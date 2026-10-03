@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Controlbook Workbench</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <link rel="stylesheet" href="css/workbench.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <strong>Controlbook Workbench</strong>
+      <select id="study" aria-label="Design study"></select>
+    </div>
+    <nav id="tabs" class="tabs" role="tablist" aria-label="Chapter"></nav>
+    <div class="top-actions">
+      <div id="mode"></div>
+      <button id="theme" type="button" class="btn btn-quiet" aria-label="Toggle theme"></button>
+      <button id="reset-all" type="button" class="btn btn-quiet" title="Reset all parameters (keeps saved answers)">Reset</button>
+    </div>
+  </header>
+
+  <div class="chapter-bar">
+    <h1 id="chapter-title"></h1>
+    <span id="chapter-pages" class="page-ref"></span>
+  </div>
+
+  <main class="layout">
+    <aside id="left" class="panel" aria-label="Plant and simulation settings"></aside>
+
+    <section class="center">
+      <div class="row-2">
+        <div id="anim" class="card"></div>
+        <div id="splane" class="card"></div>
+      </div>
+      <div id="plot-y" class="card"></div>
+      <div id="plot-u" class="card"></div>
+      <section class="math-wrap" aria-label="Live math">
+        <div class="math-head">
+          <h2>Live math</h2>
+          <span class="muted small">Book equations filled in with the current values. In Work mode, anything that would give away an answer is hidden until you reveal it.</span>
+        </div>
+        <div id="math" class="math-grid"></div>
+      </section>
+    </section>
+
+    <aside class="panel right-col" aria-label="Controller and problem">
+      <div id="right"></div>
+      <div id="problem" class="problem card"></div>
+    </aside>
+  </main>
+
+
+  <script src="js/core/math.js"></script>
+  <script src="js/core/ui.js"></script>
+  <script src="js/core/plot.js"></script>
+  <script src="js/core/sim.js"></script>
+  <script src="js/systems/arm.js"></script>
+  <script src="js/chapters/pd.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
