@@ -33,8 +33,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   function loopsOf(ctx) {
     const st = ctx.st;
     const d = E.pdDesign(ctx.pModel, KN(st));
-    const g = { ...d, kIz: st.kIz };
-    const Cin = pdTf(g.kPth, g.kDth, st.sigma), Cout = pidTf(g.kPz, g.kIz, g.kDz, st.sigma);
+    const g = { ...d, kIz: st.kIz, kIth: st.kIth || 0 };
+    const Cin = g.kIth ? pidTf(g.kPth, g.kIth, g.kDth, st.sigma) : pdTf(g.kPth, g.kDth, st.sigma), Cout = pidTf(g.kPz, g.kIz, g.kDz, st.sigma);
     const Lin = T.mul(Pin(ctx), Cin), Lout = T.mul(Pout(ctx), Cout);
     return { g, Cin, Cout, Lin, Lout, Tin: T.feedback(Lin), Tout: T.feedback(Lout) };
   }
@@ -46,29 +46,37 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     E.knob(sec, ctx, 'zetaTh', 'ζ<sub>θ</sub>', 0.3, 1.5, 0.005);
     E.knob(sec, ctx, 'M', 'M = t<sub>r<sub>z</sub></sub>/t<sub>r<sub>θ</sub></sub>', 1.5, 30, 0.1, { sig: 3 });
     E.knob(sec, ctx, 'zetaZ', 'ζ<sub>z</sub>', 0.3, 1.5, 0.005);
-    E.knob(sec, ctx, 'kIz', 'k<sub>I<sub>z</sub></sub>', -0.003, 0, 0.000002, { sig: 3 });
+    E.knob(sec, ctx, 'kIz', 'k<sub>I<sub>z</sub></sub>', -0.1, 0, 0.00001, { sig: 3 });
+    E.knob(sec, ctx, 'kIth', 'k<sub>I<sub>θ</sub></sub>', 0, 50, 0.01, { sig: 3 });
     E.knob(sec, ctx, 'sigma', 'σ', 0.005, 0.3, 0.001, { unit: 's', sig: 3 });
-    sec.append(el('p', { class: 'muted small', text: 'Defaults: the E.8 specs (t_rθ = 1 s, M = 10, ζ = 0.707) with k_Iz = −10⁻⁴ from E.P.6 and σ = 0.05.' }));
+    sec.append(el('p', { class: 'muted small', text: 'Defaults: the E.8 specs (t_rθ = 1 s, M = 10, ζ = 0.707) with k_Iz = −10⁻⁴ from E.P.6, k_Iθ = 0 and σ = 0.05. These are not the gains that pass E.10 (see the E.10 solution).' }));
+    sec.append(el('div', { class: 'btn-row' },
+      el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.8 specs', onclick: () => { Object.assign(ctx.st, { trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0 }); ctx.update(); } }),
+      el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.10 sample design', title: 'the robust design from the E.10 solution', onclick: () => { Object.assign(ctx.st, E10_SAMPLE); ctx.update(); } })));
     const show = () => ctx.S.mode === 'explore' || ctx.app.isRevealed(`E:${ctx.S.chapter}:gains`);
     const box = el('div');
     sec.append(box);
     WB.ui.addRefresher(() => {
       if (show()) {
         const g = loopsOf(ctx).g;
-        box.replaceChildren(el('div', { class: 'readout wrap' }, ...[['kPθ', g.kPth], ['kDθ', g.kDth], ['kPz', g.kPz], ['kDz', g.kDz], ['kIz', g.kIz]].map(([k, v]) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: fmt(v, 4) })))));
+        box.replaceChildren(el('div', { class: 'readout wrap' }, ...[['kPθ', g.kPth], ['kDθ', g.kDth], ['kPz', g.kPz], ['kDz', g.kDz], ['kIz', g.kIz], ['kIθ', g.kIth]].map(([k, v]) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: fmt(v, 4) })))));
       } else {
-        box.replaceChildren(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the gains', onclick: () => { ctx.app.reveal(`E:${ctx.S.chapter}:gains`); WB.ui.refreshAll(); } }));
+        box.replaceChildren(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the gains', onclick: () => { ctx.app.reveal(`E:${ctx.S.chapter}:gains`); ctx.update(); } }));
       }
     });
     return sec;
   }
+  // Closed-loop poles from the designed gains would give away E.8, so in Work mode
+  // they appear only after "Reveal the gains".
+  const gainsShown = (ctx) => ctx.S.mode === 'explore' || ctx.app.isRevealed(`E:${ctx.S.chapter}:gains`);
   function loopToggle(parent, ctx, label = 'Loop') {
     segmented(parent, {
       label, options: [{ value: 'in', label: 'inner (θ)' }, { value: 'out', label: 'outer (z)' }],
       get: () => ctx.st.loop, set: (v) => { ctx.st.loop = v; ctx.update(); },
     });
   }
-  const freqDefaults = (extra = {}) => ({ comp: 'fl', trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, sigma: 0.05, loop: 'in', vbar: 0.05, ...extra });
+  const E10_SAMPLE = { trTh: 0.15, zetaTh: 0.707, M: 8, zetaZ: 0.707, kIz: -0.05, kIth: 20 };
+  const freqDefaults = (extra = {}) => ({ comp: 'fl', trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0, sigma: 0.05, loop: 'in', vbar: 0.05, ...extra });
   const nestedCtl = (ctx, o) => E.nestedPID(ctx, loopsOf(ctx).g, { comp: 'fl', meas: 'dirty', sigma: ctx.st.sigma, antiwindup: 'gate', vbar: ctx.st.vbar }, o);
   const showOf = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isRevealed(key);
   const revealBtn = (ctx, key, text) => el('button', { type: 'button', class: 'btn btn-quiet', text, onclick: () => { ctx.app.reveal(key); WB.ui.refreshAll(); } });
@@ -99,13 +107,13 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       loopToggle(sec, ctx, 'Plant');
       slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, get: () => ctx.st.w0, set: (v) => { ctx.st.w0 = v; ctx.update(); } });
       segmented(sec, { label: 'Inner plant: also show the full E.5(b) model', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => ctx.st.full, set: (v) => { ctx.st.full = v; ctx.update(); } });
-      sec.append(el('p', { class: 'muted small', text: 'Both plants are double integrators: the straight-line approximation is exact. The time plots show the E.8 nested loop for reference.' }));
+      sec.append(el('p', { class: 'muted small', text: 'Sketch the straight-line approximation by hand first, then compare. The time plots show the E.8 nested loop for reference.' }));
     },
 
     bode(ctx) {
       const inner = ctx.st.loop === 'in';
       const P = inner ? Pin(ctx) : Pout(ctx);
-      const lines = [{ label: inner ? 'P_in = b₀/s² (E.5c)' : 'P_out = −g/s²', ...T.bode(P, W), color: '--series-1' }];
+      const lines = [{ label: inner ? 'P_in(jω) (E.5c)' : 'P_out(jω)', ...T.bode(P, W), color: '--series-1' }];
       if (inner && ctx.st.full) lines.push({ label: 'full Θ̃/F̃ (E.5b)', ...T.bode(PinFull(ctx), W), color: '--text-muted', dash: [5, 4], width: 1.5 });
       const g = T.at(P, ctx.st.w0);
       const show = showOf(ctx, 'E:ch15:w0');
@@ -124,16 +132,17 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Frequency response', page: 'p. 264 · Eq. 15.4',
           theory: 'u = A\\sin\\omega_0 t \\Rightarrow y_{ss} = A|P(j\\omega_0)|\\sin(\\omega_0 t + \\angle P(j\\omega_0))' },
         { title: 'Inner plant', page: 'p. 266–267, p. 390 · E.15(a)',
-          theory: 'P_{in}(j\\omega) = \\frac{b_0}{(j\\omega)^2}:\\; 20\\log|P_{in}| = 20\\log b_0 - 40\\log\\omega,\\; \\angle P_{in} = -180^\\circ',
+          theory: '\\frac{k}{(j\\omega)^n}:\\; 20\\log k \\text{ at } \\omega = 1,\\; -20n\\,\\text{dB/dec},\\; \\angle = -90^\\circ n \\;(\\text{plus } 180^\\circ \\text{ if } k < 0)',
+          symbolic: 'P_{in}(j\\omega) = \\frac{b_0}{(j\\omega)^2}:\\; 20\\log|P_{in}| = 20\\log b_0 - 40\\log\\omega,\\; \\angle P_{in} = -180^\\circ',
           numbers: `20\\log b_0 = ${tex(db(b0))}\\,\\text{dB at } \\omega = 1,\\quad 0\\,\\text{dB at } \\omega = \\sqrt{b_0} = ${tex(Math.sqrt(b0))}`, spoiler: true },
         { title: 'Outer plant', page: 'p. 391 · E.15(b)',
-          theory: 'P_{out}(j\\omega) = \\frac{-g}{(j\\omega)^2} = \\frac{g}{\\omega^2}:\\; -40\\,\\text{dB/dec},\\; \\angle P_{out} = 0^\\circ \\;(\\equiv -360^\\circ)',
-          numbers: `20\\log g = ${tex(db(g))}\\,\\text{dB at } \\omega = 1,\\quad 0\\,\\text{dB at } \\omega = \\sqrt g = ${tex(Math.sqrt(g))}`, spoiler: true,
-          note: 'The minus sign adds ±180° to the −180° of 1/s². That is why the outer gains must be negative.' },
+          theory: '\\text{same building blocks: gain and integrators}',
+          symbolic: 'P_{out}(j\\omega) = \\frac{-g}{(j\\omega)^2} = \\frac{g}{\\omega^2}:\\; -40\\,\\text{dB/dec},\\; \\angle P_{out} = 0^\\circ \\;(\\equiv -360^\\circ;\\text{ the minus sign adds } \\pm180^\\circ)',
+          numbers: `20\\log g = ${tex(db(g))}\\,\\text{dB at } \\omega = 1,\\quad 0\\,\\text{dB at } \\omega = \\sqrt g = ${tex(Math.sqrt(g))}`, spoiler: true },
         { title: 'Full inner model (E.5b)', page: 'p. 387',
-          theory: '\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{b s^2}{s^4 - a}:\\; +40\\,\\text{dB/dec below } \\lambda = a^{1/4},\\; \\to b/s^2 \\text{ above}',
-          numbers: `\\lambda = ${tex(Math.pow(ctx.pModel.m1 * g * g / ctx.sys.linear(ctx.pModel).De, 0.25))}\\,\\text{rad/s}`, spoiler: true,
-          note: 'The poles ±jλ make a resonance at λ; well above λ the two models agree. The m₁g z̃ term (the difference) is what F_fl(z) cancels.' },
+          theory: '\\text{compare with the full model from E.5(b) (dashed in the Bode plot)}',
+          symbolic: '\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{b s^2}{s^4 - a}:\\; +40\\,\\text{dB/dec below } \\lambda = a^{1/4},\\; \\to b/s^2 \\text{ above}',
+          numbers: `\\lambda = ${tex(Math.pow(ctx.pModel.m1 * g * g / ctx.sys.linear(ctx.pModel).De, 0.25))}\\,\\text{rad/s}`, spoiler: true },
       ];
     },
 
@@ -177,8 +186,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const S = (Lg, w) => 1 / L.C.abs(L.C.add(L.C.of(1, 0), T.at(Lg, w)));
       return {
         ...l,
-        gr: 1 / mag(l.Lin, st.wr),
-        gdin: 1 / l.g.kPth, gdinEdge: 1 / mag(l.Cin, st.wdin),
+        gr: 1 / mag(l.Lin, st.wr), grExact: S(l.Lin, st.wr), Lsin: mag(l.Lout, st.wsin),
+        gdin: Math.max(...Array.from(W.filter((w) => w <= st.wdin), (w) => 1 / mag(l.Cin, w))), gdinEdge: 1 / mag(l.Cin, st.wdin),
         gn: mag(l.Lin, st.wno),
         gdout: 1 / mag(l.Lout, st.wdout), gdoutExact: S(l.Lout, st.wdout),
         esin: st.Asin * S(l.Lout, st.wsin), esinApprox: st.Asin / mag(l.Lout, st.wsin),
@@ -186,7 +195,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     },
 
     buildControls(parent, ctx) {
-      knobSection(parent, ctx, 'Gains from E.8 / E.10', 'p. 387–389');
+      knobSection(parent, ctx, 'Gains (default: E.8 specs)', 'p. 387–389');
       const sec = section(parent, 'Spec readouts', 'p. 284–290');
       loopToggle(sec, ctx, 'Bode of');
       const box = el('div', { class: 'metrics' });
@@ -217,21 +226,20 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         marks,
       };
     },
-    splane(ctx) { const l = loopsOf(ctx); return loopMarkers(ctx, ctx.st.loop === 'in' ? l.Lin : l.Lout); },
+    splane(ctx) { return gainsShown(ctx) ? loopMarkers(ctx, ctx.st.loop === 'in' ? loopsOf(ctx).Lin : loopsOf(ctx).Lout) : null; },
 
     math(ctx) {
       const s = this.specs(ctx), st = ctx.st;
       return [
         { title: 'Error with every input', page: 'p. 284 · Eq. 16.2–16.3',
           theory: 'E = \\frac{1}{1+PC}R + \\frac{PC}{1+PC}N + \\frac{1}{1+PC}D_{out} + \\frac{P}{1+PC}D_{in}' },
-        { title: 'Inner loop under PD', page: 'p. 286 · Eq. 16.5, p. 290 · Eq. 16.9, p. 287 · Eq. 16.6',
-          theory: '\\gamma_r = \\frac{1}{|L_{in}(j\\omega_r)|},\\quad \\gamma_{d_{in}} = \\max_{\\omega\\le\\omega_{d}}\\frac{1}{|C_{in}(j\\omega)|} = \\frac{1}{k_{P_\\theta}},\\quad \\gamma_n = |L_{in}(j\\omega_{no})|',
-          numbers: `\\gamma_r = ${tex(s.gr)},\\quad \\gamma_{d_{in}} = ${tex(s.gdin)}\\;(1/|C(j${st.wdin})| = ${tex(s.gdinEdge)}),\\quad \\gamma_n = ${tex(s.gn)}`, spoiler: true,
-          note: '|C_in| of a PD grows with ω, so the worst input-disturbance attenuation below ω_d,in is at low frequency, where |C_in| → k_Pθ (not at the band edge, as for the arm\'s PID in A.16).' },
-        { title: 'Outer loop under PID', page: 'p. 288 · Eq. 16.7',
-          theory: '\\gamma_{d_{out}} \\approx \\frac{1}{|L_{out}(j\\omega_{d})|},\\quad y_r = A\\sin\\omega t \\Rightarrow |e| = A\\,|S(j\\omega)| = \\frac{A}{|1 + L_{out}(j\\omega)|}',
-          numbers: `\\gamma_{d_{out}} = ${tex(s.gdout)}\\;(\\text{exact } |S| = ${tex(s.gdoutExact)}),\\quad |e| = ${tex(s.esin)}\\;\\text{m}\\;(A/|L| = ${tex(s.esinApprox)})`, spoiler: true,
-          note: '0.6 rad/s is above the outer crossover (|L_out| < 1 there), so the 1/|L| approximation is meaningless and the output barely follows: |e| ≈ A.' },
+        { title: 'Inner loop under PD', page: 'p. 287 · Eq. 16.5, p. 291 · Eq. 16.9, p. 287 · Eq. 16.6',
+          theory: '|e| \\le \\gamma_r|r|:\\; \\gamma_r = \\frac{1}{\\min_{\\omega\\le\\omega_r}|PC|},\\quad \\gamma_{d_{in}} = \\max_{\\omega\\le\\omega_d}\\frac{1}{|C|},\\quad \\gamma_n = \\max_{\\omega\\ge\\omega_{no}}|PC|',
+          symbolic: '\\gamma_r = \\frac{1}{|L_{in}(j\\omega_r)|},\\quad \\gamma_{d_{in}} = \\frac{1}{k_{P_\\theta}}\\;(|C_{in}| \\text{ of a PD is smallest at low } \\omega),\\quad \\gamma_n = |L_{in}(j\\omega_{no})|',
+          numbers: `\\gamma_r = ${tex(s.gr)}\\;(\\text{exact } |S| = ${tex(s.grExact)}),\\quad \\gamma_{d_{in}} = ${tex(s.gdin)}\\;(1/|C(j${st.wdin})| = ${tex(s.gdinEdge)}),\\quad \\gamma_n = ${tex(s.gn)}`, spoiler: true },
+        { title: 'Outer loop under PID', page: 'p. 289 · Eq. 16.7',
+          theory: '\\gamma_{d_{out}} \\approx \\frac{1}{|L(j\\omega_{d})|},\\quad \\text{exact: } |e| = |r|\\,|S(j\\omega)| = \\frac{|r|}{|1 + L(j\\omega)|}',
+          numbers: `\\gamma_{d_{out}} = ${tex(s.gdout)}\\;(\\text{exact } |S| = ${tex(s.gdoutExact)}),\\quad |e| = ${tex(s.esin)}\\;\\text{m}\\;(A/|L| = ${tex(s.esinApprox)},\\; |L(j${st.wsin})| = ${tex(s.Lsin, 2)})`, spoiler: true },
         { title: 'Controllers with the dirty derivative', page: 'p. 313',
           theory: 'C_{in} = \\frac{(k_D + \\sigma k_P)s + k_P}{\\sigma s + 1},\\quad C_{out} = \\frac{(k_D + \\sigma k_P)s^2 + (k_P + \\sigma k_I)s + k_I}{s(\\sigma s + 1)}',
           numbers: `C_{in} = ${T.texTf(s.Cin)},\\quad C_{out} = ${T.texTf(s.Cout)}`, spoiler: true },
@@ -243,8 +251,12 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const pc = (v, truth, label) => PD().checkNumbers({ v }, { v: 100 * truth }, { v: label });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
         { id: 'a', title: '(a) Inner tracking error below 1 rad/s', inputs: { v: '%' },
-          check: (v) => pc(v.v, s().gr, 'percent'),
-          solution: () => [{ tex: `|L_{in}(j1)| = ${tex(db(1 / s().gr))}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().gr)}\\%` }] },
+          check: (v) => {
+            const g = PD().num(v.v), x = s();
+            if (g !== null && M.close(g, 100 * x.grExact, 0.01)) return { ok: true, msg: `Exact |S(j1)|. The book's method (1/|L|, Eq. 16.5) gives ${fmt(100 * x.gr, 3)}%.` };
+            return pc(v.v, x.gr, 'percent');
+          },
+          solution: () => [{ tex: `|L_{in}(j1)| = ${tex(db(1 / s().gr))}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().gr)}\\%\\quad(\\text{exact } |S(j1)| = ${tex(100 * s().grExact)}\\%)` }, { html: 'Both are accepted: the book reads 1/|L| off the Bode plot (p. 287, and A.16/B.16 on pp. 295–297).' }] },
         { id: 'b', title: '(b) Input disturbance below 0.8 rad/s, % in θ', inputs: { v: '%' },
           check: (v) => {
             const g = PD().num(v.v), x = s();
@@ -265,10 +277,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { id: 'e', title: '(e) Error amplitude for y<sub>r</sub> = 2 sin(0.6t)', inputs: { v: '|e| [m]' },
           check: (v) => {
             const g = PD().num(v.v), x = s();
-            if (g !== null && M.close(g, x.esinApprox, 0.02)) return { ok: false, msg: 'That is A/|L|, valid only where |L| ≫ 1. Here |L(j0.6)| < 1: use A/|1 + L|.' };
+            if (g !== null && M.close(g, x.esinApprox, 0.01)) return { ok: true, msg: `That is the book's A/|L| method. Here |L(j0.6)| = ${fmt(x.Lsin, 2)} < 1, so it is a poor approximation: the exact error is A/|1 + L| = ${fmt(x.esin, 3)} m.` };
             return PD().checkNumbers({ v: v.v }, { v: x.esin }, { v: '|e|' });
           },
-          solution: () => [{ tex: `|e| = \\frac{2}{|1 + L_{out}(j0.6)|} = ${tex(s().esin)}\\;\\text{m}` }, { html: 'The outer bandwidth is about 0.45 rad/s, so a 0.6 rad/s reference is mostly not followed. (With the derivative on the output in the time domain, the actual closed loop has no zero from k<sub>D</sub>, which makes tracking a little worse still.)' }] },
+          solution: () => [{ tex: `|e| = \\frac{2}{|1 + L_{out}(j0.6)|} = ${tex(s().esin)}\\;\\text{m}\\quad(\\text{book method } 2/|L| = ${tex(s().esinApprox)},\\; |L(j0.6)| = ${tex(s().Lsin, 2)})` }, { html: 'The outer bandwidth is about 0.45 rad/s, so a 0.6 rad/s reference is mostly not followed. (With the derivative on the output in the time domain, the actual closed loop has no zero from k<sub>D</sub>, which makes tracking a little worse still.)' }] },
       ]);
     },
   };
@@ -289,7 +301,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     },
 
     buildControls(parent, ctx) {
-      knobSection(parent, ctx, 'Gains from E.10', 'p. 391 · E.17');
+      knobSection(parent, ctx, 'Gains (default: E.8 specs)', 'p. 391 · E.17');
       const sec = section(parent, 'Margins', 'p. 303–306');
       segmented(sec, { label: 'Bode shows', options: [{ value: 'both', label: 'both loops' }, { value: 'in', label: 'inner' }, { value: 'out', label: 'outer' }], get: () => ctx.st.loop, set: (v) => { ctx.st.loop = v; ctx.update(); } });
       const box = el('div', { class: 'metrics' });
@@ -323,7 +335,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       }
       return { title: 'Open and closed loop, inner and outer', w: W, lines, marks };
     },
-    splane(ctx) { const l = loopsOf(ctx); return loopMarkers(ctx, ctx.st.loop === 'out' ? l.Lout : l.Lin); },
+    splane(ctx) { return gainsShown(ctx) ? loopMarkers(ctx, ctx.st.loop === 'out' ? loopsOf(ctx).Lout : loopsOf(ctx).Lin) : null; },
 
     math(ctx) {
       const l = this.loops(ctx);
@@ -334,12 +346,12 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Closed-loop bandwidth', page: 'p. 306–307',
           theory: 'T = \\frac{L}{1 + L},\\quad \\omega_{bw}: |T(j\\omega_{bw})| = -3\\,\\text{dB} \\;(\\approx \\omega_{co} \\text{ for } PM \\approx 60^\\circ)',
           numbers: `\\omega_{bw,in} = ${tex(l.bwIn)},\\quad \\omega_{bw,out} = ${tex(l.bwOut)}`, spoiler: true },
-        { title: 'Bandwidth separation', page: 'p. 315 (B.17c)',
-          theory: '\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} \\gtrsim 5\\text{–}10 \\;\\Rightarrow\\; \\text{the outer loop sees the inner loop as } k_{DC} = 1',
+        { title: 'Bandwidth separation', page: 'pp. 315–317 (B.17c)',
+          theory: '\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} \\gtrsim 5\\text{–}10 \\;\\Rightarrow\\; \\text{the outer loop sees the inner loop as its DC gain}',
           numbers: `\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} = ${tex(l.bwIn / l.bwOut, 3)}`, spoiler: true },
-        { title: 'Outer loop is conditionally stable', page: 'p. 305',
-          theory: 'L_{out} \\sim \\frac{-gk_I}{s^3} \\text{ at low } \\omega:\\; \\angle L_{out} \\to -270^\\circ',
-          note: 'Three integrators put the low-frequency phase at −270°, so the phase crosses −180° at low frequency too, giving a gain margin below 0 dB there. Lowering the outer gain enough would destabilize the loop (cf. A.18, p. 345).' },
+        { title: 'Multiple phase crossings', page: 'p. 303–305',
+          theory: '\\text{if the phase crosses } -180^\\circ \\text{ more than once, list every gain-margin crossing (cf. A.18, p. 345)}',
+          symbolic: 'L_{out} \\sim \\frac{-gk_I}{s^3} \\text{ at low } \\omega:\\; \\angle L_{out} \\to -270^\\circ \\Rightarrow \\text{a low-frequency crossing with GM} < 0\\,\\text{dB (conditionally stable)}', spoiler: true },
       ];
     },
 
@@ -442,8 +454,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const which = st.loop === 'out' ? 'out' : 'in';
       const b = st.d[which];
       top.append(el('p', { class: 'muted small', text: which === 'in'
-        ? 'C_in = k · lead · lag · LPF on P_in = b₀/s².'
-        : 'C_out = −k · (s + z_I)/s · lead · lag · LPF on P = P_out · T_in. The minus sign makes the loop gain positive (P_out = −g/s²).' }));
+        ? 'C_in = k · lead · lag · LPF on P_in from E.5.'
+        : 'C_out = −k · (s + z_I)/s · lead · lag · LPF on P = P_out · T_in. The minus sign makes the loop gain positive (P_out has a negative gain).' }));
       const g = section(parent, which === 'in' ? 'Inner gain k' : 'Outer gain k (applied as −k)', 'p. 324');
       slider(g, { label: 'k', min: which === 'in' ? 0.1 : 1e-4, max: which === 'in' ? 1000 : 10, log: true, sig: 4, get: () => b.k, set: (v) => { b.k = v; ctx.update(); } });
       const onOff = (sec, blk) => segmented(sec, { options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], get: () => b[blk].on, set: (v) => { b[blk].on = v; ctx.update(); } });
@@ -521,7 +533,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       return [
         { title: 'Successive loop closure with loopshaping', page: 'p. 338–339 · §18.1.9',
           theory: 'T_{in} = \\frac{P_{in}C_{in}}{1 + P_{in}C_{in}},\\quad P = P_{out}T_{in},\\quad L_{out} = P\\,C_{out}' },
-        { title: 'Specs as Bode bounds', page: 'p. 286 · Eq. 16.5, p. 287 · Eq. 16.6',
+        { title: 'Specs as Bode bounds', page: 'p. 287 · Eq. 16.5, p. 287 · Eq. 16.6',
           theory: '|L(j\\omega)| \\ge \\frac{1}{\\gamma_r},\\; \\omega \\le \\omega_r;\\quad |L(j\\omega)| \\le \\gamma_n,\\; \\omega \\ge \\omega_n;\\quad \\gamma = 0.0032 \\leftrightarrow 49.9\\,\\text{dB}' },
         { title: 'Your controllers', page: 'p. 323',
           theory: `C_{in} = ${T.texTf(d.Cin, 3)}`,
@@ -529,7 +541,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Closed-loop peaking and the prefilter', page: 'p. 336 · Eq. 18.5–18.7',
           theory: '\\max|T_{out}| \\text{ vs. } \\max|F\\,T_{out}|',
           numbers: `${tex(db(d.peakT))}\\,\\text{dB} \\to ${tex(db(d.peakFT))}\\,\\text{dB}` },
-        { title: 'Implementation', page: 'p. 334–335 · Eq. 18.3–18.4',
+        { title: 'Implementation', page: 'p. 335 · Eq. 18.3–18.4',
           theory: '\\dot x_C = A_Cx_C + B_Ce,\\; u = C_Cx_C + D_Ce \\;(\\text{both loops, RK4 at } T_s),\\quad F = F_{fl}(z) + \\tilde F' },
       ];
     },
@@ -543,7 +555,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           actions: [{ label: 'Load sample inner design', run: () => { st.d.in = sampleInner(); st.loop = 'in'; ctx.update(); return null; } }],
           solution: () => [
             { html: 'P<sub>in</sub> = b₀/s² has −40 dB/dec and −180° everywhere, so a gain alone gives PM = 0. To get +49.9 dB at 1 rad/s and −49.9 dB at 1000 rad/s, the loop needs about 100 dB over three decades: it can cross over near 40 rad/s with phase lead there, then roll off.' },
-            { html: 'Sample: lead at ω = 40 rad/s with M = 20 (+64.8° max), a low-pass at 400 rad/s, and k = 135 so the loop crosses at 40 rad/s. PM ≈ 59°, |L(j1)| ≈ 51.2 dB, |L(j1000)| ≈ −51.6 dB, inner bandwidth ≈ 66 rad/s (python-control agrees).' },
+            { html: 'Sample: lead at ω = 40 rad/s with M = 20 (+64.8° max), a low-pass at 400 rad/s, and k = 135 so the loop crosses at 40 rad/s. PM ≈ 59°, |L(j1)| ≈ 51.1 dB, |L(j1000)| ≈ −51.6 dB, inner bandwidth ≈ 66 rad/s (python-control agrees).' },
           ],
         },
         {

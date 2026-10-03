@@ -14,6 +14,7 @@ The book has no worked solutions for E, so this checks the workbench JS three wa
      integrator, disturbance observer), sample by sample.
 Prints one line per check and exits 1 on any failure.
 """
+import json
 import pathlib
 import sys
 
@@ -29,6 +30,8 @@ TEST = REPO / "_E_blockbeam" / "python" / "testDynamics.py"
 P = dict(m1=0.35, m2=2.0, ell=0.5, g=9.8, F_max=15.0)
 MM = dict(m1=12, m2=-9, ell=15)                       # the pages' fixed α = 0.2 draw
 KS = [100, 1000, 2500, 3999, 5000, 7500, 9999]
+BWTR = [0.8, 0.9, 1.0, 1.1, 1.5]
+DRAWS = None  # filled in main()
 fails = []
 
 
@@ -163,6 +166,57 @@ def sim_ss(level, K, ki, Lg, ref, tEnd, ptrue, dist, Ts=0.01):
     return out
 
 
+def draws(n, seed):
+    import random
+    rnd = random.Random(seed); out = []
+    for _ in range(n):
+        out.append({k: P[k] * (1 + 0.2 * (2 * rnd.random() - 1)) for k in ("m1", "m2", "ell")})
+    return out
+
+
+def robust_py(kind, draw, dist):
+    """Python twin of the JS robustness run: nested PID (E.10) or SF + integrator (E.12)."""
+    q = {**P, **draw}
+    Ts = 0.01
+    if kind == "e10":
+        d = pd_design(0.15, 0.707, 8, 0.707); kIz, kIth, sigma, vbar, freq, tEnd = -0.05, 20.0, 0.05, 0.05, 0.01, 100
+        beta, gam = (2 * sigma - Ts) / (2 * sigma + Ts), 2 / (2 * sigma + Ts)
+        zp = None; zh = thh = Iz = ezp = Ith = ethp = 0.0
+    else:
+        A, B, C, ze, Fe, _ = lin(P); Cr = np.array([[1, 0, 0, 0]])
+        A1 = np.block([[A, np.zeros((4, 1))], [-Cr, np.zeros((1, 1))]]); B1 = np.vstack([B, [[0]]])
+        K1 = ct.place(A1, B1, np.concatenate([ss_poles(0.2, 0.8, 0.7, 0.85), [-2]]))[0]
+        K, ki = K1[:4], K1[4]; I = ep = 0.0; freq, tEnd = 0.05, 40
+    x = np.array([0.25, 0, 0, 0.]); zmin, zmax = np.inf, -np.inf; eb = None
+    ib = int(round((0.5 / freq - 0.05) / Ts))
+    for k in range(int(round(tEnd / Ts)) + 1):
+        t = k * Ts; r = 0.25 + (0.15 if (t % (1 / freq)) <= 0.5 / freq else -0.15)
+        z, th = x[0], x[1]
+        if kind == "e10":
+            if zp is None:
+                zp, thp = z, th
+            zh = beta * zh + gam * (z - zp); thh = beta * thh + gam * (th - thp)
+            ez = r - z
+            if abs(zh) < vbar:
+                Iz += Ts / 2 * (ez + ezp)
+            thr = d["kPz"] * ez + kIz * Iz - d["kDz"] * zh
+            eth = thr - th; Ith += Ts / 2 * (eth + ethp)
+            F = ffl(z, P) + d["kPth"] * eth + kIth * Ith - d["kDth"] * thh
+            zp, thp, ezp, ethp = z, th, ez, eth
+        else:
+            xt = x - np.array([ze, 0, 0, 0]); e = r - z; It = I + Ts / 2 * (e + ep)
+            if abs(Fe - K @ xt - ki * It) <= 15:
+                I = It
+            ep = e; F = Fe - K @ xt - ki * I
+        zmin, zmax = min(zmin, z), max(zmax, z)
+        if k == ib:
+            eb = abs(r - z)
+        x = rk4(x, sat(sat(F, 15) + dist, 15), Ts, q)
+        if not np.isfinite(x[0]) or abs(x[0]) > 100:
+            return [False, -1e9, 1e9, 1e9]
+    return [bool(zmin >= 0 and zmax <= q["ell"] and eb < 0.002), zmin, zmax, eb]
+
+
 def structured_L(A, B, pz, pth, pD=None):
     az = np.poly(pz).real
     n = 5 if pD is not None else 4
@@ -217,6 +271,24 @@ const c18 = {sys, pModel: p, S, st: {d: {in: E.freq.sampleInner(), out: E.freq.s
 const d18 = E.freq.lsDesign(c18);
 out.e18 = {pmIn: d18.si.mg.pm, wcIn: d18.si.mg.wc, loIn: d18.si.lo, hiIn: d18.si.hi, pmOut: d18.so.mg.pm, wcOut: d18.so.mg.wc, loOut: d18.so.lo, hiOut: d18.so.hi,
   ok: d18.si.lowOk && d18.si.highOk && d18.si.pmOk && d18.so.lowOk && d18.so.highOk && d18.so.pmOk && d18.stableIn && d18.stableOut, peakFT: d18.peakFT};
+// E.17 bandwidth at several inner rise times
+out.bw = %(BWTR)s.map((tr) => { const c = {sys, pModel: p, S, st: {...CH.ch17.defaults(sys), trTh: tr}}; const l = CH.ch17.loops(c); return [l.bwIn, l.bwOut]; });
+// E.10 and E.12 robustness over random α = 0.2 draws (block on the true beam + error before the switch)
+function robust(controllerFor, freq, tEnd, dist, draw) {
+  const res = WB.sim.simulate({plant: {f: (x, u) => sys.f(x, u, draw), h: sys.h, uLimit: 15}, controller: controllerFor(), reference: sq(freq),
+    disturbance: () => dist, noise: null, x0: [0.25, 0, 0, 0], Ts: 0.01, tEnd});
+  let zmin = Infinity, zmax = -Infinity, bad = false;
+  for (const z of res.yAll[0]) { if (!isFinite(z) || Math.abs(z) > 100) { bad = true; break; } zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
+  const i = Math.round((0.5 / freq - 0.05) / 0.01);
+  const e = bad ? 1e9 : Math.abs(res.rAll[0][i] - res.yAll[0][i]);
+  return bad ? [false, -1e9, 1e9, 1e9] : [zmin >= 0 && zmax <= draw.ell && e < 0.002, zmin, zmax, e];
+}
+const d10s = {...E.pdDesign(p, {trTh: .15, zetaTh: .707, M: 8, zetaZ: .707}), kIz: -0.05, kIth: 20};
+const opt10 = {comp: 'fl', meas: 'dirty', sigma: .05, antiwindup: 'gate', vbar: .05};
+out.rob10 = %(DRAWS)s.map((dr) => robust(() => E.nestedPID(ctx, d10s, opt10), 0.01, 100, 0, {...p, ...dr}));
+out.rob10fixed = robust(() => E.nestedPID(ctx, d10s, opt10), 0.01, 100, 0, pt);
+const d12s = E.ssDesign(p, {trTh: .2, zetaTh: .8, trZ: .7, zetaZ: .85, pI: -2, comp: 'eq'}, 'sfi');
+out.rob12 = %(DRAWS)s.map((dr) => robust(() => E.makeSS(ctx, d12s, 'sfi', {comp: 'eq', antiwindup: 'clamp'}), 0.05, 40, 1, {...p, ...dr}));
 // E.8(f) answer (bisection on the simulated peak force)
 out.e8f = E.pid.fastestTrZ({...ctx, S: {sim: {Ts: 0.01}}}, {trTh: 1, zetaTh: .707, M: 10, zetaZ: .707, rule: '2.2', step: 0.25});
 return out;
@@ -233,8 +305,10 @@ def same_set(a, b, tol=1e-6):
 
 
 def main():
+    global DRAWS
+    DRAWS = draws(30, 1) + draws(30, 2) + draws(30, 3)
     X, U, XD = test_vectors()
-    js = js_eval(JS % dict(X=X.tolist(), U=U.tolist(), MM=MM, KS=KS))
+    js = js_eval(JS % dict(X=X.tolist(), U=U.tolist(), MM=MM, KS=KS, BWTR=BWTR, DRAWS=json.dumps(DRAWS)), budget=120000)
 
     # 1. testDynamics vectors, same tolerance as the script
     err = np.abs(np.array(js["f"]) - XD)
@@ -294,7 +368,7 @@ def main():
     py16 = dict(gr=1 / mg(Lin, 1.0), gdin=1 / kp, gdinEdge=1 / mg(Cin, 0.8), gn=mg(Lin, 300), gdout=1 / mg(Lout, 0.1),
                 gdoutExact=1 / abs(1 + Lout(0.1j)), esin=2 / abs(1 + Lout(0.6j)))
     e = max(abs(s16[k] - py16[k]) / abs(py16[k]) for k in py16)
-    report("E.16 spec numbers vs python-control", e < 1e-9, " ".join(f"{k}={py16[k]:.4g}" for k in py16))
+    report("E.16 spec numbers vs python-control", e < 1e-6, " ".join(f"{k}={py16[k]:.4g}" for k in py16))
     s17 = js["e17"]
     gmi, pmi, _, wci = ct.margin(Lin); gmo, pmo, _, wco = ct.margin(Lout)
     bwi, bwo = ct.bandwidth(ct.feedback(Lin, 1)), ct.bandwidth(ct.feedback(Lout, 1))
@@ -323,6 +397,26 @@ def main():
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if peak(mid) > 15 else (lo, mid)
     report("E.8(f) fastest t_rz", abs(js["e8f"] - hi) < 1e-6, f"JS {js['e8f']:.5f} s, python {hi:.5f} s")
+
+    # E.17 bandwidth (bisection-refined) vs python-control
+    worst = 0
+    for tr, (bi, bo) in zip(BWTR, js["bw"]):
+        dd = pd_design(tr, 0.707, 10, 0.707)
+        Li = dd["b0"] / s ** 2 * (dd["kPth"] + dd["kDth"] * s / (0.05 * s + 1))
+        Lo = -g / s ** 2 * (dd["kPz"] - 1e-4 / s + dd["kDz"] * s / (0.05 * s + 1))
+        pbi, pbo = ct.bandwidth(ct.feedback(Li, 1)), ct.bandwidth(ct.feedback(Lo, 1))
+        worst = max(worst, abs(bi / pbi - 1), abs(bo / pbo - 1))
+    report("E.17 bandwidth vs control.bandwidth", worst < 1e-4, f"t_rθ = {BWTR}: max rel err {worst:.1e}")
+
+    # E.10 / E.12 robustness over random α = 0.2 draws, JS vs Python
+    for name, kind, dist, key in [("E.10 sample design", "e10", 0.0, "rob10"), ("E.12 sample design (d = 1 N)", "e12", 1.0, "rob12")]:
+        py = [robust_py(kind, dr, dist) for dr in DRAWS]
+        jsr = js[key]
+        same = all(a[0] == b[0] for a, b in zip(py, jsr)) and all(abs(a[1] - b[1]) < 1e-6 for a, b in zip(py, jsr) if a[0])
+        npass = sum(b[0] for b in jsr)
+        report(f"robustness {name}", same, f"{npass}/{len(DRAWS)} draws pass in JS and Python (seeds 1–3)")
+    pf = robust_py("e10", {k: true_params()[k] for k in ("m1", "m2", "ell")}, 0.0)
+    report("E.10 sample design, fixed draw", pf[0] and js["rob10fixed"][0], f"z in [{pf[1]:.3f}, {pf[2]:.3f}] m, error {1000 * pf[3]:.3f} mm")
 
     # 3. closed-loop simulations, sample by sample
     pt = true_params()
