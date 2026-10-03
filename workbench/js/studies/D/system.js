@@ -290,11 +290,11 @@ WB.studies.D = WB.studies.D || { chapters: {} };
         id: 'D.P.6', page: 380, tr: 2, zeta: 0.7,
         sim: { amplitude: 1, tStep: 0.5, tEnd: 40 },
         statement: [
-          'Add an integrator to obtain PID control. Put the characteristic equation in Evans form, plot the root locus versus the integrator gain k<sub>I</sub>, and select a k<sub>I</sub> that does not significantly change the other closed-loop poles. (This tab starts from the D.8(a) specs t<sub>r</sub> = 2 s, ζ = 0.7.)',
+          'Add an integrator to obtain PID control. Put the characteristic equation in Evans form, plot the root locus versus the integrator gain k<sub>I</sub>, and select a k<sub>I</sub> that does not significantly change the other closed-loop poles. (Work mode: enter your D.8 gains. Explore starts from the D.8(a) specs t<sub>r</sub> = 2 s, ζ = 0.7.)',
         ],
       },
       ch10: {
-        id: 'D.10', page: 380, tr: 2, zeta: 0.7, sigma: 0.05, kiRef: 1,
+        id: 'D.10', page: 380, tr: 2, zeta: 0.7, sigma: 0.05, kiRef: 0.75, tolPct: 2,
         sim: { type: 'square', amplitude: 0.5, frequency: 0.02, tStep: 0, tEnd: 50 },
         mismatch: { m: 15, k: -18, b: 10 },  // one fixed draw with alpha = 0.2, so the page is repeatable
         statement: [
