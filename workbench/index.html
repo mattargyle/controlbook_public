@@ -28,7 +28,12 @@
   </div>
 
   <main class="layout">
-    <aside id="left" class="panel" aria-label="Plant and simulation settings"></aside>
+    <aside class="left-col" aria-label="Plant and simulation settings">
+      <button id="left-toggle" type="button" class="collapse-btn" aria-controls="left" aria-expanded="true" title="Hide settings">
+        <span class="collapse-icon" aria-hidden="true">‹</span><span class="collapse-text">Settings</span>
+      </button>
+      <div id="left" class="panel"></div>
+    </aside>
 
     <section class="center">
       <div class="row-2">

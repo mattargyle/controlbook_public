@@ -362,6 +362,7 @@ WB.plot = (function () {
       for (const v of niceTicks(reMin, reMax, 6)) {
         if (v === 0) continue;
         const [x] = P(v, 0);
+        if (x < 14 || x > w - 14) continue; // label would be clipped at the edge
         ctx.beginPath(); ctx.moveTo(x, oy - 3); ctx.lineTo(x, oy + 3); ctx.stroke();
         ctx.fillText(fmt(v, 3), x, oy + 5);
       }

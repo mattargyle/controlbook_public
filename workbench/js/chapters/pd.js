@@ -196,6 +196,7 @@ WB.chapters = WB.chapters || {};
       el('strong', { text: `Problem ${prob.id}` }), WB.ui.pageChip(`p. ${prob.page}`));
     const stmt = el('div', { class: 'problem-stmt' });
     stmt.innerHTML = prob.statement.map((s) => `<p>${s}</p>`).join(''); // authored text
+    WB.ui.linkifyNode(stmt);
     parent.append(head, stmt);
     const note = el('p', { class: 'muted small', text: 'Answers are checked against the current nominal parameters (left panel).' });
     parent.append(note);
@@ -223,6 +224,7 @@ WB.chapters = WB.chapters || {};
       if (part.html) {
         const p = el('p', { class: 'muted small' });
         p.innerHTML = part.html;
+        WB.ui.linkifyNode(p);
         box.append(p);
       }
       const result = el('div', { class: 'part-result', 'aria-live': 'polite' });
@@ -273,6 +275,7 @@ WB.chapters = WB.chapters || {};
       } else {
         const p = el('p', {});
         p.innerHTML = line.html;
+        WB.ui.linkifyNode(p);
         node.append(p);
       }
     }

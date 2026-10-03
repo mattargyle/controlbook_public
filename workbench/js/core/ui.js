@@ -26,8 +26,49 @@ WB.ui = (function () {
     return body;
   }
 
+  // Page references are controlbook.pdf page numbers (not book page numbers).
+  // The PDF is gitignored, so links only resolve where book_and_notes/ exists locally.
+  const PDF_PATH = '../book_and_notes/controlbook.pdf';
+  // "p. 101 · Eq. 7.5", "pp. 102–103", "A.7 p. 102": a page and the labels that follow it.
+  const PAGE_RE = /(?:[A-F]\.\d+\s+)?pp?\.\s*(\d+)(?:[–-]\d+)?(?:\s*·\s*(?:Eqs?\.|Fig\.|Listing)\s*[\d.–-]+)*/g;
+
+  function pdfLink(page, text) {
+    // A named target reuses one PDF tab instead of opening a new tab per click.
+    const a = el('a', { class: 'pdf-link', href: `${PDF_PATH}#page=${page}`, target: 'controlbook-pdf', title: `Open controlbook.pdf at page ${page}`, text });
+    // If that tab already shows the PDF, a change to #page alone is a same-document
+    // navigation that the PDF viewer ignores. A fresh query string forces a real
+    // load, so the viewer opens at the new page.
+    a.addEventListener('click', () => { a.href = `${PDF_PATH}?v=${Date.now()}#page=${page}`; });
+    return a;
+  }
+
+  // Split text into plain runs and PDF links; returns an array of nodes.
+  function linkPages(text) {
+    const out = [];
+    let last = 0;
+    for (const m of text.matchAll(PAGE_RE)) {
+      if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)));
+      out.push(pdfLink(m[1], m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) out.push(document.createTextNode(text.slice(last)));
+    return out;
+  }
+
+  // Rewrite page references inside already-rendered (authored) HTML.
+  function linkifyNode(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) if (!walker.currentNode.parentElement.closest('a, .katex')) nodes.push(walker.currentNode);
+    for (const n of nodes) {
+      // search() ignores lastIndex; test() on a /g regex would leave it advanced,
+      // and matchAll() in linkPages copies lastIndex, skipping the first match.
+      if (n.nodeValue.search(PAGE_RE) >= 0) n.replaceWith(...linkPages(n.nodeValue));
+    }
+  }
+
   function pageChip(ref) {
-    return el('span', { class: 'page-ref', title: 'controlbook.pdf page', text: ref });
+    return el('span', { class: 'page-ref' }, ...linkPages(ref));
   }
 
   // Slider + number box. opts: label, unit, min, max, step, get, set, sig, log, hint
@@ -136,5 +177,5 @@ WB.ui = (function () {
     },
   };
 
-  return { el, section, pageChip, slider, segmented, refreshAll, clearRefreshers, addRefresher, renderTex, store };
+  return { el, section, pageChip, linkPages, linkifyNode, slider, segmented, refreshAll, clearRefreshers, addRefresher, renderTex, store };
 })();

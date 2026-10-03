@@ -415,7 +415,7 @@ window.WB = window.WB || {};
     }
     const ch = chapter();
     document.getElementById('chapter-title').textContent = `${ch.tab} · ${ch.title}`;
-    document.getElementById('chapter-pages').textContent = `controlbook.pdf ${ch.pages}`;
+    document.getElementById('chapter-pages').replaceChildren(document.createTextNode('controlbook.pdf '), ...WB.ui.linkPages(ch.pages));
     document.body.dataset.mode = S.mode;
   }
 
@@ -445,6 +445,19 @@ window.WB = window.WB || {};
     run();
     buildCenter();
     rebuild();
+    // Collapsible settings column (remembered per browser).
+    const layout = document.querySelector('.layout');
+    const toggle = document.getElementById('left-toggle');
+    const setCollapsed = (on) => {
+      layout.classList.toggle('left-collapsed', on);
+      toggle.setAttribute('aria-expanded', String(!on));
+      toggle.title = on ? 'Show settings' : 'Hide settings';
+      toggle.querySelector('.collapse-icon').textContent = on ? '›' : '‹';
+      store.set('wb.leftCollapsed', on);
+    };
+    setCollapsed(store.get('wb.leftCollapsed', false));
+    toggle.addEventListener('click', () => setCollapsed(!layout.classList.contains('left-collapsed')));
+
     document.getElementById('reset-all').addEventListener('click', () => {
       S = freshState(S.sysId, S.chapter);
       rebuild();

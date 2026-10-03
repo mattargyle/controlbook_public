@@ -4,6 +4,8 @@ Interactive pages for working through the design studies. Open `index.html` dire
 
 Deep links: `index.html#A/ch8/explore` (study / chapter / mode).
 
+Page references (`p. 101 · Eq. 7.5`) are controlbook.pdf page numbers. They link to `../book_and_notes/controlbook.pdf#page=N`, which only resolves where the gitignored PDF exists locally. All links share one PDF tab.
+
 ## Modes
 
 - **Work it**: you set the gains. Problem parts have answer boxes with **Check** and **Show solution**. Live-math cards that would give away an answer stay hidden until you click **Reveal**. Answers are saved in the browser's localStorage.
