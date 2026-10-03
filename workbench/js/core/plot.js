@@ -263,7 +263,7 @@ WB.plot = (function () {
     _bounds(w, h) {
       if (this.frozen) return this.frozen;
       const d = this.data;
-      let R = 1;
+      let R = d.minR ?? 1;  // data.minR lets slow loops (|s| < 1) fill the view
       for (const mk of d.markers) if (!mk.noFit) R = Math.max(R, Math.abs(mk.re), Math.abs(mk.im));
       if (d.fitR) R = Math.max(R, d.fitR);
       if (d.wnCircle) R = Math.max(R, d.wnCircle);

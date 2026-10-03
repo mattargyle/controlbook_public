@@ -14,41 +14,8 @@ WB.F = (function () {
   const RAD = 180 / Math.PI;
   const ZERO_EXT = { Fwind: 0, wind: 0, ah: 0 };
 
-  // ------------------------------------------------- s-plane legend names --
-  // The shared SPlane legend has fixed names per marker kind. Successive loop
-  // closure needs "inner loop" / "outer loop" instead, so a chapter can pass
-  // data.legendNames = {kind: text}. Installed once; other data is untouched.
-  if (WB.plot && WB.plot.SPlane && !WB.plot.SPlane.prototype.__fLegend) {
-    const orig = WB.plot.SPlane.prototype.setData;
-    WB.plot.SPlane.prototype.setData = function (data) {
-      orig.call(this, data);
-      if (data && data.legendNames) {
-        const kinds = [...new Set(data.markers.map((mk) => mk.kind))];
-        [...this.legend.children].forEach((item, i) => {
-          const name = data.legendNames[kinds[i]];
-          if (name && item.lastChild) item.lastChild.textContent = name;
-        });
-      }
-    };
-    // The shared bounds never zoom in past |s| = 1, but the altitude and outer
-    // loops live near |s| ≈ 0.3. data.minR (opt-in) replaces that floor.
-    const origBounds = WB.plot.SPlane.prototype._bounds;
-    WB.plot.SPlane.prototype._bounds = function (w, h) {
-      const d = this.data;
-      if (this.frozen || !d || !d.minR) return origBounds.call(this, w, h);
-      let R = d.minR;
-      for (const mk of d.markers) if (!mk.noFit) R = Math.max(R, Math.abs(mk.re), Math.abs(mk.im));
-      if (d.fitR) R = Math.max(R, d.fitR);
-      if (d.wnCircle) R = Math.max(R, d.wnCircle);
-      R *= 1.25;
-      const maxRe = Math.max(0, ...d.markers.map((mk) => mk.re));
-      const reHi = Math.max(R * 0.25, maxRe * 1.3), reLo = -R, m = 12;
-      const scale = Math.min((w - 2 * m) / (reHi - reLo), (h - 2 * m) / (2 * R));
-      const cx = m + (-reLo) * scale + ((w - 2 * m) - (reHi - reLo) * scale) / 2;
-      return { scale, cx, cy: h / 2 };
-    };
-    WB.plot.SPlane.prototype.__fLegend = true;
-  }
+  // s-plane: chapters pass data.legendNames (inner/outer loop labels) and
+  // data.minR (zoom floor for slow loops); both are handled in plot.js.
 
   // ------------------------------------------------------------- signals --
   // Disturbance values in SI, by key, active from t_dist on.
