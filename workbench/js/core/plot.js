@@ -94,7 +94,8 @@ WB.plot = (function () {
       const t0 = t[0], t1 = t[t.length - 1];
 
       let lo = Infinity, hi = -Infinity;
-      for (const s of series) for (const v of s.y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      for (const s of series) if (s.fit !== false) for (const v of s.y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      if (!isFinite(lo)) for (const s of series) for (const v of s.y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
       for (const hl of hlines) if (hl.fit !== false) { lo = Math.min(lo, hl.y); hi = Math.max(hi, hl.y); }
       if (this.opts.minSpan && hi - lo < this.opts.minSpan) {
         const mid = (hi + lo) / 2; lo = mid - this.opts.minSpan / 2; hi = mid + this.opts.minSpan / 2;
@@ -249,7 +250,7 @@ WB.plot = (function () {
     setData(data) {
       this.data = data;
       const kinds = [...new Set(data.markers.map((mk) => mk.kind))];
-      const names = { ol: 'open-loop pole', cl: 'closed-loop pole', zero: 'closed-loop zero', target: 'target pole' };
+      const names = { ol: 'open-loop pole', cl: 'closed-loop pole', zero: 'closed-loop zero', target: 'target pole', obs: 'observer pole', olzero: 'open-loop zero' };
       this.legend.replaceChildren(...kinds.map((k) => {
         const key = el('span', { class: `marker-key mk-${k}` });
         return el('span', { class: 'legend-item' }, key, el('span', { text: names[k] }));
@@ -261,7 +262,8 @@ WB.plot = (function () {
       if (this.frozen) return this.frozen;
       const d = this.data;
       let R = 1;
-      for (const mk of d.markers) R = Math.max(R, Math.abs(mk.re), Math.abs(mk.im));
+      for (const mk of d.markers) if (!mk.noFit) R = Math.max(R, Math.abs(mk.re), Math.abs(mk.im));
+      if (d.fitR) R = Math.max(R, d.fitR);
       if (d.wnCircle) R = Math.max(R, d.wnCircle);
       if (d.wnMax && d.wnMax < 4 * R) R = Math.max(R, d.wnMax);
       R *= 1.25;
@@ -398,14 +400,25 @@ WB.plot = (function () {
       }
       ctx.setLineDash([]);
 
+      // root-locus branches
+      if (d.loci) {
+        ctx.strokeStyle = css('--series-1'); ctx.globalAlpha = 0.45; ctx.lineWidth = 1.5;
+        for (const br of d.loci) {
+          ctx.beginPath();
+          br.forEach((pt, i) => { const [x, y] = P(pt.re, pt.im); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // markers
       for (const mk of d.markers) {
         const [x, y] = P(mk.re, mk.im);
         const hov = this.hover === mk || (this.drag !== null && mk.dragId === this.drag);
         const r = hov ? 7 : 5.5;
         ctx.lineWidth = mk.kind === 'target' ? 1.5 : 2.5;
-        ctx.strokeStyle = css({ ol: '--text-muted', cl: '--series-1', zero: '--series-2', target: '--text-secondary' }[mk.kind]);
-        if (mk.kind === 'zero') {
+        ctx.strokeStyle = css({ ol: '--text-muted', cl: '--series-1', zero: '--series-2', olzero: '--text-muted', target: '--text-secondary', obs: '--series-3' }[mk.kind]);
+        if (mk.kind === 'zero' || mk.kind === 'olzero') {
           ctx.fillStyle = css('--surface');
           ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
         } else if (mk.kind === 'target') {
@@ -437,5 +450,159 @@ WB.plot = (function () {
     }
   }
 
-  return { TimePlot, SPlane, css, setupCanvas };
+  // ---------------------------------------------------------------------------
+  // Bode plot: magnitude (dB) and phase (deg) vs. log frequency, with spec
+  // regions (forbidden zones shaded), crossover markers, and a hover readout.
+  class BodePlot {
+    constructor(wrap, opts = {}) {
+      this.opts = opts;
+      this.legend = el('div', { class: 'legend' });
+      this.canvas = el('canvas', { class: 'plot-canvas', role: 'img', 'aria-label': opts.title || 'Bode plot' });
+      this.tip = el('div', { class: 'tooltip', hidden: '' });
+      const box = el('div', { class: 'plot-box bode-box' }, this.canvas, this.tip);
+      wrap.append(el('div', { class: 'plot-head' }, el('span', { class: 'plot-title', text: opts.title || 'Bode' }), this.legend), box);
+      this.box = box;
+      this.data = null;
+      this.cursor = null;
+      new ResizeObserver(() => this.draw()).observe(box);
+      box.addEventListener('pointermove', (e) => {
+        if (!this.data || !this.lay) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const frac = (e.clientX - rect.left - this.lay.l) / (rect.width - this.lay.l - this.lay.r);
+        this.cursor = Math.max(0, Math.min(1, frac));
+        this.draw();
+      });
+      box.addEventListener('pointerleave', () => { this.cursor = null; this.draw(); });
+    }
+
+    // data: { w: Float64Array, lines: [{label, mag, phase, color, dash}],
+    //         specs: [{w0, w1, db, keep: 'above'|'below', label}], marks: [{w, label}] }
+    setData(data) {
+      this.data = data;
+      this.legend.replaceChildren(...data.lines.filter((l) => l.label).map(legendItem));
+      this.draw();
+    }
+
+    draw() {
+      if (!this.data) return;
+      const { ctx, w, h } = setupCanvas(this.canvas);
+      const d = this.data;
+      const lay = this.lay = { l: 52, r: 12, t: 8, b: 22, gap: 26 };
+      const ph = (h - lay.t - lay.b - lay.gap);
+      const hMag = ph * 0.62, hPh = ph * 0.38;
+      const lw0 = Math.log10(d.w[0]), lw1 = Math.log10(d.w[d.w.length - 1]);
+      const X = (wv) => lay.l + (Math.log10(wv) - lw0) / (lw1 - lw0) * (w - lay.l - lay.r);
+      const db = (m) => 20 * Math.log10(Math.max(m, 1e-12));
+
+      let dLo = Infinity, dHi = -Infinity, pLo = Infinity, pHi = -Infinity;
+      for (const ln of d.lines) for (let i = 0; i < d.w.length; i++) {
+        const v = db(ln.mag[i]); if (isFinite(v)) { dLo = Math.min(dLo, v); dHi = Math.max(dHi, v); }
+        if (ln.phase) { pLo = Math.min(pLo, ln.phase[i]); pHi = Math.max(pHi, ln.phase[i]); }
+      }
+      for (const sp of d.specs || []) { dLo = Math.min(dLo, sp.db); dHi = Math.max(dHi, sp.db); }
+      dLo = Math.max(dLo, -160); dHi = Math.min(dHi, 160);
+      const dPad = Math.max(5, (dHi - dLo) * 0.06); dLo -= dPad; dHi += dPad;
+      pLo = Math.min(pLo, -180) - 10; pHi = Math.max(pHi, 0) + 10;
+      const top1 = lay.t, top2 = lay.t + hMag + lay.gap;
+      const Ym = (v) => top1 + (1 - (v - dLo) / (dHi - dLo)) * hMag;
+      const Yp = (v) => top2 + (1 - (v - pLo) / (pHi - pLo)) * hPh;
+
+      ctx.font = '11px var(--font-sans, system-ui)';
+      // decade grid
+      ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.fillStyle = css('--text-muted');
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      for (let e = Math.ceil(lw0); e <= Math.floor(lw1); e++) {
+        const x = Math.round(X(Math.pow(10, e))) + 0.5;
+        for (const [a, b] of [[top1, top1 + hMag], [top2, top2 + hPh]]) { ctx.beginPath(); ctx.moveTo(x, a); ctx.lineTo(x, b); ctx.stroke(); }
+        ctx.fillText(e === 0 ? '1' : e === 1 ? '10' : `10^${e}`, x, h - lay.b + 6);
+      }
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      for (const v of niceTicks(dLo, dHi, 4)) { const y = Math.round(Ym(v)) + 0.5; ctx.beginPath(); ctx.moveTo(lay.l, y); ctx.lineTo(w - lay.r, y); ctx.stroke(); ctx.fillText(fmt(v, 3), lay.l - 6, y); }
+      for (let v = Math.ceil(pLo / 90) * 90; v <= pHi; v += 90) { const y = Math.round(Yp(v)) + 0.5; ctx.beginPath(); ctx.moveTo(lay.l, y); ctx.lineTo(w - lay.r, y); ctx.stroke(); ctx.fillText(`${v}°`, lay.l - 6, y); }
+      ctx.save(); ctx.translate(11, top1 + hMag / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText('|·| [dB]', 0, 0); ctx.restore();
+      ctx.save(); ctx.translate(11, top2 + hPh / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText('phase', 0, 0); ctx.restore();
+      // 0 dB and -180 deg reference lines
+      ctx.strokeStyle = css('--axis');
+      ctx.beginPath(); ctx.moveTo(lay.l, Math.round(Ym(0)) + 0.5); ctx.lineTo(w - lay.r, Math.round(Ym(0)) + 0.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(lay.l, Math.round(Yp(-180)) + 0.5); ctx.lineTo(w - lay.r, Math.round(Yp(-180)) + 0.5); ctx.stroke();
+
+      // spec regions: shade the forbidden side of each bound
+      for (const sp of d.specs || []) {
+        const x0 = X(Math.max(sp.w0, d.w[0])), x1 = X(Math.min(sp.w1, d.w[d.w.length - 1]));
+        const y = Ym(sp.db);
+        ctx.fillStyle = css(sp.color || '--critical'); ctx.globalAlpha = 0.1;
+        if (sp.keep === 'above') ctx.fillRect(x0, y, x1 - x0, top1 + hMag - y);
+        else ctx.fillRect(x0, top1, x1 - x0, y - top1);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = css(sp.color || '--critical'); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+        if (sp.label) {
+          ctx.fillStyle = css(sp.color || '--critical'); ctx.textAlign = sp.keep === 'above' ? 'left' : 'right';
+          ctx.textBaseline = sp.keep === 'above' ? 'bottom' : 'top';
+          ctx.fillText(sp.label, sp.keep === 'above' ? x0 + 3 : x1 - 3, sp.keep === 'above' ? y - 2 : y + 2);
+        }
+      }
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(lay.l, top1, w - lay.l - lay.r, top2 + hPh - top1); ctx.clip();
+      for (const ln of d.lines) {
+        ctx.strokeStyle = css(ln.color); ctx.lineWidth = ln.width || 2; ctx.setLineDash(ln.dash || []);
+        ctx.beginPath();
+        for (let i = 0; i < d.w.length; i++) { const x = X(d.w[i]), y = Math.max(top1 - 5, Math.min(top1 + hMag + 5, Ym(db(ln.mag[i])))); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.stroke();
+        if (ln.phase) {
+          ctx.beginPath();
+          for (let i = 0; i < d.w.length; i++) { const x = X(d.w[i]), y = Yp(ln.phase[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+          ctx.stroke();
+        }
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // margin markers
+      for (const mk of d.marks || []) {
+        if (!isFinite(mk.w)) continue;
+        const x = Math.round(X(mk.w)) + 0.5;
+        ctx.strokeStyle = css(mk.color || '--text-secondary'); ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, top1); ctx.lineTo(x, top2 + hPh); ctx.stroke(); ctx.setLineDash([]);
+        if (mk.phaseFrom !== undefined && mk.phaseTo !== undefined) {
+          ctx.strokeStyle = css(mk.color || '--text-secondary'); ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.moveTo(x, Yp(mk.phaseFrom)); ctx.lineTo(x, Yp(mk.phaseTo)); ctx.stroke();
+        }
+        if (mk.dbFrom !== undefined && mk.dbTo !== undefined) {
+          ctx.strokeStyle = css(mk.color || '--text-secondary'); ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.moveTo(x, Ym(mk.dbFrom)); ctx.lineTo(x, Ym(mk.dbTo)); ctx.stroke();
+        }
+        if (mk.label) {
+          ctx.fillStyle = css('--text-secondary'); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.fillText(mk.label, x + 4, mk.inPhase ? top2 + 2 : top1 + 2);
+        }
+      }
+
+      // hover readout
+      if (this.cursor !== null) {
+        const i = Math.round(this.cursor * (d.w.length - 1));
+        const x = Math.round(X(d.w[i])) + 0.5;
+        ctx.strokeStyle = css('--text-secondary'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, top1); ctx.lineTo(x, top2 + hPh); ctx.stroke();
+        const rows = [el('div', { class: 'tip-time', text: `ω = ${fmt(d.w[i], 4)} rad/s` })];
+        for (const ln of d.lines) {
+          if (!ln.label) continue;
+          const key = el('span', { class: 'tip-key' + (ln.dash ? ' dashed' : '') });
+          key.style.setProperty('--key-color', `var(${ln.color})`);
+          const txt = `${fmt(db(ln.mag[i]), 4)} dB (×${fmt(ln.mag[i], 3)})` + (ln.phase ? `, ${fmt(ln.phase[i], 4)}°` : '');
+          rows.push(el('div', { class: 'tip-row' }, key, el('strong', { text: txt }), el('span', { class: 'tip-label', text: ln.label })));
+        }
+        this.tip.replaceChildren(...rows);
+        this.tip.hidden = false;
+        const tw = this.tip.offsetWidth;
+        this.tip.style.left = (x + 12 + tw > w ? x - 12 - tw : x + 12) + 'px';
+        this.tip.style.top = '8px';
+      } else {
+        this.tip.hidden = true;
+      }
+    }
+  }
+
+  return { TimePlot, SPlane, BodePlot, css, setupCanvas };
 })();

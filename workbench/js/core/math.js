@@ -124,5 +124,11 @@ WB.math = (function () {
     return (ok(given[0], truth[0]) && ok(given[1], truth[1])) || (ok(given[0], truth[1]) && ok(given[1], truth[0]));
   }
 
-  return { DEG, saturate, parseComplex, close, polesMatch, rk4Step, roots2, polyFromPoles, wnZeta, stepMetrics, fmt, tex, texPole, fmtPole };
+  // LaTeX bmatrix from an array of rows (or a flat array as a column).
+  function texMat(Mx, sig = 4) {
+    const rows = Array.isArray(Mx[0]) ? Mx : Mx.map((v) => [v]);
+    return `\\begin{bmatrix}${rows.map((r) => r.map((v) => tex(v, sig)).join(' & ')).join(' \\\\ ')}\\end{bmatrix}`;
+  }
+
+  return { DEG, saturate, parseComplex, texMat, close, polesMatch, rk4Step, roots2, polyFromPoles, wnZeta, stepMetrics, fmt, tex, texPole, fmtPole };
 })();

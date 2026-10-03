@@ -4,7 +4,25 @@ window.WB = window.WB || {};
 (function () {
   const { el, slider, segmented, section, renderTex, store } = WB.ui;
   const M = WB.math;
-  const CHAPTERS = ['ch7', 'ch8'];
+  // Chapters register themselves as WB.chapters.chN with a numeric `num`.
+  const CHAPTERS = Object.keys(WB.chapters).filter((k) => WB.chapters[k].num !== undefined).sort((a, b) => WB.chapters[a].num - WB.chapters[b].num);
+  const PARTS = [
+    { label: 'Models', nums: [2, 6] }, { label: 'PID', nums: [7, 10.9] },
+    { label: 'Observers', nums: [11, 14] }, { label: 'Loopshaping', nums: [15, 18] },
+  ];
+  // Every chapter starts from these simulation settings, then applies its own.
+  const SIM_BASE = { type: 'step', amplitude: 30, frequency: 0.2, tStep: 0.5, y0: 0, dist: 0, tDist: 3, tEnd: 4, Ts: 0.01, noise: 0 };
+  function chapterSim(c, sys) {
+    const { mismatch, ...sim } = WB.chapters[c].simDefaults(sys);
+    return { ...SIM_BASE, ...sim };
+  }
+  // Apply a chapter's default simulation settings and plant mismatch to S.
+  function applyChapterDefaults(c) {
+    const s = WB.systems[S.sysId];
+    Object.assign(S.sim, chapterSim(c, s));
+    const mm = WB.chapters[c].simDefaults(s).mismatch || {};
+    S.mismatch = Object.fromEntries(s.uncertain.map((k) => [k, mm[k] || 0]));
+  }
   const STATE_KEY = 'wb.state.v1';
 
   // ------------------------------------------------------------------ state --
@@ -15,11 +33,12 @@ window.WB = window.WB || {};
       p: Object.fromEntries(sys.params.map((q) => [q.key, q.value])),
       mismatch: Object.fromEntries(sys.uncertain.map((k) => [k, 0])),
       alpha: 0.2,
-      sim: { type: 'step', amplitude: 30, frequency: 0.2, tStep: 0.5, y0: 0, dist: 0, tDist: 3, tEnd: 4, Ts: 0.01 },
+      sim: { ...SIM_BASE, seed: 1 },
       ch: {},
     };
     for (const c of CHAPTERS) S.ch[c] = WB.chapters[c].defaults(sys);
-    Object.assign(S.sim, WB.chapters[chapter].simDefaults(sys));
+    Object.assign(S.sim, chapterSim(chapter, sys));
+    Object.assign(S.mismatch, WB.chapters[chapter].simDefaults(sys).mismatch || {});
     return S;
   }
 
@@ -31,6 +50,7 @@ window.WB = window.WB || {};
     const merged = { ...base, ...saved, p: { ...base.p, ...saved.p }, mismatch: { ...base.mismatch, ...saved.mismatch }, sim: { ...base.sim, ...saved.sim }, ch: { ...base.ch } };
     for (const c of CHAPTERS) merged.ch[c] = { ...base.ch[c], ...(saved.ch || {})[c] };
     if (!CHAPTERS.includes(merged.chapter)) merged.chapter = 'ch7';
+    for (const c of CHAPTERS) if (!merged.ch[c]) merged.ch[c] = base.ch[c];
     return merged;
   })();
 
@@ -49,8 +69,8 @@ window.WB = window.WB || {};
     const pTrue = { ...pModel };
     for (const k of s.uncertain) pTrue[k] = pModel[k] * (1 + S.mismatch[k] / 100);
     ctx = ctx || {};
-    Object.assign(ctx, { sys: s, S, st: S.ch[S.chapter], pModel, pTrue, model: s.secondOrderModel(pModel), update, app });
-    ctx.gains = chapter().gains(ctx);
+    Object.assign(ctx, { sys: s, S, st: S.ch[S.chapter], pModel, pTrue, model: s.secondOrderModel(pModel), ss: s.stateSpace(pModel), update, app });
+    ctx.gains = chapter().gains ? chapter().gains(ctx) : {};
   }
 
   // -------------------------------------------------------------- simulate --
@@ -61,24 +81,31 @@ window.WB = window.WB || {};
     const reference = WB.sim.makeReference({ type: S.sim.type, amplitude: S.sim.amplitude * scale, offset: 0, frequency: S.sim.frequency, tStep: S.sim.tStep });
     const refWithStart = (t) => (t < S.sim.tStep ? S.sim.y0 * scale : reference(t));
     const disturbance = (t) => (t >= S.sim.tDist ? S.sim.dist : 0);
-    const common = { reference: refWithStart, disturbance, x0: s.x0(S.sim.y0 * scale), Ts: S.sim.Ts, tEnd: S.sim.tEnd };
+    const noise = WB.sim.makeNoise(S.sim.noise * scale, S.sim.seed);
+    const common = { reference: chapter().reference ? chapter().reference(ctx, refWithStart) : refWithStart, disturbance, noise, x0: s.x0(S.sim.y0 * scale), Ts: S.sim.Ts, tEnd: S.sim.tEnd };
 
-    result = WB.sim.simulate({
-      ...common,
-      plant: { f: (x, u) => s.f(x, u, ctx.pTrue), h: s.h, uLimit: s.uLimit(ctx.pTrue) },
-      controller: WB.chapters._pd.makeController(ctx),
-    });
+    const plantTrue = { f: (x, u) => s.f(x, u, ctx.pTrue), h: s.h, uLimit: s.uLimit(ctx.pTrue) };
+    result = chapter().simulate
+      ? chapter().simulate(ctx, common, plantTrue)
+      : WB.sim.simulate({ ...common, plant: plantTrue, controller: chapter().controller(ctx) });
 
-    // Linear design model: same PD law on b0/(s^2+a1 s+a0), no saturation,
-    // no gravity, nominal parameters. Deviations of the real response from this
-    // trace come from saturation, nonlinearity, compensation choice, or mismatch.
-    const m = ctx.model;
-    linResult = WB.sim.simulate({
-      ...common,
-      disturbance: () => 0,
-      plant: { f: (x, u) => [x[1], -m.a1 * x[1] - m.a0 * x[0] + m.b0 * u], h: (x) => x[0], uLimit: Infinity },
-      controller: WB.chapters._pd.makeController(ctx, { linear: true }),
-    });
+    // Linear design model: the same controller (without its feedforward term) on
+    // xdot = A x + B u with nominal parameters, no saturation, no disturbance and
+    // no noise. Gaps between this trace and the real response come from
+    // saturation, nonlinearity, the compensation choice, mismatch, d, or noise.
+    if (chapter().linear === false) {
+      linResult = null;
+    } else if (chapter().linearSim) {
+      linResult = chapter().linearSim(ctx, common);
+    } else {
+      const { A, B } = ctx.ss;
+      linResult = WB.sim.simulate({
+        ...common,
+        disturbance: null, noise: null,
+        plant: { f: (x, u) => A.map((row, i) => row.reduce((acc, a, j) => acc + a * x[j], 0) + B[i][0] * u), h: (x) => x[0], uLimit: Infinity },
+        controller: chapter().controller(ctx, { linear: true }),
+      });
+    }
 
     // Metrics on the first step: from tStep to the next reference change or disturbance.
     const N = result.t.length;
@@ -123,15 +150,17 @@ window.WB = window.WB || {};
       el('button', { type: 'button', class: 'btn btn-quiet', text: 'Exact model', onclick: () => { for (const k of s.uncertain) S.mismatch[k] = 0; update(); } })));
 
     const ref = section(root, 'Reference');
-    segmented(ref, { label: 'Signal', options: [{ value: 'step', label: 'step' }, { value: 'square', label: 'square' }], get: () => S.sim.type, set: (v) => { S.sim.type = v; update(); } });
+    segmented(ref, { label: 'Signal', options: [{ value: 'step', label: 'step' }, { value: 'square', label: 'square' }, { value: 'sine', label: 'sine' }], get: () => S.sim.type, set: (v) => { S.sim.type = v; update(); } });
     slider(ref, { label: 'amplitude', unit: '°', min: -90, max: 90, step: 1, sig: 3, get: () => S.sim.amplitude, set: (v) => { S.sim.amplitude = v; update(); } });
     slider(ref, { label: 'starts at', unit: 's', min: 0, max: 5, step: 0.05, sig: 3, get: () => S.sim.tStep, set: (v) => { S.sim.tStep = v; update(); } });
-    slider(ref, { label: 'frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, get: () => S.sim.frequency, set: (v) => { S.sim.frequency = v; update(); }, disabled: () => S.sim.type !== 'square' });
+    slider(ref, { label: 'frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, get: () => S.sim.frequency, set: (v) => { S.sim.frequency = v; update(); }, disabled: () => S.sim.type === 'step' });
     slider(ref, { label: `initial ${s.output.label}`, unit: '°', min: -90, max: 90, step: 1, sig: 3, get: () => S.sim.y0, set: (v) => { S.sim.y0 = v; update(); } });
 
-    const dist = section(root, 'Input disturbance');
+    const dist = section(root, 'Disturbance & noise');
     slider(dist, { label: 'd', unit: s.input.unit, min: -1, max: 1, step: 0.01, sig: 3, get: () => S.sim.dist, set: (v) => { S.sim.dist = v; update(); } });
     slider(dist, { label: 'starts at', unit: 's', min: 0, max: 20, step: 0.1, sig: 3, get: () => S.sim.tDist, set: (v) => { S.sim.tDist = v; update(); } });
+    slider(dist, { label: 'noise σ', unit: '°', min: 0, max: 2, step: 0.01, sig: 3, hint: `Gaussian noise on the measured ${s.output.label}. Controllers that use the true state ignore it.`, get: () => S.sim.noise, set: (v) => { S.sim.noise = v; update(); } });
+    dist.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'New noise sample', onclick: () => { S.sim.seed = (S.sim.seed % 100000) + 1; update(); } }));
 
     const simS = section(root, 'Simulation');
     slider(simS, { label: 't<sub>end</sub>', unit: 's', min: 1, max: 60, step: 0.5, sig: 3, get: () => S.sim.tEnd, set: (v) => { S.sim.tEnd = v; update(); } });
@@ -140,7 +169,7 @@ window.WB = window.WB || {};
       type: 'button', class: 'btn btn-quiet', text: 'Reset this chapter',
       onclick: () => {
         S.ch[S.chapter] = chapter().defaults(s);
-        Object.assign(S.sim, { tStep: 0.5, y0: 0, dist: 0, type: 'step' }, chapter().simDefaults(s));
+        applyChapterDefaults(S.chapter);
         rebuild();
       },
     }));
@@ -151,10 +180,12 @@ window.WB = window.WB || {};
     root.replaceChildren();
     chapter().buildControls(root, ctx);
 
-    const met = section(root, 'Step response', 'p. 113');
-    const table = el('div', { class: 'metrics' });
-    met.append(table);
-    WB.ui.addRefresher(() => renderMetrics(table));
+    if (chapter().metrics !== false) {
+      const met = section(root, 'Step response', 'p. 113');
+      const table = el('div', { class: 'metrics' });
+      met.append(table);
+      WB.ui.addRefresher(() => renderMetrics(table));
+    }
 
     const prob = document.getElementById('problem');
     prob.replaceChildren();
@@ -171,11 +202,11 @@ window.WB = window.WB || {};
       if (status) r.append(el('span', { class: 'status ' + (status.ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: status.ok ? '✓' : '✗' }), el('span', { text: status.text })));
       rows.push(r);
     };
-    const st = ctx.st;
-    const trTarget = S.chapter === 'ch8' ? st.tr : null;
+    const tg = chapter().targets ? chapter().targets(ctx) : {};
+    const trTarget = tg.tr || null;
     row('rise time (10–90%)', isNaN(metrics.tr) ? '—' : `${M.fmt(metrics.tr, 3)} s`,
       trTarget && !isNaN(metrics.tr) ? { ok: metrics.tr <= trTarget * 1.1, text: `target ${M.fmt(trTarget, 3)} s` } : null);
-    const zeta = S.chapter === 'ch8' ? st.zeta : null;
+    const zeta = tg.zeta || null;
     const osExp = zeta && zeta < 1 ? 100 * Math.exp(-zeta * Math.PI / Math.sqrt(1 - zeta * zeta)) : zeta ? 0 : null;
     row('overshoot', isNaN(metrics.os) ? '—' : `${M.fmt(metrics.os, 3)} %`,
       osExp !== null && !isNaN(metrics.os) ? { ok: metrics.os <= osExp + 2, text: `2nd-order ζ predicts ${M.fmt(osExp, 2)} %` } : null);
@@ -187,7 +218,7 @@ window.WB = window.WB || {};
   }
 
   // ----------------------------------------------------------------- views --
-  let thetaPlot, uPlot, splane, armCanvas, scrub, timeLabel, armReadout;
+  let thetaPlot, uPlot, xPlot, splane, bodePlot, armCanvas, scrub, timeLabel, armReadout;
 
   function buildCenter() {
     const s = sys();
@@ -209,13 +240,17 @@ window.WB = window.WB || {};
 
     const sp = document.getElementById('splane'); sp.replaceChildren();
     splane = new WB.plot.SPlane(sp, { title: 's-plane' });
-    splane.onDrag = (id, re, im) => chapter().onPoleDrag(ctx, id, re, im);
+    splane.onDrag = (id, re, im) => chapter().onPoleDrag && chapter().onPoleDrag(ctx, id, re, im);
 
     const py = document.getElementById('plot-y'); py.replaceChildren();
     thetaPlot = new WB.plot.TimePlot(py, { title: `${s.output.label}(t)`, yLabel: `${s.output.label} [${s.output.unit}]`, unit: s.output.unit, minSpan: 2 });
     const pu = document.getElementById('plot-u'); pu.replaceChildren();
     uPlot = new WB.plot.TimePlot(pu, { title: `${s.input.label}(t)`, yLabel: `${s.input.label} [${s.input.unit}]`, unit: s.input.unit });
-    for (const p of [thetaPlot, uPlot]) {
+    const px = document.getElementById('plot-x'); px.replaceChildren();
+    xPlot = new WB.plot.TimePlot(px, { title: '' });
+    const bd = document.getElementById('bode'); bd.replaceChildren();
+    bodePlot = new WB.plot.BodePlot(bd, { title: 'Bode' });
+    for (const p of [thetaPlot, uPlot, xPlot]) {
       p.onHover = (i) => { view.hoverIndex = i; drawCursor(); };
     }
   }
@@ -225,20 +260,22 @@ window.WB = window.WB || {};
     const k = s.output.scale;
     const t = result.t;
     const deg = (arr) => Array.from(arr, (v) => v * k);
-    const yf = result.r[metrics.i0] * k;
+    const ch = chapter();
+    const yf = result.r[Math.min(metrics.i0, t.length - 1)] * k;
     const tol = Math.abs(yf - result.y[metrics.i0] * k) * 0.02;
     const points = [];
     if (metrics.os > 0.5) points.push({ t: t[metrics.iPeak], y: result.y[metrics.iPeak] * k, color: '--series-1', label: `${M.fmt(metrics.os, 3)}% OS` });
     const vmarks = isNaN(metrics.t90) ? [] : [{ t: metrics.t90, label: `90% · tr ${M.fmt(metrics.tr, 3)} s` }];
+    const ySeries = ch.openLoop ? [] : [{ label: 'reference r', y: deg(result.r), color: '--ref', dash: [6, 4], width: 1.5 }];
+    if (S.sim.noise > 0) ySeries.push({ label: `${s.output.label} measured (noisy)`, y: deg(result.yMeas), color: '--text-muted', width: 1 });
+    if (linResult) ySeries.push({ label: ch.linearLabel || 'linear design model', y: deg(linResult.y), color: '--series-2', dash: [5, 4], width: 1.5, fit: false });
+    if (ch.outputSeries) ySeries.push(...ch.outputSeries(ctx, result, deg));
+    ySeries.push({ label: `${s.output.label} (simulated)`, y: deg(result.y), color: '--series-1' });
     thetaPlot.setData({
       t,
-      series: [
-        { label: 'reference r', y: deg(result.r), color: '--ref', dash: [6, 4], width: 1.5 },
-        { label: 'linear design model', y: deg(linResult.y), color: '--series-2', dash: [5, 4], width: 1.5 },
-        { label: `${s.output.label} (simulated)`, y: deg(result.y), color: '--series-1' },
-      ],
-      bands: tol > 0 ? [{ y0: yf - tol, y1: yf + tol, color: '--text-muted', alpha: 0.12 }] : [],
-      points, vmarks,
+      series: ySeries,
+      bands: tol > 0 && !ch.openLoop ? [{ y0: yf - tol, y1: yf + tol, color: '--text-muted', alpha: 0.12 }] : [],
+      points: ch.openLoop ? [] : points, vmarks: ch.openLoop ? [] : vmarks,
     });
     const lim = s.uLimit(ctx.pModel);
     const clip = (arr) => Array.from(arr, (v) => Math.max(-4 * lim, Math.min(4 * lim, v)));
@@ -251,7 +288,28 @@ window.WB = window.WB || {};
       hlines: [{ y: lim, color: '--critical', label: `+${s.input.label}max` }, { y: -lim, color: '--critical', label: `−${s.input.label}max`, fit: false }],
       bands: [{ y0: lim, y1: 1e9, color: '--critical', alpha: 0.07 }, { y0: -1e9, y1: -lim, color: '--critical', alpha: 0.07 }],
     });
+    const extra = ch.extraPlot ? ch.extraPlot(ctx, result) : null;
+    document.getElementById('plot-x').hidden = !extra;
+    if (extra) {
+      xPlot.opts = { ...xPlot.opts, ...extra.opts };
+      xPlot.box.previousSibling.querySelector('.plot-title').textContent = extra.opts.title;
+      xPlot.setData({ t, ...extra.data });
+    }
     scrub.max = t.length - 1;
+  }
+
+  function drawAnalysis() {
+    const ch = chapter();
+    const spData = ch.splane ? ch.splane(ctx) : null;
+    document.getElementById('splane').hidden = !spData;
+    if (spData) splane.setData(spData);
+    const bd = ch.bode ? ch.bode(ctx) : null;
+    document.getElementById('bode').hidden = !bd;
+    if (bd) {
+      bodePlot.box.previousSibling.querySelector('.plot-title').textContent = bd.title || 'Bode';
+      bodePlot.setData(bd);
+    }
+    document.querySelector('.row-2').classList.toggle('single', !spData);
   }
 
   function cursorIndex() {
@@ -274,6 +332,7 @@ window.WB = window.WB || {};
     const cur = view.hoverIndex !== null || view.playing || view.playIndex > 0 ? i : null;
     thetaPlot.setCursor(cur);
     uPlot.setCursor(cur);
+    if (!document.getElementById('plot-x').hidden) xPlot.setCursor(cur);
     scrub.value = view.playIndex;
     drawArm();
   }
@@ -339,7 +398,7 @@ window.WB = window.WB || {};
     run();
     WB.ui.refreshAll();
     drawPlots();
-    splane.setData(chapter().splane(ctx));
+    drawAnalysis();
     drawMath();
     drawCursor();
     store.set(STATE_KEY, S);
@@ -358,19 +417,21 @@ window.WB = window.WB || {};
   function buildHeader() {
     const tabs = document.getElementById('tabs');
     tabs.replaceChildren();
-    for (const c of CHAPTERS) {
-      const ch = WB.chapters[c];
-      const b = el('button', { type: 'button', role: 'tab', class: 'tab', 'data-ch': c },
-        el('span', { class: 'tab-num', text: ch.tab }), el('span', { class: 'tab-title', text: ch.title }));
-      b.addEventListener('click', () => {
-        if (S.chapter === c) return;
-        S.chapter = c;
-        Object.assign(S.sim, chapter().simDefaults(sys()));
-        rebuild();
-      });
-      tabs.append(b);
+    for (const part of PARTS) {
+      const group = el('div', { class: 'tab-group', role: 'group', 'aria-label': part.label }, el('span', { class: 'tab-part', text: part.label }));
+      for (const c of CHAPTERS.filter((k) => WB.chapters[k].num >= part.nums[0] && WB.chapters[k].num <= part.nums[1])) {
+        const ch = WB.chapters[c];
+        const b = el('button', { type: 'button', role: 'tab', class: 'tab', 'data-ch': c, title: `${ch.tab} · ${ch.title}` }, el('span', { class: 'tab-num', text: ch.short || ch.tab.replace('Ch ', '') }));
+        b.addEventListener('click', () => {
+          if (S.chapter === c) return;
+          S.chapter = c;
+          applyChapterDefaults(c);
+          rebuild();
+        });
+        group.append(b);
+      }
+      if (group.children.length > 1) tabs.append(group);
     }
-    tabs.append(el('span', { class: 'tab tab-soon', title: 'Chapters 9 to 18 are not built yet', text: 'Ch 9–18 · later' }));
 
     const study = document.getElementById('study');
     study.replaceChildren(...['A', 'B', 'C', 'D', 'E', 'F'].map((id) => {
@@ -420,6 +481,9 @@ window.WB = window.WB || {};
   }
 
   const app = {
+    result: () => result,
+    isRevealed: (key) => revealed.has(key),
+    reveal: (key) => revealed.add(key),
     setMode(m) {
       if (S.mode === m) return;
       // Entering work mode from explore: start from the explored gains so the
@@ -435,7 +499,7 @@ window.WB = window.WB || {};
   function applyHash() {
     const [sysId, ch, mode] = location.hash.replace('#', '').split('/');
     if (sysId && WB.systems[sysId] && sysId !== S.sysId) S = freshState(sysId, S.chapter);
-    if (ch && CHAPTERS.includes(ch) && ch !== S.chapter) { S.chapter = ch; Object.assign(S.sim, chapter().simDefaults(sys())); }
+    if (ch && CHAPTERS.includes(ch) && ch !== S.chapter) { S.chapter = ch; applyChapterDefaults(ch); }
     if (mode === 'work' || mode === 'explore') S.mode = mode;
   }
 

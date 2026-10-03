@@ -47,6 +47,23 @@ WB.systems.A = {
       },
     };
   },
+  // Feedback-linearized state space (A.6, Eq. 6.16, p. 88): x = (θ, θ̇), u = τ̃, y = θ.
+  stateSpace(p) {
+    const J = p.m * p.ell ** 2;
+    return { A: [[0, 1], [0, -3 * p.b / J]], B: [[0], [3 / J]], C: [[1, 0]], D: [[0]] };
+  },
+  // Jacobian linearization about (θe, 0, τe) (A.4 Eq. 4.5, p. 64; A.6 p. 88).
+  jacobian(p, yE) {
+    const J = p.m * p.ell ** 2;
+    return {
+      A: [[0, 1], [(3 * p.g / (2 * p.ell)) * Math.sin(yE), -3 * p.b / J]],
+      B: [[0], [3 / J]], C: [[1, 0]], D: [[0]],
+      ue: p.m * p.g * (p.ell / 2) * Math.cos(yE),
+    };
+  },
+  kinetic(x, p) { return 0.5 * (p.m * p.ell ** 2 / 3) * x[1] ** 2; },       // A.2, p. 29
+  potential(x, p) { return p.m * p.g * (p.ell / 2) * Math.sin(x[0]); },    // A.3, p. 44 (P0 = 0)
+
   // Gravity-cancelling torque tau_fl = m g (l/2) cos(theta)  (Ch 7 Listing 7.1, p. 104)
   feedbackLinearization(x, p) { return p.m * p.g * (p.ell / 2) * Math.cos(x[0]); },
   equilibriumInput(yE, p) { return p.m * p.g * (p.ell / 2) * Math.cos(yE); },
@@ -113,6 +130,153 @@ WB.systems.A = {
   // Problem data for the chapter modules. Statements are paraphrased; the page
   // numbers point at controlbook.pdf (PDF page, not book page).
   problems: {
+    ch2: {
+      id: 'A.2', page: 28,
+      sim: { amplitude: 30, frequency: 0.25, tEnd: 8 },
+      statement: [
+        '(a) Using the configuration variable θ, write an expression for the kinetic energy of the system.',
+        '(b) Write a class that animates the arm, and display a sinusoidal variation of θ.',
+      ],
+    },
+    ch3: {
+      id: 'A.3', page: 43,
+      sim: { tEnd: 20, tStep: 0 },
+      openLoop: { shape: 'square', amp: 0.2, freq: 0.05, offset: 0 },  // hw03_armSim.py
+      statement: [
+        '(a) Find the potential energy of the system.',
+        '(b) Define the generalized coordinates.',
+        '(c) Find the generalized forces and damping forces.',
+        '(d) Derive the equations of motion with the Euler-Lagrange equations.',
+        '(e) Implement the equations of motion and simulate with a variable torque input.',
+      ],
+    },
+    ch4: {
+      id: 'A.4', page: 62,
+      sim: { tEnd: 6, tStep: 0 },
+      statement: [
+        '(a) Find the equilibria of the system.',
+        '(b) Linearize about the equilibria using Jacobian linearization.',
+        '(c) Linearize using feedback linearization.',
+      ],
+    },
+    ch5: {
+      id: 'A.5', page: 71,
+      sim: { tEnd: 6, tStep: 0 },
+      statement: ['Using the feedback-linearized model, find the transfer function from the torque τ̃ to the angle θ.'],
+    },
+    ch6: {
+      id: 'A.6', page: 87,
+      sim: { tEnd: 6, tStep: 0 },
+      statement: ['With x = (θ, θ̇)ᵀ, ũ = τ̃ and y = θ, find A, B, C, D for the feedback-linearized equations (4.7).'],
+    },
+    ch9: {
+      id: 'A.9', page: 145,
+      sim: { amplitude: 30, tEnd: 12, dist: 0.1, tDist: 6 },
+      statement: [
+        '(a) With PD control, what is the system type? Characterize the steady-state error for a step, a ramp and a parabola. How does this change with an integrator?',
+        '(b) A constant disturbance acts at the plant input (gravity, for example). What is the steady-state error with and without the integrator?',
+      ],
+    },
+    ch10: {
+      id: 'A.10', page: 161,
+      tr: 0.6, zeta: 0.9, ki: 0.2, sigma: 0.05,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 20 },
+      mismatch: { m: 12, ell: -9, b: 15 },  // a fixed "alpha = 0.2" draw so the page is repeatable
+      statement: [
+        '(a) Let the parameters vary by up to 20% (α = 0.2).',
+        '(b) The controller may use only the measured angle θ and the reference θ<sub>r</sub>, not the state.',
+        '(c) Implement the PID with dirty-derivative gain σ = 0.05, and tune the integrator to remove the steady-state error caused by the uncertain parameters.',
+      ],
+    },
+    p6: {
+      id: 'A.P.6', page: 470,
+      sim: { amplitude: 30, tEnd: 12 },
+      statement: [
+        'Use the PD gains from A.8 and add an integrator to get PID control (derivative on the output). Put the closed-loop characteristic equation in Evans form, plot the root locus versus k<sub>I</sub>, and choose a k<sub>I</sub> that does not significantly move the other closed-loop poles.',
+      ],
+    },
+    ch11: {
+      id: 'A.11', page: 186,
+      tr: 0.489, zeta: 0.707,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 10 },
+      statement: [
+        '(a) Choose the closed-loop poles from s² + 2ζω<sub>n</sub>s + ω<sub>n</sub>² with t<sub>r</sub> = 0.489 and ζ = 0.707.',
+        '(b) Add the state-space matrices from A.6.',
+        '(c) Check controllability: rank(𝒞<sub>A,B</sub>) = n.',
+        '(d) Find K so eig(A − BK) are the desired poles, and k<sub>r</sub> so the DC gain from θ<sub>r</sub> to θ is one. If the poles match A.8, K = (k<sub>P</sub>, k<sub>D</sub>). Why?',
+        '(e) Implement the state-feedback controller, using a digital differentiator to estimate θ̇.',
+      ],
+    },
+    ch12: {
+      id: 'A.12', page: 203,
+      tr: 0.489, zeta: 0.707, pI: -5,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 20, dist: 0.25, tDist: 0 },
+      mismatch: { m: 12, ell: -9, b: 15 },
+      statement: [
+        '(a) Add an integrator with anti-windup to the A.11 state-feedback controller.',
+        '(b) Add a disturbance and let the parameters vary by up to 20%.',
+        '(c) Tune the integrator pole (and other gains if needed) for good tracking.',
+      ],
+    },
+    ch13: {
+      id: 'A.13', page: 228,
+      tr: 0.4, zeta: 0.707, pI: -9, trObsFactor: 10, zetaObs: 0.707,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 20, dist: 0, tDist: 0 },
+      statement: [
+        '(a) Use exact parameters (α = 0) and no input disturbance.',
+        '(b) Check observability: rank(𝒪<sub>A,C</sub>) = n.',
+        '(c) Add an observer that estimates x̂ and use x̂ in the controller. Tune the controller and observer poles.',
+        '(d) Plot the state and the estimated state together.',
+        '(e) Add an input disturbance of 0.01 and observe the steady-state error even with the integrator.',
+      ],
+    },
+    ch14: {
+      id: 'A.14', page: 246,
+      tr: 0.4, zeta: 0.95, pI: -9, wnObs: 10, zetaObs: 0.707, pD: -5.5,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 20, dist: 0.5, tDist: 0, noise: 0.0573 },
+      mismatch: { m: 12, ell: -9, b: 15 },
+      statement: [
+        '(a) Use α = 0.2, an input disturbance of 0.5 N·m, and output noise with standard deviation 0.001 rad. Without a disturbance observer, the controller cannot handle the large disturbance.',
+        '(b) Add a disturbance observer, verify the estimator\'s steady-state error is removed, and tune.',
+      ],
+    },
+    ch15: {
+      id: 'A.15', page: 275,
+      sim: { tEnd: 30, tStep: 0 },
+      statement: ['Draw by hand the Bode plot from τ̃ to θ̃ with θ<sub>e</sub> = 0, then compare with the bode command.'],
+    },
+    ch16: {
+      id: 'A.16', page: 295,
+      wr: 0.4, parabolaA: 5, wdin: 0.01, wno: 100,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 20 },
+      statement: [
+        'Plot the Bode plots of the plant and of the plant under the A.10 PID control.',
+        '(a) To what percent error can the closed loop track θ<sub>r</sub> if its frequency content is below ω<sub>r</sub> = 0.4 rad/s?',
+        '(b) What is the steady-state tracking error to θ<sub>r</sub>(t) = 5t²?',
+        '(c) If d<sub>in</sub> has content below 0.01 rad/s, what percent of it shows up in θ?',
+        '(d) If the noise has content above 100 rad/s, what percent shows up in θ?',
+      ],
+    },
+    ch17: {
+      id: 'A.17', page: 311,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 20 },
+      statement: [
+        'Find the phase and gain margins under the A.10 PID control. Plot the open-loop and closed-loop Bode plots together. What is the closed-loop bandwidth, and how does it relate to the crossover frequency?',
+      ],
+    },
+    ch18: {
+      id: 'A.18', page: 340,
+      wLow: 0.07, wHigh: 1000, factor: 10, pm: 60,
+      sim: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0, tEnd: 20, dist: 0.1, tDist: 0, noise: 0.573 },
+      mismatch: { m: 6, ell: -4, b: 8 },
+      statement: [
+        'C(s) = C<sub>pid</sub>(s)·C<sub>l</sub>(s), with C<sub>pid</sub> from A.10.',
+        '(a) Design C<sub>l</sub>: improve tracking and disturbance rejection by 10× below 0.07 rad/s, improve noise attenuation by 10× above 1000 rad/s, and get PM ≈ 60°.',
+        '(b) Add zero-mean Gaussian noise (σ = 0.01).',
+        '(c) Implement C(s) in simulation using its state-space form.',
+        '(d) Add a low-pass prefilter F(s) to flatten the closed-loop response and remove the overshoot.',
+      ],
+    },
     ch7: {
       id: 'A.7', page: 101,
       yE: 0,

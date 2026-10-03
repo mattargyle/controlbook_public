@@ -318,7 +318,8 @@ WB.chapters = WB.chapters || {};
 
   // ------------------------------------------------------------- Chapter 7 --
   WB.chapters.ch7 = {
-    id: 'ch7', tab: 'Ch 7', title: 'Pole placement (PD)', pages: 'pp. 99–106',
+    id: 'ch7', num: 7, tab: 'Ch 7', title: 'Pole placement (PD)', pages: 'pp. 99–106',
+    controller: (ctx, o) => makeController(ctx, o),
 
     defaults(sys) {
       const prob = sys.problems.ch7;
@@ -454,7 +455,9 @@ WB.chapters = WB.chapters || {};
 
   // ------------------------------------------------------------- Chapter 8 --
   WB.chapters.ch8 = {
-    id: 'ch8', tab: 'Ch 8', title: 'Second-order design', pages: 'pp. 107–136',
+    id: 'ch8', num: 8, tab: 'Ch 8', title: 'Second-order design', pages: 'pp. 107–136',
+    controller: (ctx, o) => makeController(ctx, o),
+    targets: (ctx) => ({ tr: ctx.st.tr, zeta: ctx.st.zeta }),
 
     defaults(sys) {
       const prob = sys.problems.ch8;
@@ -629,5 +632,6 @@ WB.chapters = WB.chapters || {};
     },
   };
 
-  WB.chapters._pd = { makeController, clPoles };
+  // Shared with later chapters (PID, root locus, frequency response).
+  WB.pd = { makeController, clPoles, gainsFromPoles, polesFromWnZeta, wnFromTr, problemPanel, checkNumbers, num, sharedControls, plantCard, closedLoopCard, compensationCard, baseMarkers, showResult };
 })();
