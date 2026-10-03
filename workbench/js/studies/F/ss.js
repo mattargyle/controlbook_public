@@ -323,7 +323,6 @@
       id: `ch${num}`, num, tab: `Ch ${num}`, title, pages, level,
       controller(ctx, o) { return makeSS(ctx, o); },
       gains(ctx) { return ctx.S.mode === 'explore' ? design(ctx.pModel, ctx.st.k, level) : fromW(ctx.st.w, level); },
-      toWork(ctx) { Object.assign(ctx.st.w, toW(ctx.gains)); },
       splane,
       targets(ctx) { return { tr: ctx.st.k.trh }; },
     }, extra));
@@ -374,7 +373,7 @@
         { title: 'Gains (place / Ackermann)', page: 'p. 182 · Eq. 11.32, 11.35',
           theory: 'K = \\text{place}(A, B, p),\\quad k_r = \\frac{-1}{C_r(A - BK)^{-1}B}',
           numbers: `K_h = ${texMat([d.Kh])},\\; k_{r,h} = ${tex(d.krh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{r,z} = ${tex(d.krz)}`, spoiler: true,
-          note: 'k_r,h = K_h,1 and k_r,z = K_z,1: each loop has a free integrator, so the reference must enter exactly like the position feedback.' },
+          symbolic: '\\text{each loop has a free integrator, so } k_{r,h} = K_{h,1},\\; k_{r,z} = K_{z,1}' },
         { title: 'Tuning (F.11e)', page: 'p. 110–113',
           theory: 't_r \\approx \\frac{2.2}{\\omega_n}:\\; \\text{move poles farther from the origin to speed up};\\quad M_p = e^{-\\zeta\\pi/\\sqrt{1-\\zeta^2}}:\\; \\text{raise } \\zeta \\text{ (smaller angle from the real axis) to cut overshoot}' },
       ];
@@ -438,10 +437,18 @@
   });
 
   // ------------------------------------------------------------ Chapter 12 --
+  // Tracking errors at t_end, or just before the last z_r switch for a square wave.
   function trackCheck(ctx, tol = 0.02) {
-    const res = ctx.app.result(), n = res.t.length - 1;
-    const eh = Math.abs(res.rAll[0][n] - res.yAll[1][n]), ez = Math.abs(res.rAll[1][n] - res.yAll[0][n]);
-    return { eh, ez, ok: eh < tol && ez < tol };
+    const res = ctx.app.result(), S = ctx.S, zc = S.sim.refs[0];
+    let t = S.sim.tEnd;
+    if (zc.type === 'square') {
+      const half = 0.5 / zc.frequency;
+      const k = Math.floor((S.sim.tEnd - zc.tStep) / half - 1e-9);
+      if (k >= 1) t = zc.tStep + k * half - 0.05;
+    }
+    const i = Math.max(0, Math.min(res.t.length - 1, Math.round(t / S.sim.Ts)));
+    const eh = Math.abs(res.rAll[0][i] - res.yAll[1][i]), ez = Math.abs(res.rAll[1][i] - res.yAll[0][i]);
+    return { eh, ez, t: res.t[i], ok: eh < tol && ez < tol };
   }
   base('sfi', 12, 'Integrators with state feedback', 'pp. 197–214, F.12 p. 400', {
     defaults(sys) { return { view: 'lat', zOff: 3, hOff: 0, antiwindup: 'clamp', extra: 'int', k: knobs(sys), w: slowW(sys, 'sfi') }; },
@@ -465,14 +472,14 @@
       return [
         { title: 'Augmented systems', page: 'p. 198 · Eq. 12.1',
           theory: '\\dot x_I = r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\0\\end{bmatrix}',
-          numbers: `A_{1,lon} = ${texMat(ah.A1)},\\quad A_{1,lat} = ${texMat(az.A1, 3)}` },
+          numbers: `A_{1,lon} = ${texMat(ah.A1)},\\quad A_{1,lat} = ${texMat(az.A1, 3)}`, spoiler: true },
         ctrbCard(az.A1, az.B1, 'Controllability of (A₁, B₁), lateral', 'p. 198'),
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 199–201',
           theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I x_I',
           numbers: `K_h = ${texMat([d.Kh])},\\; k_{I,h} = ${tex(d.kIh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{I,z} = ${tex(d.kIz)}`, spoiler: true },
         { title: 'Wind as a lateral force', page: 'F.12(b) p. 400',
-          theory: '\\ddot z = \\frac{-(f_r + f_\\ell)\\sin\\theta - \\mu\\dot z + F_{wind}}{m_c + 2m_r}\\;\\Rightarrow\\; \\theta_{ss} = \\frac{F_{wind}}{F_e}',
+          theory: '\\ddot z = \\frac{-(f_r + f_\\ell)\\sin\\theta - \\mu\\dot z + F_{wind}}{m_c + 2m_r}', symbolic: '\\theta_{ss} = \\frac{F_{wind}}{F_e}', spoiler: true,
           note: 'The integrator on z finds the steady tilt that cancels the wind; without it z settles off target.' },
       ];
     },
@@ -506,8 +513,9 @@
       { title: 'Observability', page: 'p. 221, F.13(b)',
         theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix}C\\\\ CA\\\\ \\vdots\\\\ CA^{n-1}\\end{bmatrix}',
         numbers: `\\operatorname{rank}\\mathcal{O}_{lon} = ${L.rank(Ol)},\\quad \\operatorname{rank}\\mathcal{O}_{lat} = ${L.rank(Oz)}\\;(C_{lat} \\text{ is } 2\\times4)`, spoiler: true },
-      { title: 'Lateral observer gain (block structure)', page: 'p. 221 · Eq. 13.16',
-        theory: 'L_{lat} = \\begin{bmatrix}L_{z1} & 0\\\\ 0 & L_{\\theta1}\\\\ L_{z2} & 0\\\\ 0 & L_{\\theta2}\\end{bmatrix}:\\; \\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
+      { title: 'Lateral observer gain (block structure)', page: 'p. 222 · Eq. 13.16',
+        theory: 'L_{lat} = \\begin{bmatrix}L_{z1} & 0\\\\ 0 & L_{\\theta1}\\\\ L_{z2} & 0\\\\ 0 & L_{\\theta2}\\end{bmatrix}',
+        symbolic: '\\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
         numbers: d.Lz ? `L_h = ${texMat(d.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(d.Lz[0])}, ${tex(d.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(d.Lt[0])}, ${tex(d.Lt[1])})` : '', spoiler: true,
         note: 'With two outputs L is not unique; place() on the full (A, C) would return a different L with the same eigenvalues.' },
       { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224',
@@ -602,7 +610,8 @@
           theory: '\\text{altitude: } \\dot{\\hat d}_F = L_{d,h}(h - \\hat h)\\text{ at the input};\\quad \\text{lateral: } d_\\tau \\text{ at the input, } d_z \\text{ a force in } \\ddot z',
           note: 'A constant wind speed w added to ż (the F.14 snippet) is exactly a force μw in the observer\'s ż coordinates, so the d_z state absorbs it.' },
         { title: 'Augmented blocks', page: 'p. 240',
-          theory: 'A_{h} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{z} = \\begin{bmatrix}0&1&0\\\\0&-\\frac{\\mu}{M}&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{\\theta} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1J\\\\0&0&0\\end{bmatrix},\\; C = \\begin{bmatrix}1&0&0\\end{bmatrix}' },
+          theory: 'A_2 = \\begin{bmatrix}A & B_d\\\\ 0 & 0\\end{bmatrix},\\quad C_2 = \\begin{bmatrix}C & 0\\end{bmatrix}\\;(\\dot d = 0)', spoiler: true,
+          symbolic: 'A_{h} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{z} = \\begin{bmatrix}0&1&0\\\\0&-\\frac{\\mu}{M}&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{\\theta} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1J\\\\0&0&0\\end{bmatrix},\\; C = \\begin{bmatrix}1&0&0\\end{bmatrix}' },
         { title: 'Observer gains', page: 'p. 241',
           theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top \\text{ per block}',
           numbers: `L_h = ${texMat(d.Lh)},\\; L_z = ${texMat(d.Lz)},\\; L_\\theta = ${texMat(d.Lt)}`, spoiler: true },
@@ -629,7 +638,7 @@
             const res = ctx.app.result(), n = res.t.length - 1;
             const bh = Math.abs(res.yAll[1][n] - res.extras.hhat[n]), bz = Math.abs(res.yAll[0][n] - res.extras.zhat[n]);
             const t = trackCheck(ctx, 0.05);
-            return { ok: bh < 0.01 && bz < 0.01, msg: `|h − ĥ| = ${fmt(bh, 3)} m, |z − ẑ| = ${fmt(bz, 3)} m; tracking |e_h| = ${fmt(t.eh, 3)}, |e_z| = ${fmt(t.ez, 3)} m.` };
+            return { ok: bh < 0.01 && bz < 0.01, msg: `|h − ĥ| = ${fmt(bh, 3)} m, |z − ẑ| = ${fmt(bz, 3)} m; tracking |e_h| = ${fmt(t.eh, 3)}, |e_z| = ${fmt(t.ez, 3)} m at t = ${fmt(t.t, 3)} s.` };
           },
           solution: () => [{ html: 'd̂<sub>F</sub> settles at the altitude disturbance (M·1.0 N) plus the weight error from the mass mismatch; d̂<sub>z</sub> settles near μ·w for the wind speed w.' }],
         },
