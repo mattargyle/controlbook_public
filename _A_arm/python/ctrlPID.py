@@ -54,7 +54,7 @@ class ctrlPID:
 
         
         # Anti-windup scheme: only integrate theta when theta_dot is small
-        if abs(self.theta_dot < 0.08):
+        if abs(self.theta_dot) < 0.08:
             self.integrator = self.integrator \
                 + (P.Ts / 2) * (error + self.error_prev)
             
