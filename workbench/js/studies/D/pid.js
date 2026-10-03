@@ -602,7 +602,6 @@
     simDefaults(sys) { return sys.problems.p6.sim; },
     // Work mode: your own PD gains (placeholders until you enter your D.8 gains); Explore: from t_r, ζ.
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kD: ctx.st.kD, kI: ctx.st.kIx } : designed(ctx); },
-    toWork(ctx) { const g = ctx.gains; Object.assign(ctx.st, { kP: g.kP, kD: g.kD }); },
     controller: (ctx, o) => makePID(ctx, o),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePID),
 
@@ -711,7 +710,6 @@
     },
     simDefaults(sys) { return { ...sys.problems.ch10.sim, mismatch: sys.problems.ch10.mismatch }; },
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD } : designed(ctx); },
-    toWork(ctx) { const g = ctx.gains; Object.assign(ctx.st, { kP: g.kP, kD: g.kD, kI: g.kI }); },
     controller: (ctx, o) => makePID(ctx, o),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePID),
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.tr } : {}; },
