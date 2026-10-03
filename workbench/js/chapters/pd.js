@@ -297,7 +297,9 @@ WB.chapters = WB.chapters || {};
     for (const [k, v] of Object.entries(truth)) {
       const g = num(vals[k]);
       if (g === null) return { ok: false, msg: `Enter a number for ${labels[k] || k}.` };
-      if (!M.close(g, v)) bad.push(labels[k] || k);
+      // 1% relative; the 1e-3 absolute floor applies only when the answer is 0, so
+      // small gains (e.g. k_P = −0.0049) are not accepted within ±20%.
+      if (!M.close(g, v, 0.01, Math.abs(v) < 1e-12 ? 1e-3 : 0)) bad.push(labels[k] || k);
     }
     return bad.length ? { ok: false, msg: `Check ${bad.join(', ')}.` } : { ok: true, msg: 'Within 1%.' };
   }
