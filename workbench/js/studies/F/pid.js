@@ -79,7 +79,7 @@
     const cl = F.rootsOf(F.lonPoly(m, g));
     return {
       title: 'Altitude loop (PD, derivative on h)', page: 'p. 101 · Eq. 7.5, F.7 p. 397',
-      theory: '\\frac{\\tilde H}{\\tilde H_r} = \\frac{k_{P_h}/(m_c+2m_r)}{s^2 + \\frac{k_{D_h}}{m_c+2m_r}s + \\frac{k_{P_h}}{m_c+2m_r}},\\quad F = F_e + \\tilde F',
+      theory: '\\frac{Y}{Y_r} = \\frac{b_0k_P}{s^2 + (a_1 + b_0k_D)s + (a_0 + b_0k_P)}\\;(\\text{Fig. 7-2})', symbolic: '\\frac{\\tilde H}{\\tilde H_r} = \\frac{k_{P_h}/(m_c+2m_r)}{s^2 + \\frac{k_{D_h}}{m_c+2m_r}s + \\frac{k_{P_h}}{m_c+2m_r}},\\quad F = F_e + \\tilde F',
       numbers: `\\Delta_{cl} = ${T.polyTex(F.lonPoly(m, g))},\\quad p = ${cl.map((q) => texPole(q)).join(',\\;')}`, spoiler: true,
     };
   }
@@ -88,13 +88,13 @@
     const kDC = F.kDCof(m, g);
     return [
       { title: 'Inner loop τ → θ', page: 'p. 118 · Fig. 8-10, F.8(b) p. 397',
-        theory: '\\frac{\\Theta}{\\Theta_d} = \\frac{k_{P_\\theta}/J}{s^2 + \\frac{k_{D_\\theta}}{J}s + \\frac{k_{P_\\theta}}{J}},\\quad J = J_c + 2m_rd^2,\\quad k_{DC_\\theta} = \\frac{k_{P_\\theta}/J}{k_{P_\\theta}/J} = 1',
+        theory: 'T_{in}(s) = \\frac{P_1C_1}{1 + P_1C_1},\\quad k_{DC_1} = \\lim_{s\\to0}T_{in}(s)', symbolic: '\\frac{\\Theta}{\\Theta_d} = \\frac{k_{P_\\theta}/J}{s^2 + \\frac{k_{D_\\theta}}{J}s + \\frac{k_{P_\\theta}}{J}},\\quad J = J_c + 2m_rd^2,\\quad k_{DC_\\theta} = \\frac{k_{P_\\theta}/J}{k_{P_\\theta}/J} = 1',
         numbers: `\\Delta_\\theta = ${T.polyTex(F.innerPoly(m, g))},\\quad p_\\theta = ${F.rootsOf(F.innerPoly(m, g)).map((q) => texPole(q)).join(',\\;')},\\quad k_{DC_\\theta} = ${tex(kDC)}`, spoiler: true },
       { title: 'Outer loop θ_d → z (inner loop as its DC gain)', page: 'p. 118 · Fig. 8-11, F.8(d)',
-        theory: '\\frac{Z}{Z_r} = \\frac{-g k_{DC_\\theta}k_{P_z}}{s^2 + \\big(\\frac{\\mu}{m_c+2m_r} - g k_{DC_\\theta}k_{D_z}\\big)s - g k_{DC_\\theta}k_{P_z}}',
+        theory: '\\text{outer loop sees } k_{DC_1}P_2(s)\\;(\\text{Fig. 8-11})', symbolic: '\\frac{Z}{Z_r} = \\frac{-g k_{DC_\\theta}k_{P_z}}{s^2 + \\big(\\frac{\\mu}{m_c+2m_r} - g k_{DC_\\theta}k_{D_z}\\big)s - g k_{DC_\\theta}k_{P_z}}',
         numbers: `\\Delta_z = ${T.polyTex(F.outerPoly(m, g))},\\quad p_z = ${F.rootsOf(F.outerPoly(m, g)).map((q) => texPole(q)).join(',\\;')}`, spoiler: true },
       { title: 'Exact lateral loop (inner dynamics kept)', page: 'checks the k_DC approximation',
-        theory: '\\Big(s^2 + \\tfrac{\\mu}{M}s\\Big)\\Big(s^2 + \\tfrac{k_{D_\\theta}}{J}s + \\tfrac{k_{P_\\theta}}{J}\\Big) - \\tfrac{g k_{P_\\theta}}{J}\\big(k_{D_z}s + k_{P_z}\\big) = 0',
+        theory: '1 + C_{out}(s)\\,T_{in}(s)\\,P_2(s) = 0', symbolic: '\\Big(s^2 + \\tfrac{\\mu}{M}s\\Big)\\Big(s^2 + \\tfrac{k_{D_\\theta}}{J}s + \\tfrac{k_{P_\\theta}}{J}\\Big) - \\tfrac{g k_{P_\\theta}}{J}\\big(k_{D_z}s + k_{P_z}\\big) = 0',
         numbers: `p = ${F.rootsOf(F.exactLatPoly(m, g)).map((q) => texPole(q)).join(',\\;')}`, spoiler: true,
         note: 'The open circles in the lateral s-plane view. With good separation they sit next to the inner and outer design poles.' },
     ];
@@ -169,12 +169,13 @@
       const gd = F.pdFromPoles(m.lon, des);
       const { alpha1, alpha0 } = M.polyFromPoles(des[0], des[1]);
       return [
-        { title: 'Plant (F.5)', page: 'F.5 p. 396', theory: 'P_{lon}(s) = \\frac{1/(m_c+2m_r)}{s^2}', numbers: `P_{lon}(s) = \\frac{${tex(m.lon.b0)}}{s^2},\\quad p_{ol} = 0,\\; 0`, spoiler: true },
+        { title: 'Plant (F.5)', page: 'F.5 p. 396', theory: 'P_{lon}(s) = \\tilde H(s)/\\tilde F(s)\\;(\\text{F.5})', symbolic: 'P_{lon}(s) = \\frac{1/(m_c+2m_r)}{s^2}', numbers: `P_{lon}(s) = \\frac{${tex(m.lon.b0)}}{s^2},\\quad p_{ol} = 0,\\; 0`, spoiler: true },
         lonCard(ctx, ctx.gains),
         { title: ctx.S.mode === 'work' ? 'Pole placement (problem targets)' : 'Pole placement (your design)', page: 'p. 100',
-          theory: '\\Delta^d_{cl} = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad k_P = (m_c+2m_r)\\alpha_0,\\quad k_D = (m_c+2m_r)\\alpha_1',
+          theory: '\\Delta^d_{cl} = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
+          symbolic: 'k_P = (m_c+2m_r)\\alpha_0,\\quad k_D = (m_c+2m_r)\\alpha_1',
           numbers: `\\Delta^d_{cl} = s^2 + ${tex(alpha1)}s + ${tex(alpha0)} \\Rightarrow k_P = ${tex(gd.kP)},\\; k_D = ${tex(gd.kD)}`, spoiler: true },
-        { title: 'Equilibrium force', page: 'F.4 p. 396', theory: 'F = F_e + \\tilde F,\\quad F_e = (m_c+2m_r)g', numbers: `F_e = ${tex(m.Fe)}\\,\\text{N}` },
+        { title: 'Equilibrium force', page: 'F.4 p. 396', theory: 'F = F_e + \\tilde F', symbolic: 'F_e = (m_c+2m_r)g', numbers: `F_e = ${tex(m.Fe)}\\,\\text{N}`, spoiler: true },
       ];
     },
     buildProblem(parent, ctx) {
@@ -496,13 +497,13 @@
         { title: 'System type (unity feedback)', page: 'p. 133 · Table 9-1',
           theory: 'E = \\frac{1}{1 + PC}R,\\quad M_p = \\lim_{s\\to0}PC,\\; M_v = \\lim_{s\\to0}sPC,\\; M_a = \\lim_{s\\to0}s^2PC' },
         { title: 'Altitude loop', page: 'F.9(a) p. 398',
-          theory: 'PC = \\frac{k_{D_h}s^2 + k_{P_h}s + k_{I_h}}{(m_c+2m_r)\\,s^3}\\;(\\text{PID}),\\quad \\frac{k_{D_h}s + k_{P_h}}{(m_c+2m_r)s^2}\\;(\\text{PD})',
+          theory: 'PC = P_{lon}(s)\\,C(s)', symbolic: 'PC = \\frac{k_{D_h}s^2 + k_{P_h}s + k_{I_h}}{(m_c+2m_r)\\,s^3}\\;(\\text{PID}),\\quad \\frac{k_{D_h}s + k_{P_h}}{(m_c+2m_r)s^2}\\;(\\text{PD})',
           numbers: `\\text{PD: type 2},\\; e_{parab} = \\frac{m_c+2m_r}{k_{P_h}} = ${tex(A.m.M / g.kPh)}\\quad \\text{PID: type 3}\\quad d_{in}: \\text{PD type 0 } (e = 1/k_{P_h} = ${tex(1 / g.kPh)}),\\; \\text{PID type 1}`, spoiler: true },
         { title: 'Inner θ loop (PD)', page: 'F.9(b)',
-          theory: 'PC = \\frac{k_{D_\\theta}s + k_{P_\\theta}}{J s^2}',
+          theory: 'PC = P_{\\theta}(s)\\,C(s)', symbolic: 'PC = \\frac{k_{D_\\theta}s + k_{P_\\theta}}{J s^2}',
           numbers: `\\text{type 2},\\; e_{parab} = \\frac{J}{k_{P_\\theta}} = ${tex(A.m.J / g.kPth)},\\quad d_{in}: \\text{type 0},\\; e = \\frac{1}{k_{P_\\theta}} = ${tex(1 / g.kPth)}`, spoiler: true },
         { title: 'Outer z loop', page: 'F.9(c)',
-          theory: 'PC = \\frac{-g k_{DC_\\theta}(k_{D_z}s + k_{P_z})}{s(s + \\mu/(m_c+2m_r))}\\;(\\text{PD})',
+          theory: 'PC = k_{DC_\\theta}P_z(s)\\,C(s)', symbolic: 'PC = \\frac{-g k_{DC_\\theta}(k_{D_z}s + k_{P_z})}{s(s + \\mu/(m_c+2m_r))}\\;(\\text{PD})',
           numbers: `\\text{PD: type 1},\\; M_v = \\frac{-g k_{P_z}}{\\mu/(m_c+2m_r)} = ${tex(1 / A.outer.book.ramp)},\\; e_{ramp} = ${tex(A.outer.book.ramp)}\\quad \\text{PID: type 2},\\; e_{parab} = \\frac{\\mu/(m_c+2m_r)}{-g k_{I_z}}\\quad d_{in}: \\text{PD type 0, PID type 1}`, spoiler: true },
         { title: 'Derivative on the output changes the tracking type', page: 'Fig. 7-2 p. 101 vs. Fig. 9-1 p. 138',
           theory: '\\frac{E}{R} = \\frac{s^2 + b_0k_Ds}{s^2 + b_0k_Ds + b_0k_P}\\;(\\text{PD, }D\\text{ on }y)\\;\\Rightarrow\\; e_{ramp} = \\frac{k_D}{k_P} \\ne 0',
@@ -650,10 +651,10 @@
       const g = ctx.gains, eh = evans(ctx, 'lon', g), ez = evans(ctx, 'outer', g);
       return [
         { title: 'Altitude loop in Evans form', page: 'p. 466, F.P.6(a)',
-          theory: '\\Delta = s^3 + \\frac{k_{D_h}}{M}s^2 + \\frac{k_{P_h}}{M}s + \\frac{k_{I_h}}{M},\\quad 1 + k_{I_h}\\frac{1/M}{s^3 + \\frac{k_{D_h}}{M}s^2 + \\frac{k_{P_h}}{M}s} = 0',
+          theory: '1 + K\\,L(s) = 0\\;(\\text{Evans form, } K = k_{I_h})', symbolic: '\\Delta = s^3 + \\frac{k_{D_h}}{M}s^2 + \\frac{k_{P_h}}{M}s + \\frac{k_{I_h}}{M},\\quad 1 + k_{I_h}\\frac{1/M}{s^3 + \\frac{k_{D_h}}{M}s^2 + \\frac{k_{P_h}}{M}s} = 0',
           numbers: `L_h(s) = \\frac{${tex(eh.num[0])}}{${T.polyTex(eh.den)}},\\quad k_{I_h,crit} = \\frac{k_{D_h}k_{P_h}}{M} = ${tex(eh.kCrit)}`, spoiler: true },
         { title: 'Outer loop in Evans form', page: 'F.P.6(b)',
-          theory: '1 + (-k_{I_z})\\frac{g\\,k_{DC_\\theta}}{s^3 + (\\frac{\\mu}{M} - gk_{DC_\\theta}k_{D_z})s^2 - gk_{DC_\\theta}k_{P_z}s} = 0\\quad (k_{I_z} < 0)',
+          theory: '1 + K\\,L(s) = 0\\;(\\text{Evans form, } K = -k_{I_z})', symbolic: '1 + (-k_{I_z})\\frac{g\\,k_{DC_\\theta}}{s^3 + (\\frac{\\mu}{M} - gk_{DC_\\theta}k_{D_z})s^2 - gk_{DC_\\theta}k_{P_z}s} = 0\\quad (k_{I_z} < 0)',
           numbers: `L_z(s) = \\frac{${tex(ez.num[0])}}{${T.polyTex(ez.den)}},\\quad k_{I_z,crit} = ${tex(-ez.kCrit)}`, spoiler: true },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
           theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ is stable iff } c_2, c_1, c_0 > 0,\\; c_2c_1 > c_0',

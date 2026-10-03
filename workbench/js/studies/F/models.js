@@ -197,13 +197,14 @@
           theory: 'q = (z, h, \\theta)^\\top',
           symbolic: 'P = (m_c + 2m_r)\\,g\\,h,\\quad Q = \\begin{bmatrix} -F\\sin\\theta \\\\ F\\cos\\theta \\\\ \\tau\\end{bmatrix},\\quad B\\dot q = \\begin{bmatrix}\\mu\\dot z\\\\ 0\\\\ 0\\end{bmatrix}',
           numbers: `P = ${tex(m.M * p.g)}\\,h`, spoiler: true,
-          note: 'The thrust F acts along the body normal (−sin θ, cos θ); the drag −μż acts on z only (p. 393).' },
+          note: 'Q collects the input forces and torques acting on each coordinate; B q̇ collects the damping (p. 42–43).' },
         { title: 'Equations of motion', page: 'F.3(d) p. 395',
           theory: 'M(q)\\ddot q + c(q,\\dot q) + \\frac{\\partial P}{\\partial q} = Q - B\\dot q',
           symbolic: '(m_c + 2m_r)\\ddot z = -F\\sin\\theta - \\mu\\dot z,\\quad (m_c + 2m_r)\\ddot h = F\\cos\\theta - (m_c + 2m_r)g,\\quad (J_c + 2m_r d^2)\\ddot\\theta = \\tau',
           numbers: `\\ddot z = ${tex(-1 / m.M)}F\\sin\\theta ${tex(-p.mu / m.M)}\\dot z,\\quad \\ddot h = ${tex(1 / m.M)}F\\cos\\theta - ${tex(p.g)},\\quad \\ddot\\theta = ${tex(1 / m.J)}\\,\\tau`, spoiler: true },
         { title: 'Energy balance (a check on the EOM)', page: 'follows from the EOM',
-          theory: '\\frac{d}{dt}(K + P) = Q^\\top\\dot q - \\mu\\dot z^2 = F(-\\dot z\\sin\\theta + \\dot h\\cos\\theta) + \\tau\\dot\\theta - \\mu\\dot z^2',
+          theory: '\\frac{d}{dt}(K + P) = Q^\\top\\dot q - \\dot q^\\top B\\dot q',
+          symbolic: '\\frac{d}{dt}(K + P) = F(-\\dot z\\sin\\theta + \\dot h\\cos\\theta) + \\tau\\dot\\theta - \\mu\\dot z^2', spoiler: true,
           note: 'Only the input forces enter this balance; the disturbance sliders (wind etc.) break it.' },
       ];
     },
@@ -256,9 +257,11 @@
       });
       progControls(sec, ctx, 'inF', 'Force F̃(t)', 'N', 5);
       progControls(sec, ctx, 'inT', 'Torque τ̃(t)', 'N·m', 0.05);
+      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch4eig')) sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the eigenvalues in the s-plane', onclick: () => { ctx.app.reveal('F:ch4eig'); ctx.update(); } }));
       sec.append(el('p', { class: 'muted small', text: 'Start at hover, nudge with F̃ and τ̃, and compare with the linearized model (dashed). Set θ(0) in the left panel to see how the linearization of sin θ and cos θ degrades with angle.' }));
     },
     splane(ctx) {
+      if (!F.shown(ctx, 'F:ch4eig')) return null;   // eigenvalues answer F.4(b)
       const m = ctx.sys.models(ctx.pModel);
       const mk = [...L.eig(m.lonSS.A).map((q) => ({ ...q, kind: 'ol', label: 'eig A_lon' })), ...L.eig(m.latSS.A).map((q) => ({ ...q, kind: 'cl', label: 'eig A_lat' }))];
       return { markers: mk, fitR: 0.3, legendNames: { ol: 'eig of A_lon', cl: 'eig of A_lat' } };
@@ -271,12 +274,13 @@
           symbolic: 'z_e, h_e \\text{ arbitrary},\\quad \\theta_e = 0,\\quad F_e = (m_c+2m_r)g,\\quad f_{r,e} = f_{\\ell,e} = \\tfrac12 F_e',
           numbers: `F_e = ${tex(m.Fe)}\\,\\text{N},\\quad f_{r,e} = f_{\\ell,e} = ${tex(m.Fe / 2)}\\,\\text{N}`, spoiler: true },
         { title: 'Jacobian linearization', page: 'p. 59–61 · Eq. 4.1',
-          theory: '\\sin\\theta \\approx \\tilde\\theta,\\; \\cos\\theta \\approx 1:\\quad F\\sin\\theta \\approx F_e\\tilde\\theta,\\; F\\cos\\theta \\approx F_e + \\tilde F',
-          symbolic: '\\ddot{\\tilde z} = -\\frac{F_e}{m_c+2m_r}\\tilde\\theta - \\frac{\\mu}{m_c+2m_r}\\dot{\\tilde z} = -g\\tilde\\theta - \\frac{\\mu}{m_c+2m_r}\\dot{\\tilde z},\\quad \\ddot{\\tilde h} = \\frac{\\tilde F}{m_c+2m_r},\\quad \\ddot{\\tilde\\theta} = \\frac{\\tilde\\tau}{J_c + 2m_r d^2}',
+          theory: '\\dot{\\tilde x} = \\frac{\\partial f}{\\partial x}\\Big|_e\\tilde x + \\frac{\\partial f}{\\partial u}\\Big|_e\\tilde u,\\quad \\tilde x = x - x_e,\\; \\tilde u = u - u_e',
+          symbolic: 'F\\sin\\theta \\approx F_e\\tilde\\theta,\\; F\\cos\\theta \\approx F_e + \\tilde F \\;\\Rightarrow\\quad \\ddot{\\tilde z} = -\\frac{F_e}{m_c+2m_r}\\tilde\\theta - \\frac{\\mu}{m_c+2m_r}\\dot{\\tilde z} = -g\\tilde\\theta - \\frac{\\mu}{m_c+2m_r}\\dot{\\tilde z},\\quad \\ddot{\\tilde h} = \\frac{\\tilde F}{m_c+2m_r},\\quad \\ddot{\\tilde\\theta} = \\frac{\\tilde\\tau}{J_c + 2m_r d^2}',
           numbers: `\\ddot{\\tilde z} = ${tex(-p.g)}\\tilde\\theta ${tex(-m.a)}\\dot{\\tilde z},\\quad \\ddot{\\tilde h} = ${tex(1 / m.M)}\\tilde F,\\quad \\ddot{\\tilde\\theta} = ${tex(1 / m.J)}\\tilde\\tau`, spoiler: true },
         { title: 'Feedback linearization', page: 'p. 62 · F.4(c)',
-          theory: 'F = \\frac{(m_c+2m_r)g + \\tilde F}{\\cos\\theta} \\;\\Rightarrow\\; (m_c+2m_r)\\ddot h = \\tilde F \\;\\text{exactly } (|\\theta| < 90^\\circ)',
-          note: 'Only the altitude channel. The lateral channel stays nonlinear: z̈ = −(g + F̃/M) tan θ − (μ/M)ż, and θ is a state, not an input, so no static feedback of τ alone linearizes z. The book\'s designs use the Jacobian model.' },
+          theory: 'u = u_{fl}(x) + \\tilde u \\text{ chosen so the nonlinear terms cancel exactly}',
+          symbolic: 'F = \\frac{(m_c+2m_r)g + \\tilde F}{\\cos\\theta} \\;\\Rightarrow\\; (m_c+2m_r)\\ddot h = \\tilde F \\;\\text{exactly } (|\\theta| < 90^\\circ)\\quad \\text{lateral: } \\ddot z = -\\big(g + \\tfrac{\\tilde F}{M}\\big)\\tan\\theta - \\tfrac{\\mu}{M}\\dot z \\text{ stays nonlinear } (\\theta \\text{ is a state, not an input})',
+          spoiler: true },
       ];
     },
     buildProblem(parent, ctx) {
@@ -315,8 +319,9 @@
     const sec = section(parent, 'Inputs around hover', page);
     progControls(sec, ctx, 'inF', 'Force F̃(t)', 'N', 5);
     progControls(sec, ctx, 'inT', 'Torque τ̃(t)', 'N·m', 0.05);
-    sec.append(el('p', { class: 'muted small', text: 'F = F_e + F̃. Dashed traces: the linear model. A torque pulse tilts the VTOL by a constant angle (two integrators), and the tilted thrust then accelerates it sideways against the drag.' }));
+    sec.append(el('p', { class: 'muted small', text: 'F = F_e + F̃. Dashed traces: the linear model. Watch what a force pulse does to h, and what a torque pulse does to θ and then to z.' }));
   }
+  const BLOCK_TEX = '\\tilde F \\to \\boxed{\\tfrac{1/(m_c+2m_r)}{s^2}} \\to \\tilde H \\qquad \\tilde\\tau \\to \\boxed{\\tfrac{1/(J_c+2m_rd^2)}{s^2}} \\xrightarrow{\\;\\tilde\\Theta\\;} \\boxed{\\tfrac{-g}{s(s + \\mu/(m_c+2m_r))}} \\to \\tilde Z';
   const tfSplane = (ctx) => {
     const m = ctx.sys.models(ctx.pModel);
     return {
@@ -335,13 +340,21 @@
     simDefaults(sys) { return sys.problems.ch5.sim; },
     linearSim(ctx, common) { ctx.chapter = this; return F.linearSim(ctx, common); },
     linearLabel: 'transfer-function model',
-    buildControls(parent, ctx) { tfInputSection(parent, ctx, 'F.5 p. 396'); },
-    splane: tfSplane,
+    buildControls(parent, ctx) {
+      tfInputSection(parent, ctx, 'F.5 p. 396');
+      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch5poles')) {
+        const sec = section(parent, 's-plane', 'p. 70');
+        sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the poles in the s-plane', onclick: () => { ctx.app.reveal('F:ch5poles'); ctx.update(); } }));
+      }
+    },
+    // the poles are the F.5 answer: hidden in Work mode until revealed
+    splane(ctx) { return F.shown(ctx, 'F:ch5poles') ? tfSplane(ctx) : null; },
     math(ctx) {
       const p = ctx.pModel, m = ctx.sys.models(p);
       return [
         { title: 'Laplace transform (zero initial conditions)', page: 'p. 69–70',
-          theory: '(m_c+2m_r)s^2\\tilde H = \\tilde F,\\quad (J_c+2m_rd^2)s^2\\tilde\\Theta = \\tilde\\tau,\\quad \\big(s^2 + \\tfrac{\\mu}{m_c+2m_r}s\\big)\\tilde Z = -g\\tilde\\Theta' },
+          theory: '\\mathcal L\\{\\dot y\\} = sY(s) - y(0),\\quad \\mathcal L\\{\\ddot y\\} = s^2Y(s) - sy(0) - \\dot y(0)',
+          symbolic: '(m_c+2m_r)s^2\\tilde H = \\tilde F,\\quad (J_c+2m_rd^2)s^2\\tilde\\Theta = \\tilde\\tau,\\quad \\big(s^2 + \\tfrac{\\mu}{m_c+2m_r}s\\big)\\tilde Z = -g\\tilde\\Theta', spoiler: true },
         { title: 'Longitudinal', page: 'F.5(b) p. 396',
           theory: '\\frac{\\tilde H(s)}{\\tilde F(s)} = P_{lon}(s)',
           symbolic: 'P_{lon}(s) = \\frac{1/(m_c+2m_r)}{s^2}', numbers: `P_{lon}(s) = \\frac{${tex(1 / m.M)}}{s^2}`, spoiler: true },
@@ -350,8 +363,8 @@
           symbolic: '\\frac{\\tilde\\Theta}{\\tilde\\tau} = \\frac{1/(J_c+2m_rd^2)}{s^2},\\quad \\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{-g}{s^2 + \\frac{\\mu}{m_c+2m_r}s},\\quad \\frac{\\tilde Z}{\\tilde\\tau} = \\frac{-g/(J_c+2m_rd^2)}{s^3\\big(s + \\frac{\\mu}{m_c+2m_r}\\big)}',
           numbers: `\\frac{\\tilde\\Theta}{\\tilde\\tau} = \\frac{${tex(1 / m.J)}}{s^2},\\quad \\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{${tex(-p.g)}}{s^2 + ${tex(m.a)}s},\\quad \\frac{\\tilde Z}{\\tilde\\tau} = \\frac{${tex(-p.g / m.J)}}{s^4 + ${tex(m.a)}s^3}`, spoiler: true },
         { title: 'Open-loop block diagrams', page: 'F.5(d) p. 396',
-          theory: '\\tilde F \\to \\boxed{\\tfrac{1/(m_c+2m_r)}{s^2}} \\to \\tilde H \\qquad \\tilde\\tau \\to \\boxed{\\tfrac{1/(J_c+2m_rd^2)}{s^2}} \\xrightarrow{\\;\\tilde\\Theta\\;} \\boxed{\\tfrac{-g}{s(s + \\mu/(m_c+2m_r))}} \\to \\tilde Z',
-          note: 'The minus sign: a positive roll tilts the thrust to the left (−z).' },
+          theory: '\\tilde F \\to \\boxed{P_{lon}(s)} \\to \\tilde H \\qquad \\tilde\\tau \\to \\boxed{P_{\\theta}(s)} \\xrightarrow{\\;\\tilde\\Theta\\;} \\boxed{P_{z}(s)} \\to \\tilde Z',
+          symbolic: BLOCK_TEX, spoiler: true },
       ];
     },
     buildProblem(parent, ctx) {
@@ -371,7 +384,8 @@
             { tex: `\\frac{\\tilde\\Theta}{\\tilde\\tau} = \\frac{${tex(1 / m().J)}}{s^2},\\quad \\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{${tex(-p().g)}}{s^2 + ${tex(m().a)}s},\\quad \\frac{\\tilde Z}{\\tilde\\tau} = \\frac{${tex(-p().g / m().J)}}{s^3(s + ${tex(m().a)})}` },
           ],
         },
-        { id: 'd', title: '(d) Block diagrams', html: 'See the <em>Open-loop block diagrams</em> card under Live math.' },
+        { id: 'd', title: '(d) Block diagrams', html: 'Draw both cascades, then compare.',
+          solution: () => [{ tex: BLOCK_TEX }, { html: 'The minus sign: a positive roll tilts the thrust toward −z.' }] },
       ]);
     },
   }));

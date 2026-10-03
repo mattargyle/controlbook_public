@@ -141,13 +141,15 @@
       slider(sec, { label: 'A (F̃)', unit: 'N', min: 0, max: 3, step: 0.01, sig: 3, get: () => ctx.st.AF, set: (v) => { ctx.st.AF = v; ctx.update(); }, disabled: () => ctx.st.loop !== 'lon' });
       slider(sec, { label: 'A (τ)', unit: 'N·m', min: 0, max: 0.05, step: 0.0001, sig: 3, get: () => ctx.st.AT, set: (v) => { ctx.st.AT = v; ctx.update(); }, disabled: () => ctx.st.loop === 'lon' });
       segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => ctx.st.asym, set: (v) => { ctx.st.asym = v; ctx.update(); } });
-      sec.append(el('p', { class: 'muted small', text: 'Open loop around hover, started on the steady-state sinusoid so the double integrators do not drift. θ → z is driven through τ: the θ sinusoid then moves z. Dotted traces: the Bode prediction.' }));
+      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch15')) sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the straight-line approximation and |P(jω₀)|', onclick: () => { ctx.app.reveal('F:ch15'); ctx.update(); } }));
+      sec.append(el('p', { class: 'muted small', text: 'Open loop around hover, started on the steady-state sinusoid so the plant does not drift. θ → z is driven through τ: the θ sinusoid then moves z. Dotted traces: the Bode prediction.' }));
     },
     bode(ctx) {
       const P = plants(ctx.pModel), G = P[ctx.st.loop];
       const { mag, phase } = T.bode(G, W);
       const lines = [{ label: `P_${ctx.st.loop}(jω)`, mag, phase, color: '--series-1' }];
-      if (ctx.st.asym) {
+      const show = F.shown(ctx, 'F:ch15');   // asymptotes and |P(jω₀)| answer F.15
+      if (ctx.st.asym && show) {
         if (ctx.st.loop === 'outer') {
           const a = P.m.a, Kb = Math.abs(G.num[0]) / a;
           lines.push({ label: 'straight-line approx.', mag: W.map((w) => (w < a ? Kb / w : Kb * a / (w * w))), phase: W.map((w) => 90 + (w < a / 10 ? 0 : w > 10 * a ? -90 : -45 * (Math.log10(w / a) + 1))), color: '--text-muted', dash: [5, 4], width: 1.5 });
@@ -157,20 +159,21 @@
         }
       }
       const g = T.at(G, ctx.st.w0);
-      return { title: `Bode plot of ${{ lon: 'H̃/F̃', inner: 'Θ/τ', outer: 'Z/Θ' }[ctx.st.loop]}`, w: W, lines, marks: [{ w: ctx.st.w0, label: `ω₀: ${fmt(db(L.C.abs(g)), 3)} dB, ${fmt(L.C.arg(g) * 180 / Math.PI, 3)}°`, color: '--series-3' }] };
+      return { title: `Bode plot of ${{ lon: 'H̃/F̃', inner: 'Θ/τ', outer: 'Z/Θ' }[ctx.st.loop]}`, w: W, lines, marks: [{ w: ctx.st.w0, label: show ? `ω₀: ${fmt(db(L.C.abs(g)), 3)} dB, ${fmt(L.C.arg(g) * 180 / Math.PI, 3)}°` : 'ω₀', color: '--series-3' }] };
     },
     splane(ctx) { const P = plants(ctx.pModel); return { markers: L.roots(P[ctx.st.loop].den).map((q) => ({ ...q, kind: 'ol', label: 'pole' })), fitR: 0.2 }; },
     math(ctx) {
       const P = plants(ctx.pModel), m = P.m;
       return [
         { title: 'Frequency response', page: 'p. 264 · Eq. 15.4', theory: 'u = A\\sin\\omega_0 t \\Rightarrow y_{ss} = A|P(j\\omega_0)|\\sin(\\omega_0 t + \\angle P(j\\omega_0))' },
-        { title: 'Altitude F̃ → h', page: 'F.15(a)', theory: 'P_{lon}(j\\omega) = \\frac{1/M}{(j\\omega)^2}',
-          numbers: `20\\log|P_{lon}| = ${tex(db(m.lon.b0))} - 40\\log\\omega\\;\\text{dB},\\; \\angle = -180^\\circ`, spoiler: true, note: 'A double integrator: −40 dB/dec through 20 log(1/M) at ω = 1, phase −180° everywhere.' },
-        { title: 'Inner τ → θ', page: 'F.15(b)', theory: 'P_{in}(j\\omega) = \\frac{1/J}{(j\\omega)^2}',
+        { title: 'Altitude F̃ → h', page: 'F.15(a)', theory: '20\\log|P(j\\omega)| = \\textstyle\\sum 20\\log|\\text{factors}|,\\quad \\angle P = \\sum \\angle\\,\\text{factors}\\;(\\text{p. 266})',
+          symbolic: 'P_{lon}(j\\omega) = \\frac{1/M}{(j\\omega)^2}:\\; -40\\,\\text{dB/dec through } 20\\log\\tfrac1M \\text{ at } \\omega = 1,\\; \\angle = -180^\\circ',
+          numbers: `20\\log|P_{lon}| = ${tex(db(m.lon.b0))} - 40\\log\\omega\\;\\text{dB},\\; \\angle = -180^\\circ`, spoiler: true },
+        { title: 'Inner τ → θ', page: 'F.15(b)', theory: 'P_{in}(j\\omega) = \\frac{\\tilde\\Theta}{\\tilde\\tau}(j\\omega)', symbolic: 'P_{in}(j\\omega) = \\frac{1/J}{(j\\omega)^2}',
           numbers: `20\\log|P_{in}| = ${tex(db(m.inner.b0))} - 40\\log\\omega\\;\\text{dB},\\; \\angle = -180^\\circ,\\; 0\\text{ dB at } \\omega = ${tex(Math.sqrt(m.inner.b0))}`, spoiler: true },
-        { title: 'Outer θ → z', page: 'F.15(c)', theory: 'P_{out}(j\\omega) = \\frac{-g}{j\\omega(j\\omega + \\mu/M)} = \\frac{-gM/\\mu}{j\\omega(1 + j\\omega M/\\mu)}',
-          numbers: `\\text{Bode gain } \\frac{gM}{\\mu} = ${tex(-m.outer.b0 / m.a)}\\,(${tex(db(-m.outer.b0 / m.a))}\\text{ dB}),\\; \\text{corner } \\frac{\\mu}{M} = ${tex(m.a)}\\,\\text{rad/s}`, spoiler: true,
-          note: 'The −1 adds 180°: the phase starts at +90° (−270°) and falls to 0° (−360°). The corner is very low, so above 1 rad/s it looks like −g/s².' },
+        { title: 'Outer θ → z', page: 'F.15(c)', theory: 'P_{out}(j\\omega) = \\frac{\\tilde Z}{\\tilde\\Theta}(j\\omega)\\;\\text{in Bode canonical form (p. 266)}',
+          symbolic: 'P_{out}(j\\omega) = \\frac{-g}{j\\omega(j\\omega + \\mu/M)} = \\frac{-gM/\\mu}{j\\omega(1 + j\\omega M/\\mu)}:\\; \\text{the } -1 \\text{ adds } 180^\\circ\\;(\\text{phase from } +90^\\circ \\text{ to } 0^\\circ)',
+          numbers: `\\text{Bode gain } \\frac{gM}{\\mu} = ${tex(-m.outer.b0 / m.a)}\\,(${tex(db(-m.outer.b0 / m.a))}\\text{ dB}),\\; \\text{corner } \\frac{\\mu}{M} = ${tex(m.a)}\\,\\text{rad/s}`, spoiler: true },
       ];
     },
     buildProblem(parent, ctx) {
@@ -244,17 +247,22 @@
     },
     bode(ctx) {
       const s = specs16(ctx), pr = ctx.sys.problems.ch16, lp = s.lp, v = ctx.st.view;
+      // spec bands and marks show the F.16 answers, so only after Reveal in Work mode
+      const show = F.shown(ctx, 'F:ch16');
       if (v === 'lon') {
         return { title: 'Altitude: P and PC (F.10 PID)', w: W, lines: [{ label: 'P_lon', ...T.bode(lp.P.lon, W), color: '--text-muted', width: 1.5 }, { label: 'P·C_PID', ...T.bode(lp.Ll, W), color: '--series-1' }],
-          specs: [{ w0: pr.wno, w1: 1e4, db: db(s.gn), keep: 'below', color: '--series-3', label: `${fmt(db(s.gn), 3)} dB` }] };
+          specs: show ? [{ w0: pr.wno, w1: 1e4, db: db(s.gn), keep: 'below', color: '--series-3', label: `${fmt(db(s.gn), 3)} dB` }] : [],
+          marks: show ? [] : [{ w: pr.wno, label: `ω_no = ${pr.wno}` }] };
       }
       if (v === 'inner') {
         return { title: 'Inner loop: P and PC (F.8 PD)', w: W, lines: [{ label: 'P_in', ...T.bode(lp.P.inner, W), color: '--text-muted', width: 1.5 }, { label: 'P·C_PD', ...T.bode(lp.Li, W), color: '--series-1' }, { label: 'closed loop T_in', mag: T.bode(lp.Ti, W).mag, color: '--series-2', width: 1.5 }],
-          marks: [{ w: pr.wdin, label: `ω_din: |C| = ${fmt(db(abs(lp.Ci, pr.wdin)), 3)} dB` }, ...(isFinite(s.wSensor) ? [{ w: s.wSensor, label: '|T| = −20 dB', color: '--series-3' }] : [])] };
+          marks: show
+            ? [{ w: pr.wdin, label: `ω_din: |C| = ${fmt(db(abs(lp.Ci, pr.wdin)), 3)} dB` }, ...(isFinite(s.wSensor) ? [{ w: s.wSensor, label: '|T| = −20 dB', color: '--series-3' }] : [])]
+            : [{ w: pr.wdin, label: `ω_din = ${pr.wdin}` }] };
       }
       return { title: 'Outer loop: P and PC (F.10 PID)', w: W, lines: [{ label: 'P_out', ...T.bode(lp.Pout, W), color: '--text-muted', width: 1.5 }, { label: 'P·C', ...T.bode(lp.Lo, W), color: '--series-1' }],
-        specs: [{ w0: 1e-3, w1: pr.wr, db: -db(s.gr), keep: 'above', color: '--series-3', label: `B_r = ${fmt(-db(s.gr), 3)} dB` }],
-        marks: [{ w: pr.wdout, label: `ω_dout: ${fmt(-db(s.gout), 3)} dB` }] };
+        specs: show ? [{ w0: 1e-3, w1: pr.wr, db: -db(s.gr), keep: 'above', color: '--series-3', label: `B_r = ${fmt(-db(s.gr), 3)} dB` }] : [],
+        marks: show ? [{ w: pr.wdout, label: `ω_dout: ${fmt(-db(s.gout), 3)} dB` }] : [{ w: pr.wr, label: `ω_r = ${pr.wr}` }, { w: pr.wdout, label: `ω_dout = ${pr.wdout}` }] };
     },
     splane(ctx) { return F.pidSplane(ctx, f10Gains(ctx), {}); },
     math(ctx) {
@@ -264,7 +272,8 @@
           theory: 'C(s) = k_P + \\frac{k_I}{s} + \\frac{k_Ds}{\\sigma s + 1}',
           numbers: `C_{lon} = ${T.texTf(s.lp.Cl)},\\quad C_{in} = ${T.texTf(s.lp.Ci)}`, spoiler: true },
         { title: 'Parabola tracking (a)', page: 'p. 293 · Eq. 16.12, F.16(a)',
-          theory: 'PC_{lon} \\sim \\frac{k_I}{M s^3} \\;(\\text{type 3}) \\Rightarrow e_{ss} = 0 \\text{ for } R = \\frac{5}{s^3}',
+          theory: 'e_{ss} = \\frac{1}{M_a}\\text{ for } R = \\tfrac{1}{s^3},\\quad M_a = \\lim_{\\omega\\to0}|(j\\omega)^2PC|',
+          symbolic: 'PC_{lon} \\sim \\frac{k_I}{M s^3} \\;(\\text{type 3}) \\Rightarrow e_{ss} = 0 \\text{ for } R = \\frac{5}{s^3}',
           numbers: `e_{ss} = ${tex(s.ePar)}\\;(\\text{book}),\\quad \\text{with } D \\text{ on } h:\\; e_{ss} = \\frac{5k_{D_h}}{k_{I_h}} = ${isFinite(s.eParImpl) ? tex(s.eParImpl) : '\\infty'}`, spoiler: true,
           note: 'Table 9-1 and the Bode argument assume C acts on the error. The book\'s loops differentiate h instead, which costs one system type for tracking (see Ch 9).' },
         { title: 'Noise (b) and output disturbance / tracking (e, f)', page: 'p. 287 · Eq. 16.5–16.6',
@@ -273,11 +282,12 @@
         { title: 'Input disturbance (c)', page: 'p. 290 · Eq. 16.8–16.9',
           theory: '\\Big|\\frac{y}{d_{in}}\\Big| = \\Big|\\frac{P}{1 + PC}\\Big| \\approx \\frac{1}{|C|}\\;(|PC| \\gg 1)',
           numbers: `\\frac{1}{\\min_{\\omega\\le${pr.wdin}}|C|} = \\frac{1}{k_{P_\\theta}} = ${tex(s.gdin)}\\;\\text{rad/(N·m)},\\quad \\max|P/(1+PC)| = ${tex(s.gdinExact)}`, spoiler: true,
-          note: 'For PD, |C| is smallest at DC (= k_Pθ), so the worst case in the band is a constant torque. The "percentage" mixes units (rad per N·m).' },
+          symbolic: '\\text{PD: } |C| \\text{ is smallest at DC } (= k_{P_\\theta})\\text{, so the worst case in the band is a constant torque}',
+          note: 'The "percentage" compares rad with N·m.' },
         { title: 'θ sensor (d)', page: 'p. 287',
           theory: '\\theta_{noise} = |T_{in}(j\\omega)|\\,n(\\omega) < 0.1^\\circ',
           numbers: `|T_{in}| < 0.1 \\text{ above } \\omega \\approx ${tex(s.wSensor)}\\;\\text{rad/s}`, spoiler: true,
-          note: 'So: noise below that frequency must already be under 0.1°; above it, 1° of noise is attenuated to under 0.1°, and higher still (−40 dB/dec) much more.' },
+          symbolic: '\\text{below that frequency the noise itself must be under } 0.1^\\circ;\\; \\text{above it, } 1^\\circ \\text{ of noise shows up as under } 0.1^\\circ' },
       ];
     },
     buildProblem(parent, ctx) {
@@ -374,7 +384,8 @@
           theory: '|PC(j\\omega_{co})| = 1,\\quad PM = 180^\\circ + \\angle PC(j\\omega_{co}),\\quad GM = \\frac{1}{|PC(j\\omega_{180})|}',
           numbers: ['lon', 'inner', 'outer'].map((k) => `\\text{${LOOPS[k]}}: PM = ${tex(r[k].mg.pm)}^\\circ \\text{ at } ${tex(r[k].mg.wc)}`).join(',\\quad '), spoiler: true },
         { title: 'Bandwidth vs. crossover', page: 'p. 306–307',
-          theory: '\\omega_{bw}: |T(j\\omega_{bw})| = -3\\,\\text{dB};\\quad PM \\approx 60^\\circ \\Rightarrow \\omega_{bw} \\approx 1.3\\text{–}1.6\\,\\omega_{co}',
+          theory: '\\omega_{bw}: |T(j\\omega_{bw})| = -3\\,\\text{dB},\\quad \\omega_{bw} \\approx \\omega_{co}\\;(\\text{p. 307})',
+          note: 'Workbench observation (not in the book): with PM ≈ 50–60° the closed-loop bandwidth comes out about 1.3–1.6 ω_co.',
           numbers: ['lon', 'inner', 'outer'].map((k) => `\\text{${LOOPS[k]}}: \\omega_{bw} = ${tex(r[k].bw)}`).join(',\\quad '), spoiler: true },
         { title: 'Bandwidth separation (d)', page: 'p. 118, F.17(d)',
           theory: '\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} \\gtrsim 5\\text{–}10 \\Rightarrow \\text{successive loop closure is justified}',
@@ -570,6 +581,16 @@
     },
     math(ctx) {
       const d = design18(ctx), st = ctx.st;
+      // conditional stability from the actual margin crossings (any GM < 1, i.e. negative dB)
+      const condNote = (dd, s0) => {
+        const loops = [['altitude', dd.mgl, s0.lon], ['inner', dd.mgi, s0.inner], ['outer', dd.mgo, s0.outer]];
+        const cond = loops.filter(([, mg]) => (mg.crossings || []).some((c) => c.gm < 1));
+        if (!cond.length) return 'No loop is conditionally stable with these compensators (no gain margin below 1).';
+        return cond.map(([name, mg, c]) => {
+          const low = mg.crossings.filter((x) => x.gm < 1).map((x) => `${fmt(db(x.gm), 3)} dB at ${fmt(x.w, 3)} rad/s`).join(', ');
+          return `The ${name} loop is conditionally stable (GM ${low})${c.pi.on ? ', since C adds an integrator' : ''}: the phase is below −180° at low frequency, so lowering the gain enough would also destabilize it.`;
+        }).join(' ');
+      };
       const texC = (c, sign) => { const parts = [`${sign < 0 ? '-' : ''}${tex(c.k)}`]; for (const key of Object.keys(BLK)) if (c[key].on) parts.push(T.texTf(BLK[key](c[key]), 4)); return parts.join('\\cdot '); };
       return [
         { title: 'Loops', page: 'F.18 p. 403',
@@ -578,7 +599,7 @@
           theory: `C = ${texC(st[st.loop], st.loop === 'outer' ? -1 : 1)}` },
         { title: 'Margins (all loops)', page: 'p. 304–306',
           theory: `\\text{alt: } PM = ${tex(d.mgl.pm)}^\\circ @ ${tex(d.mgl.wc)},\\quad \\text{inner: } ${tex(d.mgi.pm)}^\\circ @ ${tex(d.mgi.wc)},\\quad \\text{outer: } ${tex(d.mgo.pm)}^\\circ @ ${tex(d.mgo.wc)}`,
-          note: 'The altitude loop has three integrators (two in the plant, one in C), so it is conditionally stable: the phase is below −180° at low frequency and there is a gain margin below 1 as well (negative dB).' },
+          note: condNote(d, st) },
         { title: 'Lead and lag', page: 'p. 325–328 · Eq. 18.1–18.2',
           theory: '\\phi_{max} = \\sin^{-1}\\frac{M-1}{M+1} \\text{ at } \\omega_{lead},\\quad \\text{lag boosts low frequencies by } 20\\log M' },
         { title: 'Implementation (d)', page: 'p. 335 · Eq. 18.3–18.4',
