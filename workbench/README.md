@@ -47,17 +47,12 @@ These were run with the same inputs, comparing the JS against the Python, with t
 
 ## Adding a design study (B–F)
 
-Copy `systems/arm.js` to `systems/<name>.js`, register it as `WB.systems.<letter>`, and add a `<script>` tag in `index.html`. The fields the chapter code uses are:
+See [STUDY_GUIDE.md](STUDY_GUIDE.md): each study lives in `js/studies/<X>/` (system file, chapter modules, manifest) and builds on the generic blocks in `js/core/design.js`. Multi-output / multi-input systems declare `outputs`, `inputs`, `refs`, `initial`, and `disturbances`; the page builds one plot per output and controls per channel.
 
-- `params`, `constants`, `uncertain`: nominal parameters (sliders), fixed constants, and the parameters the "true plant" mismatch perturbs.
-- `f(x, u, p)`, `h(x)`, `uLimit(p)`, `x0(y0)`: the nonlinear simulation model.
-- `secondOrderModel(p)`: `{b0, a1, a0, tex}` for P(s) = b0 / (s² + a1 s + a0).
-- `feedbackLinearization(x, p)`, `equilibriumInput(yE, p)`, `ffTex`: the feedforward input.
-- `draw(ctx, w, h, {x, r, u, uLimit, saturated})`: the animation frame.
-- `stateSpace(p)`, `jacobian(p, yE)`, `kinetic(x, p)`, `potential(x, p)`: linear models and energies (Ch 2–6, 11–14).
-- `problems.chN`: problem data (page, statement, specs, simulation defaults, optional default plant mismatch).
+## Tools
 
-The study's own homework (EOM, linearization, transfer function) is what goes into `f` and `secondOrderModel`. For D/E/F, write those yourself first.
-
-Systems that need successive loop closure (B, E, F) or more than one output will need chapter variants: the current chapter code assumes a single second-order loop with x = (y, ẏ).
-
+```
+python3 workbench/tools/smoke_test.py [--study X] [--shots DIR]   every tab × mode, buttons clicked, JS errors reported
+.venv/bin/python workbench/tools/regress_A.py                     JS vs _A_arm/python controllers (machine precision)
+tools/js_eval.py                                                   run a JS snippet with all workbench scripts loaded
+```

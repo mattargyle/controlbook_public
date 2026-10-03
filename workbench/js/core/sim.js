@@ -3,44 +3,74 @@
 // with the controller's output saturated (as the ctrl*.py classes do) and the
 // plant input saturated again after the disturbance is added (as
 // <sys>Dynamics.update does). y_m = h(x) + measurement noise.
+//
+// Signals may be scalars (single-input/single-output systems such as the arm)
+// or arrays (multi-output / multi-input systems). Channel 0 of every signal is
+// also stored in the scalar result fields (y, r, u, ...) so SISO code keeps working.
 window.WB = window.WB || {};
 
 WB.sim = (function () {
-  const { rk4Step, saturate } = WB.math;
+  const { rk4Step } = WB.math;
+  const asArr = (v) => (Array.isArray(v) ? v : [v]);
 
-  // plant: { f(x, u) -> xdot, h(x) -> y (scalar), uLimit }
-  // controller: { update(r, x, yMeas, t) -> u  |  { u, ...extras } }
+  // Saturation for input i: limit is a number (±limit), an array of numbers, or
+  // an array of [lo, hi] ranges.
+  function sat(u, limit, i) {
+    const L = Array.isArray(limit) ? limit[i] : limit;
+    if (Array.isArray(L)) return Math.max(L[0], Math.min(L[1], u));
+    return Math.max(-L, Math.min(L, u));
+  }
+
+  // plant: { f(x, u) -> xdot, h(x) -> y (number or array), uLimit }
+  // controller: { update(r, x, yMeas, t) -> u | [u...] | { u, ...extras } }
   //   x is the true state; only full-state-feedback chapters may use it.
-  //   Any extra numeric fields returned (e.g. xhat0, dhat, integrator) are recorded.
+  //   Extra numeric fields returned are recorded in result.extras.
   function simulate({ plant, controller, reference, disturbance, noise, x0, Ts, tEnd }) {
     const N = Math.round(tEnd / Ts) + 1;
+    const F = () => new Float64Array(N);
     const out = {
-      t: new Float64Array(N), r: new Float64Array(N), y: new Float64Array(N), yMeas: new Float64Array(N),
-      uDemand: new Float64Array(N), u: new Float64Array(N), uApplied: new Float64Array(N),
+      t: F(), r: F(), y: F(), yMeas: F(), uDemand: F(), u: F(), uApplied: F(),
+      rAll: [], yAll: [], yMeasAll: [], uDemandAll: [], uAll: [], uAppliedAll: [],
       x: [], extras: {},
     };
+    const ensure = (arr, n) => { while (arr.length < n) arr.push(F()); };
     let x = x0.slice();
+    let vectorU = false, vectorY = false, vectorR = false;
     for (let k = 0; k < N; k++) {
       const t = k * Ts;
-      const y = plant.h(x);
-      const yMeas = y + (noise ? noise(k) : 0);
-      const r = reference(t);
-      let ret = controller.update(r, x, yMeas, t);
-      let uDemand = ret;
-      if (typeof ret === 'object') {
-        uDemand = ret.u;
+      const yv = plant.h(x);
+      vectorY = vectorY || Array.isArray(yv);
+      const y = asArr(yv);
+      const n = noise ? asArr(noise(k)) : [];
+      const yMeas = y.map((v, i) => v + (n[i] || 0));
+      const rv = reference(t);
+      vectorR = vectorR || Array.isArray(rv);
+      const r = asArr(rv);
+      const ret = controller.update(vectorR ? r : r[0], x, vectorY ? yMeas : yMeas[0], t);
+      let uRaw = ret;
+      if (ret && typeof ret === 'object' && !Array.isArray(ret)) {
+        uRaw = ret.u;
         for (const [key, v] of Object.entries(ret)) {
-          if (key === 'u') continue;
-          (out.extras[key] = out.extras[key] || new Float64Array(N))[k] = v;
+          if (key === 'u' || typeof v !== 'number') continue;
+          (out.extras[key] = out.extras[key] || F())[k] = v;
         }
       }
-      const u = saturate(uDemand, plant.uLimit);
-      const uApplied = saturate(u + (disturbance ? disturbance(t) : 0), plant.uLimit);
-      out.t[k] = t; out.r[k] = r; out.y[k] = y; out.yMeas[k] = yMeas;
-      out.uDemand[k] = uDemand; out.u[k] = u; out.uApplied[k] = uApplied;
+      vectorU = vectorU || Array.isArray(uRaw);
+      const uD = asArr(uRaw);
+      const d = disturbance ? asArr(disturbance(t)) : [];
+      const u = uD.map((v, i) => sat(v, plant.uLimit, i));
+      const uA = u.map((v, i) => sat(v + (d[i] || 0), plant.uLimit, i));
+      ensure(out.yAll, y.length); ensure(out.yMeasAll, y.length); ensure(out.rAll, r.length);
+      ensure(out.uDemandAll, uD.length); ensure(out.uAll, uD.length); ensure(out.uAppliedAll, uD.length);
+      out.t[k] = t;
+      y.forEach((v, i) => { out.yAll[i][k] = v; out.yMeasAll[i][k] = yMeas[i]; });
+      r.forEach((v, i) => { out.rAll[i][k] = v; });
+      uD.forEach((v, i) => { out.uDemandAll[i][k] = v; out.uAll[i][k] = u[i]; out.uAppliedAll[i][k] = uA[i]; });
       out.x.push(x);
-      if (k < N - 1) x = rk4Step((xx, uu) => plant.f(xx, uu), x, uApplied, Ts);
+      if (k < N - 1) x = rk4Step((xx, uu) => plant.f(xx, uu), x, vectorU ? uA : uA[0], Ts);
     }
+    out.y = out.yAll[0]; out.yMeas = out.yMeasAll[0]; out.r = out.rAll[0];
+    out.uDemand = out.uDemandAll[0]; out.u = out.uAll[0]; out.uApplied = out.uAppliedAll[0];
     return out;
   }
 
@@ -81,5 +111,19 @@ WB.sim = (function () {
     };
   }
 
-  return { simulate, makeReference, makeNoise };
+  // Fill the per-channel arrays of a result built by hand (custom simulate hooks
+  // may return only the scalar fields).
+  function normalize(res) {
+    if (!res) return res;
+    const pairs = [['y', 'yAll'], ['yMeas', 'yMeasAll'], ['r', 'rAll'], ['uDemand', 'uDemandAll'], ['u', 'uAll'], ['uApplied', 'uAppliedAll']];
+    for (const [one, all] of pairs) {
+      if (!res[all] || !res[all].length) res[all] = res[one] ? [res[one]] : [];
+      if (!res[one] && res[all].length) res[one] = res[all][0];
+    }
+    if (!res.yMeas) { res.yMeas = res.y; res.yMeasAll = res.yAll; }
+    res.extras = res.extras || {};
+    return res;
+  }
+
+  return { simulate, makeReference, makeNoise, sat, normalize };
 })();

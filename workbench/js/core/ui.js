@@ -179,3 +179,10 @@ WB.ui = (function () {
 
   return { el, section, pageChip, linkPages, linkifyNode, slider, segmented, refreshAll, clearRefreshers, addRefresher, renderTex, store };
 })();
+
+// Load a study's scripts during page parse (classic scripts, works from file://).
+WB.studies = WB.studies || {};
+WB.loadStudy = function (id, files) {
+  for (const f of files) document.write(`<script src="${f}"><\/script>`);
+};
+

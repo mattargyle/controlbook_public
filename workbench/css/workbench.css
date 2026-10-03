@@ -115,6 +115,7 @@ select {
   align-items: start;
 }
 .center { display: grid; gap: 12px; min-width: 0; }
+.plot-stack { display: grid; gap: 12px; min-width: 0; }
 .row-2 { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
 /* collapsible left column: shrinks to a narrow rail */
 .left-col { display: grid; gap: 8px; min-width: 0; }
