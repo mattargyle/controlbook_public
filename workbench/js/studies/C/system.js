@@ -743,26 +743,7 @@ WB.studies.C = WB.studies.C || { chapters: {} };
     return K ? L.T(K) : null;
   }
 
-  // ------------------------------------------- s-plane legend relabeling --
-  // The shared s-plane legend has fixed names per marker kind. Successive loop
-  // closure needs "inner loop" / "outer loop" / "full model" markers, so the
-  // chapters pass data.legendNames = {kind: label}; this wrapper renames the
-  // legend entries after the shared setData has built them. Other studies
-  // never set legendNames, so their legends are untouched.
-  if (WB.plot && WB.plot.SPlane && !WB.plot.SPlane.prototype.__legendNamesC) {
-    const orig = WB.plot.SPlane.prototype.setData;
-    WB.plot.SPlane.prototype.setData = function (data) {
-      orig.call(this, data);
-      const names = data && data.legendNames;
-      if (!names) return;
-      for (const item of this.legend.querySelectorAll('.legend-item')) {
-        const key = item.querySelector('.marker-key');
-        const kind = key && [...key.classList].find((c) => c.startsWith('mk-'));
-        if (kind && names[kind.slice(3)]) item.lastChild.textContent = names[kind.slice(3)];
-      }
-    };
-    WB.plot.SPlane.prototype.__legendNamesC = true;
-  }
+  // s-plane legends: chapters pass data.legendNames = {kind: label} (plot.js).
 
   // Series helpers for result arrays.
   const deg = (arr) => Array.from(arr || [], (v) => v * R2D);

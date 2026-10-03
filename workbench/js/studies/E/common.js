@@ -11,24 +11,7 @@ window.WB = window.WB || {};
   const { fmt } = M;
   const sysE = () => WB.systems.E;
 
-  // ---------------------------------------------------- framework work-around --
-  // SPlane legends name marker kinds with fixed strings ("observer pole"). The
-  // successive-loop pages reuse kinds for inner/outer loop poles, so they pass
-  // data.kindNames to relabel the legend. Without kindNames nothing changes.
-  const proto = WB.plot.SPlane.prototype;
-  if (!proto.__kindNames) {
-    const orig = proto.setData;
-    proto.setData = function (data) {
-      orig.call(this, data);
-      if (!data.kindNames) return;
-      const kinds = [...new Set(data.markers.map((mk) => mk.kind))];
-      [...this.legend.children].forEach((item, i) => {
-        const nm = data.kindNames[kinds[i]];
-        if (nm && item.lastChild) item.lastChild.textContent = nm;
-      });
-    };
-    proto.__kindNames = true;
-  }
+  // s-plane legends: pages pass data.kindNames = {kind: label} (plot.js).
 
   // -------------------------------------------------- successive loop closure --
   // Design model (E.5(c), p. 386–387): P_in = b0/s², b0 = ℓ/(m2ℓ²/3 + m1 z_e²);

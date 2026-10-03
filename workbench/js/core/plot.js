@@ -250,7 +250,9 @@ WB.plot = (function () {
     setData(data) {
       this.data = data;
       const kinds = [...new Set(data.markers.map((mk) => mk.kind))];
-      const names = { ol: 'open-loop pole', cl: 'closed-loop pole', zero: 'closed-loop zero', target: 'target pole', obs: 'observer pole', olzero: 'open-loop zero' };
+      // data.legendNames (or kindNames) relabels kinds, e.g. inner/outer-loop poles.
+      const names = { ol: 'open-loop pole', cl: 'closed-loop pole', zero: 'closed-loop zero', target: 'target pole', obs: 'observer pole', olzero: 'open-loop zero',
+        ...(data.kindNames || {}), ...(data.legendNames || {}) };
       this.legend.replaceChildren(...kinds.map((k) => {
         const key = el('span', { class: `marker-key mk-${k}` });
         return el('span', { class: 'legend-item' }, key, el('span', { text: names[k] }));
