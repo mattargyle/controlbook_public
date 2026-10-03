@@ -74,6 +74,11 @@ const repo = (M) => ({trTh: 0.5, zetaTh: 0.9, M, zetaZ: 0.9, rule: 'tp', pI: -2,
   out.gains.tustin = [lib.tustin(Cin.num, Cin.den, Ts), lib.tustin(Cout.num, Cout.den, Ts), lib.tustin(F.num, F.den, Ts)];
   for (const method of ['state_space', 'digital_filter']) run('ls_' + method, lib.loopshapeCtrl({Cin, Cout, F, Ts, uLim: 5, method}), {dist: 0.5, ptrue: mis(%(MIS18)s)});
 }
+// Ch 17 bandwidths (inner T_in; outer loop as implemented) from the page's own code
+{ const ch = WB.studies.B.chapters.ch17;
+  const g = lib.slcGains(p, {trTh: 0.2, zetaTh: 0.707, M: 10, zetaZ: 0.707, formula: 'book'});
+  const l = ch.loops({pModel: p, st: {kPth: g.kPth, kDth: g.kDth, kPz: g.kPz, kDz: g.kDz, kIz: -0.05, sigma: 0.05, outerModel: 'impl'}});
+  out.gains.bw = [l.bwi, l.bwo]; }
 return out;
 """ % {"KS": KS, "XS": json.dumps(XS), "TH0": TH0, "MIS": json.dumps(MIS), "MIS18": json.dumps(MIS18)}
 
@@ -168,6 +173,18 @@ def python_runs():
         if method == "digital_filter":
             out["gains"]["tustin"] = [{"num": list(f.num_d), "den": list(f.den_d)} for f in (cl.control_in, cl.control_out, cl.prefilter_out)]
         loop("ls_" + method, lambda r, pd, y, cl=cl: (cl.update(r, y), 0, 0, 0), d=0.5, mis=MIS18)
+    # Ch 17 bandwidths with python-control (hw16 transfer functions; the outer loop as
+    # the B.10 code closes it: C_out * zero-canceling filter * (theta/theta_r) * P_out)
+    import control as cnt
+    temp = P.m1 * P.ell / 6.0 + P.m2 * 2 * P.ell / 3.0
+    Pin = cnt.tf([-1 / temp], [1, 0, -(P.m1 + P.m2) * P.g / temp])
+    Pout = cnt.tf([-2 * P.ell / 3.0, 0, P.g], [1, 0, 0])
+    s_ = cp.sigma
+    Cin = cnt.tf([cp.kd_th + s_ * cp.kp_th, cp.kp_th], [s_, 1])
+    Cout = cnt.tf([cp.kd_z + cp.kp_z * s_, cp.kp_z + cp.ki_z * s_, cp.ki_z], [s_, 1, 0])
+    Tin = Pin * cp.kp_th / (1 + Pin * Cin)
+    Fzc = cnt.tf([cp.filter.a], [1, cp.filter.b])
+    out["gains"]["bw"] = [float(cnt.bandwidth(cnt.feedback(Pin * Cin))), float(cnt.bandwidth(cnt.feedback(Cout * Fzc * Tin * Pout)))]
     return out
 
 
@@ -192,6 +209,9 @@ def main():
     tr = max(maxdiff(p_["num"], j_["num"]) + maxdiff(p_["den"], j_["den"]) for p_, j_ in zip(py["gains"]["tustin"], js["gains"]["tustin"]))
     print("  %-11s %.3e   (python-control c2d vs direct bilinear substitution)" % ("tustin", tr))
     worst = max(worst, tr)
+    bw = max(abs(a - b) / abs(a) for a, b in zip(py["gains"]["bw"], js["gains"]["bw"]))
+    print("  %-11s %.3e   (Ch 17 bandwidths vs control.bandwidth: py %s, js %s)" % ("bandwidth", bw, ["%.4f" % v for v in py["gains"]["bw"]], ["%.4f" % v for v in js["gains"]["bw"]]))
+    worst = max(worst, bw)
     print("closed loop, 30 s at Ts = 0.01 (z, theta, F, z_hat, theta_hat, d_hat)")
     for name in ["pd_listing", "pd_book", "pid", "sf", "sfi", "obs", "dobs", "ls_state_space", "ls_digital_filter"]:
         err = maxdiff(py["runs"][name], js["runs"][name])

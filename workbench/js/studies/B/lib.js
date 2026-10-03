@@ -1,7 +1,10 @@
 // Design Study B controller library. Each factory mirrors one of the repo's
 // _B_pendulum/python/ctrl*.py classes line for line (same update order, same
-// initial values, same saturation points), so the chapter pages and
-// tools/regress_B.py can check the JS against the Python to machine precision.
+// initial values, same internal saturation points). Controllers return the
+// unsaturated force; the simulation saturates it, as pendulumDynamics.update does,
+// so the demanded force is visible and the applied force matches the repo. The
+// chapter pages and tools/regress_B.py check the JS against the Python to machine
+// precision.
 // The chapter modules only add the UI around these.
 window.WB = window.WB || {};
 WB.studies = WB.studies || {};
@@ -73,7 +76,7 @@ WB.studies.B = WB.studies.B || { chapters: {} };
         const tmp = g.kPz * (r - z) - g.kDz * zdot;
         const thetaR = filter ? filt.update(tmp) : tmp;
         const F = g.kPth * (thetaR - theta) - g.kDth * thetadot;
-        return { u: linear ? F : sat(F, uLim), thetaR };
+        return { u: F, thetaR };   // unsaturated: the plant saturates (pendulumDynamics.update)
       },
     };
   }
@@ -97,9 +100,8 @@ WB.studies.B = WB.studies.B || { chapters: {} };
         const errTh = thetaR - theta;
         thdot = deriv === 'state' ? x[3] : beta * thdot + gamma * (theta - thPrev);
         const Funsat = g.kPth * errTh - g.kDth * thdot;
-        const F = linear ? Funsat : sat(Funsat, uLim);
         ePrev = errZ; zPrev = z; thPrev = theta;
-        return { u: F, thetaR, thetaRunsat: thRunsat, integrator: integ, zdotHat: zdot, thetadotHat: thdot };
+        return { u: Funsat, thetaR, thetaRunsat: thRunsat, integrator: integ, zdotHat: zdot, thetadotHat: thdot };
       },
     };
   }
@@ -170,7 +172,7 @@ WB.studies.B = WB.studies.B || { chapters: {} };
 
   // ctrlStateFeedback.py: F = −K x + k_r z_r, true state.
   function sfCtrl({ K, kr, uLim, linear = false }) {
-    return { update(r, x) { const F = -dot(K, x) + kr * r; return { u: linear ? F : sat(F, uLim) }; } };
+    return { update(r, x) { const F = -dot(K, x) + kr * r; return { u: F }; } };
   }
 
   // ctrlStateFeedbackIntegrator.py: trapezoidal integrator on z_r − z (error_d1 = 0),
@@ -184,7 +186,7 @@ WB.studies.B = WB.studies.B || { chapters: {} };
         if (antiwindup === 'clamp' && !linear && Math.abs(-dot(K, x) - ki * next) > uLim) { /* hold */ } else integ = next;
         eD1 = e;
         const F = -dot(K, x) - ki * integ;
-        return { u: linear ? F : sat(F, uLim), integrator: integ };
+        return { u: F, integrator: integ };
       },
     };
   }
@@ -216,8 +218,8 @@ WB.studies.B = WB.studies.B || { chapters: {} };
         eD1 = e;
         const Fu = -dot(K, xhat) - ki * integ - dhat;
         const F = linear ? Fu : sat(Fu, uLim);
-        Fd1 = F;
-        return { u: F, zhat: xhat[0], thhat: xhat[1], zdhat: xhat[2], thdhat: xhat[3], dhat, integrator: integ };
+        Fd1 = F;   // the repo keeps the saturated force for the observer
+        return { u: Fu, zhat: xhat[0], thhat: xhat[1], zdhat: xhat[2], thdhat: xhat[3], dhat, integrator: integ };
       },
     };
   }
@@ -303,7 +305,7 @@ WB.studies.B = WB.studies.B || { chapters: {} };
         const zrF = pf.update(r);
         const thetaR = co.update(zrF - y[0]);
         const Fu = ci.update(thetaR - y[1]);
-        return { u: linear ? Fu : sat(Fu, uLim), thetaR };
+        return { u: Fu, thetaR };
       },
     };
   }

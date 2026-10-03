@@ -74,11 +74,20 @@
       }
     } else {
       clPoles(ctx, level).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole ${i + 1}` }));
+      // Work mode: the target poles (B.11a) and the observer poles (B.13c) are answers
+      if (!polesRevealed(ctx)) return mk;
       obsPolesOf(ctx, level).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 80 }));
       const t = lib().ssPoles({ ...prob, pI: level === 'sf' ? null : prob.pI });
       t.poles.forEach((p) => mk.push({ ...p, kind: 'target', label: 'target pole (problem)' }));
     }
     return mk;
+  }
+
+  const polesRevealed = (ctx) => !!(ctx.app && ctx.app.isRevealed(`B:${ctx.S.chapter}:poles`));
+  function revealPoles(parent, ctx, what) {
+    const btn = el('button', { type: 'button', class: 'btn btn-quiet', text: `Reveal ${what} in the s-plane`, onclick: () => { ctx.app.reveal(`B:${ctx.S.chapter}:poles`); ctx.update(); } });
+    parent.append(btn);
+    WB.ui.addRefresher(() => { btn.hidden = polesRevealed(ctx); });
   }
 
   function onDrag(ctx, id, re, im) {
@@ -165,8 +174,8 @@
     return {
       title: 'Linearized state-space model', page: 'p. 90 · Eq. 6.17, p. 189 · Eq. 11.39',
       theory: '\\dot x = Ax + BF,\\quad y = \\begin{pmatrix}1&0&0&0\\\\0&1&0&0\\end{pmatrix}x,\\quad x = (z, \\theta, \\dot z, \\dot\\theta)^\\top,\\quad y_r = (1, 0, 0, 0)\\,x',
-      numbers: `A = ${texMat(A)},\\quad B = ${texMat(Bm)}`,
-      note: 'Eq. 11.39 and 12.2 print row 4 doubled (34.59, 0.1412, −2.824): the ℓ = 0.5 m values. These use the current ℓ.',
+      numbers: `A = ${texMat(A)},\\quad B = ${texMat(Bm)}`, spoiler: true,
+      note: 'Eq. 11.39 and 12.2 print row 4 for a different ℓ (ISSUES.md). The numbers here use the current ℓ.',
     };
   }
   function ctrbCard(A, Bm, title, page) {
@@ -267,7 +276,8 @@
       const sec = section(parent, 'F = −Kx + k_r z_r', 'p. 175 · Eq. 11.3, p. 190');
       if (ctx.S.mode === 'work') {
         workSliders(sec, ctx, [...KEYS, 'kr']);
-        sec.append(el('p', { class: 'muted small', text: 'Starting values are a slow, stable design, not the answer. Dashed rings mark the B.11(a) target poles.' }));
+        sec.append(el('p', { class: 'muted small', text: 'Starting values are a slow, stable design, not the answer.' }));
+        revealPoles(sec, ctx, 'the B.11(a) target poles');
       } else {
         knobs(sec, ctx); presets(sec, ctx, ctx.sys.problems.ch11);
         sec.append(el('p', { class: 'muted small', text: 'Drag a θ-pair (fast) or z-pair (slow) pole.' }));
@@ -323,7 +333,7 @@
         },
         {
           id: 'e', title: '(e) A much faster response',
-          html: 'Passes when the first z step rises (10–90%) in under 1 s while |θ| stays under 30° and F never saturates. B.8\'s successive-loop design takes about 3 s.',
+          html: 'Passes when the first z step rises (10–90%) in under 1.2 s, |θ| stays under 30°, and the demanded F never exceeds F<sub>max</sub> over the whole run (the later ±0.5 m switches are 1 m steps). B.8\'s successive-loop design takes about 3.9 s.',
           check: () => {
             const res = ctx.app.result(), S = ctx.S;
             const i0 = Math.round(S.sim.tStep / S.sim.Ts), i1 = S.sim.type === 'square' ? Math.round((S.sim.tStep + 0.5 / S.sim.frequency) / S.sim.Ts) : res.t.length;
@@ -331,10 +341,10 @@
             let maxTh = 0, satd = false;
             const lim = ctx.sys.uLimit(ctx.pModel);
             for (let k = 0; k < res.t.length; k++) { maxTh = Math.max(maxTh, Math.abs(res.x[k][1])); if (Math.abs(res.uDemandAll[0][k]) > lim + 1e-9) satd = true; }
-            const ok = m.tr < 1.0 && maxTh < 30 * DEG && !satd;
+            const ok = m.tr < 1.2 && maxTh < 30 * DEG && !satd;
             return { ok, msg: `rise time ${fmt(m.tr, 3)} s, max |θ| ${fmt(maxTh / DEG, 3)}°, ${satd ? 'saturates' : 'no saturation'}.` };
           },
-          solution: () => [{ html: 'One option (Explore mode, 2.2/t<sub>r</sub> rule): t<sub>r,θ</sub> = 0.4 s, M = 3, ζ = 0.707 gives a 0.95 s rise time with peak |F| ≈ 3.7 N. Going much faster saturates the force on the 0.5 m steps.' }],
+          solution: () => [{ html: 'One option (Explore mode, 2.2/t<sub>r</sub> rule): t<sub>r,θ</sub> = 0.5 s, M = 2.5, ζ = 0.707 rises in 1.02 s, and its largest demand, on the 1 m steps, is 4.3 N. Faster designs saturate there: t<sub>r,θ</sub> = 0.4 s, M = 3 rises in 0.95 s and needs only 3.7 N on the first 0.5 m step, but demands 7.4 N at t = 12.5 s.' }],
         },
       ]);
     },
@@ -353,7 +363,8 @@
       });
       if (ctx.S.mode === 'work') {
         workSliders(sec, ctx, [...KEYS, 'ki']);
-        sec.append(el('p', { class: 'muted small', text: 'Starting values are a slow, stable design, not the answer. Dashed rings mark the target poles with p_I = −2.' }));
+        sec.append(el('p', { class: 'muted small', text: 'Starting values are a slow, stable design, not the answer.' }));
+        revealPoles(sec, ctx, 'the target poles (p_I = −2)');
       } else {
         knobs(sec, ctx, { pI: true }); presets(sec, ctx, ctx.sys.problems.ch12);
         readout(sec, ctx, [...KEYS, 'ki']);
@@ -372,7 +383,7 @@
         ssCard(ctx),
         { title: 'Augmented system', page: 'p. 207 · Step 1',
           theory: '\\dot x_I = z_r - C_r x,\\quad A_1 = \\begin{pmatrix}A & 0\\\\ -C_r & 0\\end{pmatrix},\\quad B_1 = \\begin{pmatrix}B\\\\ 0\\end{pmatrix},\\quad C_r = (1, 0, 0, 0)',
-          numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}` },
+          numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}`, spoiler: true },
         ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 207 · Step 2'),
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 208 · Step 3',
@@ -409,7 +420,7 @@
     extraPlot: estExtra,
     buildControls(parent, ctx) {
       const sec = section(parent, 'Controller (uses x̂)', 'p. 231 · Listing 13.2');
-      if (ctx.S.mode === 'work') workSliders(sec, ctx, [...KEYS, 'ki']);
+      if (ctx.S.mode === 'work') { workSliders(sec, ctx, [...KEYS, 'ki']); revealPoles(sec, ctx, 'the target and observer poles'); }
       else { knobs(sec, ctx, { pI: true }); presets(sec, ctx, ctx.sys.problems.ch13); }
       const ob = section(parent, 'Observer', 'p. 216 · Eq. 13.3');
       obsKnobs(ob, ctx, false);
@@ -483,7 +494,7 @@
         options: [{ value: true, label: 'on' }, { value: false, label: 'off (B.14a)' }],
         get: () => ctx.st.dobs, set: (v) => { ctx.st.dobs = v; ctx.update(); },
       });
-      if (ctx.S.mode === 'work') workSliders(sec, ctx, [...KEYS, 'ki']);
+      if (ctx.S.mode === 'work') { workSliders(sec, ctx, [...KEYS, 'ki']); revealPoles(sec, ctx, 'the target and observer poles'); }
       else { knobs(sec, ctx, { pI: true }); presets(sec, ctx, ctx.sys.problems.ch14); }
       const ob = section(parent, 'Observer', 'p. 241, p. 252–253');
       obsKnobs(ob, ctx, true);
@@ -500,7 +511,7 @@
           theory: '\\dot x = Ax + B(F + d),\\quad \\dot e = (A - LC)e + Bd \\Rightarrow e_{ss} \\ne 0 \\text{ for constant } d' },
         { title: 'Augmented model (ḋ = 0)', page: 'p. 240, Listing 14.4',
           theory: 'A_2 = \\begin{pmatrix}A & B\\\\ 0 & 0\\end{pmatrix},\\quad C_2 = \\begin{pmatrix}C & 0\\end{pmatrix}',
-          numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` },
+          numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}`, spoiler: true },
         { title: 'Disturbance observer', page: 'p. 241, p. 253',
           theory: '\\dot{\\hat x}_2 = A_2\\hat x_2 + B_1 F + L_2(y - C_2\\hat x_2),\\quad F = -K\\hat x - k_I x_I - \\hat d' },
         { title: 'Observer poles and gain', page: 'p. 252 · Listing 14.4',

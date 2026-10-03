@@ -238,7 +238,7 @@ WB.studies.B = WB.studies.B || { chapters: {} };
         id: 'B.8', page: 124,
         trTh: 0.5, zetaTh: 0.707, M: 10, zetaZ: 0.707,   // (b); (d) leaves the outer specs open
         listing: { trTh: 0.15, M: 15 },                   // Listing 8.3 / ctrlPD.py
-        sim: { type: 'square', amplitude: 0.5, frequency: 0.04, tStep: 0, tEnd: 25 },
+        sim: { type: 'square', amplitude: 0.5, frequency: 0.04, tStep: 0, tEnd: 25, init: { theta0: 10 } },   // (e): θ(0) = 10°
         statement: [
           '(a) Using successive loop closure, draw a block diagram with PD control on both loops. The outer controller takes the desired cart position r<sub>z</sub> and outputs the desired angle r<sub>θ</sub>; the inner controller takes r<sub>θ</sub> and outputs the force F.',
           '(b) For the inner loop, find k<sub>P<sub>θ</sub></sub> and k<sub>D<sub>θ</sub></sub> so that t<sub>r<sub>θ</sub></sub> = 0.5 s and ζ<sub>θ</sub> = 0.707.',

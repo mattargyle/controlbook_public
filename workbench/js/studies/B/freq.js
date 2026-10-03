@@ -58,10 +58,18 @@
     }
     return { pms, gms, pm: pms.length ? pms[0].pm : Infinity, wc: pms.length ? pms[0].w : NaN };
   }
+  // First frequency where |T| falls 3 dB below |T(0)| (control.bandwidth's
+  // definition, dbdrop = −3), located on the grid and refined by bisection.
   function bandwidth(Tc) {
-    const { mag } = T.bode(Tc, W);
-    const ref = mag[0] * Math.SQRT1_2;
-    for (let i = 0; i < W.length; i++) if (mag[i] < ref) return W[i];
+    const ref = Math.abs(T.dcgain(Tc)) * 10 ** (-3 / 20);
+    const m = (w) => L.C.abs(T.at(Tc, w));
+    for (let i = 1; i < W.length; i++) {
+      if (m(W[i]) < ref) {
+        let lo = Math.log(W[i - 1]), hi = Math.log(W[i]);
+        for (let k = 0; k < 60; k++) { const mid = (lo + hi) / 2; if (m(Math.exp(mid)) < ref) hi = mid; else lo = mid; }
+        return Math.exp((lo + hi) / 2);
+      }
+    }
     return NaN;
   }
   const gmText = (gms) => (gms.length ? gms.map((c) => `${fmt(db(c.gm), 3)} dB at ${c.w === 0 ? 'ω → 0' : fmt(c.w, 3) + ' rad/s'}`).join('; ') : '∞');
@@ -322,9 +330,9 @@
           numbers: `\\text{inner: } PM = ${tex(l.mi.pm)}^\\circ \\text{ at } ${tex(l.mi.wc)};\\quad \\text{outer: } PM = ${tex(l.mo.pm)}^\\circ \\text{ at } ${tex(l.mo.wc)}`, spoiler: true,
           note: 'P_in C_in starts at −180° (negative DC gain), so the inner "gain margin" is a gain decrease: below 1/|L(0)| the loop cannot hold the pendulum up. The book prints GM −6.62 and PM 32.9° (Fig. 17-12), from other gains than B.10\'s.' },
         { title: 'Bandwidth vs. crossover', page: 'p. 316–317',
-          theory: '\\omega_{bw}: |T(j\\omega_{bw})| = |T(0)|/\\sqrt2,\\quad T = \\frac{PC}{1 + PC}',
+          theory: '\\omega_{bw}: \\text{first } \\omega \\text{ where } |T(j\\omega)| \\text{ is 3 dB below } |T(0)|,\\quad T = \\frac{PC}{1 + PC}',
           numbers: `\\omega_{bw,in} = ${tex(l.bwi)},\\; \\omega_{co,in} = ${tex(l.mi.wc)};\\quad \\omega_{bw,out} = ${tex(l.bwo)},\\; \\omega_{co,out} = ${tex(l.mo.wc)}`, spoiler: true,
-          note: 'T_in(0) = k_DC ≈ 1.14, so the −3 dB point is measured from |T(0)|, not from 1.' },
+          note: 'T_in(0) = k_DC ≠ 1, so the −3 dB point is measured from |T(0)|, not from 1 (as control.bandwidth does).' },
         { title: 'Successive loop closure', page: 'p. 317',
           theory: '\\text{10× faster inner loop} \\leftrightarrow \\text{inner bandwidth a decade above the outer}',
           numbers: `\\omega_{bw,in}/\\omega_{bw,out} = ${tex(l.bwi / l.bwo)}`, spoiler: true },
@@ -481,7 +489,7 @@
       return [
         { title: 'Building blocks (loopshape_tools.py)', page: 'p. 324–328',
           theory: '\\text{lead}(\\omega, M) = \\frac{\\sqrt M s + \\omega}{s + \\omega\\sqrt M},\\quad \\text{lag}(z, M) = \\frac{s + z}{s + z/M},\\quad \\text{lpf}(p) = \\frac{p}{s + p}',
-          note: 'The repo\'s lead has DC gain 1/√M and high-frequency gain √M; the book\'s Eq. 18.2 lead is M times larger.' },
+          note: 'The repo\'s lead has DC gain 1/√M and high-frequency gain √M; the book\'s Eq. 18.2 lead has DC gain 1, so it is √M times larger.' },
         { title: 'Your controllers', page: 'p. 349, p. 355',
           theory: `C_{in}(s) = ${T.texTf(d.Ci, 4)},\\quad C_{out}(s) = ${T.texTf(d.Co, 4)}`, numbers: null },
         { title: 'Outer-loop plant', page: 'p. 349 · B.18(b)',

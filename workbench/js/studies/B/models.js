@@ -377,7 +377,7 @@
           theory: '\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{\\tilde Z/\\tilde F}{\\tilde\\Theta/\\tilde F}',
           symbolic: '\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{\\tilde Z/\\tilde F}{\\tilde\\Theta/\\tilde F} = \\frac{-\\frac{2\\ell}{3}s^2 + g}{s^2}',
           numbers: `\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{${tex(-2 * p.ell / 3)}\\,s^2 + ${tex(p.g)}}{s^2},\\quad \\text{zeros } \\pm${tex(q)}`, spoiler: true,
-          note: `A push in +z tips the rod toward −θ (the minus sign); the rod's tilt then drives the cart like a double integrator. J = m₁ℓ/6 + 2m₂ℓ/3 = ${fmt(J, 4)} kg·m.` },
+          note: `A push in +z tips the rod toward −θ (the minus sign); the rod's tilt then drives the cart like a double integrator.` },
       ];
     },
     buildProblem(parent, ctx) {
@@ -431,7 +431,7 @@
         { title: 'State-space model', page: 'p. 90 · Eq. 6.17',
           theory: '\\dot{\\tilde x} = A\\tilde x + B\\tilde u,\\quad \\tilde y = \\begin{pmatrix}1&0&0&0\\\\0&1&0&0\\end{pmatrix}\\tilde x,\\quad D = 0',
           numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`, spoiler: true,
-          note: 'The B.11–B.12 solutions print A₄₂ = 34.59, A₄₃ = 0.1412, B₄ = −2.824: those are the ℓ = 0.5 m values. With ℓ = 1 m they are half that (ISSUES.md).' },
+          note: 'The B.11–B.12 solutions print row 4 of A and B for a different ℓ than the stated one (ISSUES.md).' },
         { title: 'Back to transfer functions', page: 'p. 85 · Eq. 6.14',
           theory: 'P(s) = C(sI - A)^{-1}B + D,\\quad \\det(sI - A) = 0 \\text{ gives the poles}',
           numbers: `\\det(sI - A) = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },
