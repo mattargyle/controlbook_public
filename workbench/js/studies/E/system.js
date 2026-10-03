@@ -249,7 +249,7 @@ WB.systems = WB.systems || {};
       },
       ch12: {
         id: 'E.12', page: 389,
-        trTh: 0.5, zetaTh: 0.8, trZ: 1.5, zetaZ: 0.8, pI: -1,
+        trTh: 0.2, zetaTh: 0.8, trZ: 0.7, zetaZ: 0.85, pI: -2,
         sim: { type: 'square', amplitude: 0.15, frequency: 0.05, tStep: 0, tEnd: 40, dist: 1, tDist: 0 },
         mismatch: { m1: 12, m2: -9, ell: 15 },
         statement: [

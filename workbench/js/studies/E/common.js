@@ -263,22 +263,46 @@ window.WB = window.WB || {};
     return Math.max(0, Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts)));
   }
 
+  // Block stays on the (true) beam for the whole run: 0 ≤ z ≤ ℓ_true.
+  function onBeam(ctx, res) {
+    let zmin = Infinity, zmax = -Infinity;
+    for (const z of res.yAll[0]) { if (!isFinite(z)) { zmin = -Infinity; break; } zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
+    const ell = ctx.pTrue ? ctx.pTrue.ell : ctx.pModel.ell;
+    const ok = zmin >= 0 && zmax <= ell;
+    return { ok, zmin, zmax, ell, msg: ok ? `on the beam (z in [${fmt(zmin, 3)}, ${fmt(zmax, 3)}] m)` : `block left the beam (z from ${fmt(zmin, 3)} to ${fmt(zmax, 3)} m, beam 0–${fmt(ell, 3)} m)` };
+  }
+
+  // Index just before the last reference switch (square wave), else before t_end.
+  function beforeLastSwitch(ctx, res) {
+    const S = ctx.S, half = 0.5 / S.sim.frequency;
+    let tSw = S.sim.tEnd;
+    if (S.sim.type === 'square') tSw = S.sim.tStep + Math.floor((S.sim.tEnd - S.sim.tStep) / half - 1e-9) * half;
+    return Math.max(0, Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts)));
+  }
+
   // Shared problem-panel accessors.
   const P = () => WB.pd;
   const answersOf = (ctx, probId) => WB.ui.store.get(`wb.${ctx.sys.id}.${probId}.answers`, {});
   const poleText = (ps) => ps.map((q) => M.fmtPole(q, 4)).join(', ');
 
-  // Bode of a stable closed loop: first frequency where |T| drops below −3 dB.
+  // Closed-loop bandwidth: the first frequency where |T| falls 3 dB below its
+  // low-frequency value, refined by bisection on log ω between grid points.
   function bandwidth(Tc, W) {
-    const { mag } = WB.tf.bode(Tc, W);
-    const m0 = mag[0];
-    for (let i = 0; i < W.length; i++) if (mag[i] < m0 * Math.SQRT1_2) return W[i];
+    const m = (w) => L.C.abs(WB.tf.at(Tc, w));
+    const target = m(W[0]) * Math.pow(10, -3 / 20);  // −3 dB, as control.bandwidth
+    for (let i = 1; i < W.length; i++) {
+      if (m(W[i]) < target) {
+        let lo = Math.log(W[i - 1]), hi = Math.log(W[i]);
+        for (let k = 0; k < 60; k++) { const mid = 0.5 * (lo + hi); if (m(Math.exp(mid)) < target) hi = mid; else lo = mid; }
+        return Math.exp(0.5 * (lo + hi));
+      }
+    }
     return NaN;
   }
 
   WB.E = {
     pdDesign, innerPoles, outerPoles, nestedPoles, nestedPID, nestedLinearSim,
     ssPoles, augI, augD, obsGain, ssDesign, makeSS, Cr,
-    readout, numGrid, knob, beforeSwitch, P, answersOf, poleText, bandwidth, fmt,
+    readout, numGrid, knob, beforeSwitch, beforeLastSwitch, onBeam, P, answersOf, poleText, bandwidth, fmt,
   };
 })();

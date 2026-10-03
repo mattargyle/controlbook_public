@@ -157,6 +157,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       title: `State-space model (${ctx.st.comp === 'fl' ? 'F_fl(z), A₄₁ = 0' : 'Jacobian, F_e'})`, page: 'p. 387 · E.6, p. 183',
       theory: '\\dot{\\tilde x} = A\\tilde x + B\\tilde F,\\quad \\tilde x = x - x_e,\\; x_e = (\\tfrac{\\ell}{2}, 0, 0, 0),\\quad \\tilde F = F - F_{ff}',
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
+      spoiler: true,
     };
   }
   function ctrbCard(A, B, title, page) {
@@ -280,8 +281,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           numbers: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))},\\quad K = ${texMat([d.K])}`, spoiler: true },
         { title: 'Reference gain', page: 'p. 182 · Eq. 11.35',
           theory: 'k_r = \\frac{-1}{C_r(A - BK)^{-1}B},\\quad C_r = \\begin{bmatrix}1 & 0 & 0 & 0\\end{bmatrix}',
-          numbers: `k_r = ${tex(d.kr)}`, spoiler: true,
-          note: 'At steady state θ = 0 and θ̈ = 0, so b₀(−K₁z̃ + k_r z̃_r) = (m₁g/J_e) z̃. With F_e (Jacobian A) that gives k_r = K₁ + m₁g/ℓ; with F_fl(z) (A₄₁ = 0) it gives k_r = K₁.' },
+          numbers: `k_r = ${tex(d.kr)}`, spoiler: true },
         { title: 'Control law', page: 'p. 183 · Eq. 11.38',
           theory: 'F = F_{ff} - K(x - x_e) + k_r(z_r - z_e)',
           numbers: `F = F_{ff} - ${texMat([g.K])}\\tilde x + ${tex(g.kr)}\\,\\tilde z_r` },
@@ -371,7 +371,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         ssCard(ctx),
         { title: 'Augmented system', page: 'p. 198 · Eq. 12.1',
           theory: '\\dot x_I = z_r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix}',
-          numbers: `A_1 = ${texMat(A1)}` },
+          numbers: `A_1 = ${texMat(A1)}`, spoiler: true },
         ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'),
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 199–201',
@@ -408,12 +408,17 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         },
         {
           id: 'c', title: '(b, c) Tracking with d = 1 N and 20% parameter error',
-          html: 'Passes when |z<sub>r</sub> − z| just before the first switch is under 2 mm with the current disturbance and mismatch.',
+          html: 'Passes when the block stays on the beam (0 ≤ z ≤ ℓ of the true plant) for the whole run and |z<sub>r</sub> − z| just before the first switch is under 2 mm, with the current disturbance and mismatch.',
           check: () => {
-            const { e, t } = errorBefore(ctx), S = ctx.S;
-            return { ok: e < 0.002, msg: `error ${fmt(1000 * e, 3)} mm at t = ${fmt(t, 3)} s (d = ${fmt(S.sim.dist, 3)} N).` };
+            const { e, t, res } = errorBefore(ctx), S = ctx.S;
+            const ob = E.onBeam(ctx, res);
+            return { ok: ob.ok && e < 0.002, msg: `${ob.msg}; error ${fmt(1000 * e, 3)} mm at t = ${fmt(t, 3)} s (d = ${fmt(S.sim.dist, 3)} N).` };
           },
-          solution: () => [{ html: 'The Explore defaults (pairs from t<sub>r</sub> = 0.5 and 1.5 s, ζ = 0.8, p<sub>I</sub> = −1) pass with d = 1 N and the default mismatch. Without the integrator (E.11 gains), a constant d shifts the block by d/k<sub>r</sub> at steady state: with k<sub>r</sub> ≈ −1.6, 1 N moves it about 0.6 m, off the beam.' }],
+          solution: () => [
+            { html: 'The slower poles of E.11 (pairs from t<sub>r</sub> = 0.5 and 1.5 s, p<sub>I</sub> = −1) are not enough: with d = 1 N from t = 0 and the default mismatch, the block dips to about −0.16 m (off the pivot end) before the integrator catches up, and only 7 of 30 random α = 0.2 draws pass.' },
+            { html: 'Faster poles fix it: a pair from t<sub>r</sub> = 0.2 s (ζ = 0.8), a pair from t<sub>r</sub> = 0.7 s (ζ = 0.85), and p<sub>I</sub> = −2 (the Explore defaults). Robustness, tested in Python and JS: with d = +1 N, 88 of 90 random draws pass (30/30, 29/30, 29/30 for three seeds). With d = −1 N, which adds to the load, 24 of 30 pass (checked in Python). The peak force stays under the 15 N limit for the default draw.' },
+            { html: 'Without the integrator (E.11 gains), a constant d shifts the block by d/k<sub>r</sub> at steady state: with k<sub>r</sub> ≈ −1.6, 1 N moves it about 0.6 m, off the beam.' },
+          ],
         },
       ]);
     },
@@ -455,10 +460,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ CA^2 \\\\ CA^3\\end{bmatrix}\\;(8\\times4),\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = 4',
           numbers: `\\operatorname{rank}\\mathcal{O} = ${L.rank(O)}`, spoiler: true },
         { title: 'Decoupled observer gain (two outputs)', page: 'p. 225 (B.13 uses place(Aᵀ, Cᵀ)ᵀ)',
-          theory: 'L = \\begin{bmatrix}\\beta_{z1} & 0\\\\ 0 & \\beta_{\\theta1}\\\\ \\beta_{z0} & a_{32}\\\\ a_{41} & \\beta_{\\theta0}\\end{bmatrix} \\Rightarrow A - LC = \\text{blockdiag}\\left(\\begin{bmatrix}-\\beta_{z1} & 1\\\\ -\\beta_{z0} & 0\\end{bmatrix}, \\begin{bmatrix}-\\beta_{\\theta1} & 1\\\\ -\\beta_{\\theta0} & 0\\end{bmatrix}\\right)',
+          theory: '\\text{with two outputs } L \\text{ is } 4\\times2 \\text{ and not unique: any } L \\text{ with the desired eig}(A - LC) \\text{ works}',
+          symbolic: 'L = \\begin{bmatrix}\\beta_{z1} & 0\\\\ 0 & \\beta_{\\theta1}\\\\ \\beta_{z0} & a_{32}\\\\ a_{41} & \\beta_{\\theta0}\\end{bmatrix} \\Rightarrow A - LC = \\text{blockdiag}\\left(\\begin{bmatrix}-\\beta_{z1} & 1\\\\ -\\beta_{z0} & 0\\end{bmatrix}, \\begin{bmatrix}-\\beta_{\\theta1} & 1\\\\ -\\beta_{\\theta0} & 0\\end{bmatrix}\\right)',
           numbers: `q = ${d.obsPoles.map((q) => texPole(q)).join(',\\;')},\\quad L = ${texMat(d.L)}`, spoiler: true,
           note: 'With two outputs L is not unique: python\'s place gives a different, dense L with the same eigenvalues. Any L with the right eig(A − LC) answers (c).' },
-        { title: 'Separation principle', page: 'p. 223–224',
+        { title: 'Separation principle', page: 'p. 222–223',
           theory: '\\text{eig} = \\text{eig}(A_1 - B_1K_1) \\cup \\text{eig}(A - LC)',
           note: 'Holds for the linear model only; saturation, mismatch and the nonlinear plant break it.' },
         polesCard(ctx, d, 'obs'),
@@ -500,11 +506,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           id: 'e', title: '(e) Add a 0.5 N input disturbance',
           html: 'Set d = 0.5 N in the left panel. Reports the steady-state tracking error and the estimate bias at t<sub>end</sub>. Then try the "from z only" observer structure.',
           check: () => {
-            const res = ctx.app.result(), n = res.t.length - 1;
+            const res = ctx.app.result(), n = E.beforeLastSwitch(ctx, res);  // a settled sample, not on a switch
             if (!(Math.abs(ctx.S.sim.dist) > 0)) return { ok: false, msg: 'Set d ≠ 0 first.' };
             const ez = res.rAll[0][n] - res.yAll[0][n];
             const bz = res.yAll[0][n] - res.extras.zhat[n], bth = (res.yAll[1][n] - res.extras.thhat[n]) / M.DEG;
-            return { ok: true, msg: `z_r − z = ${fmt(1000 * ez, 3)} mm, z − ẑ = ${fmt(1000 * bz, 3)} mm, θ − θ̂ = ${fmt(bth, 3)}°.` };
+            return { ok: true, msg: `At t = ${fmt(res.t[n], 3)} s (just before the last switch): z_r − z = ${fmt(1000 * ez, 3)} mm, z − ẑ = ${fmt(1000 * bz, 3)} mm, θ − θ̂ = ${fmt(bth, 3)}°.` };
           },
           solution: () => [{ html: 'The observer error obeys ė = (A − LC)e + Bd, so it settles at e<sub>ss</sub> = −(A − LC)⁻¹Bd ≠ 0. The integrator drives z<sub>r</sub> − ẑ to zero, so z ends up off by the ẑ bias, as the book says. With the <em>decoupled</em> L the z̃ block does not see d (d enters only θ̈), so ẑ is unbiased, z still tracks, and the bias shows up in θ̂ only. With the z-only L (or python\'s place) the bias reaches ẑ and z misses the reference.' }],
         },
@@ -554,7 +560,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Disturbance observer', page: 'p. 241',
           theory: '\\dot{\\hat x} = A\\hat x + B(u - F_{ff} + \\hat d) + L(\\tilde y - C\\hat x),\\quad \\dot{\\hat d} = L_d(\\tilde y - C\\hat x),\\quad \\tilde F = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
         { title: 'Decoupled gains: a z block and a θ–d block', page: 'p. 241',
-          theory: '\\theta\\text{–}d \\text{ block: } s^3 + \\beta_2 s^2 + \\beta_1 s + b_0 L_d = (s^2 + 2\\zeta\\omega s + \\omega^2)(s - p_d)',
+          theory: '\\text{decoupled design: a } z \\text{ block and a } \\theta\\text{–}d \\text{ block}',
+          symbolic: '\\theta\\text{–}d \\text{ block: } s^3 + \\beta_2 s^2 + \\beta_1 s + b_0 L_d = (s^2 + 2\\zeta\\omega s + \\omega^2)(s - p_d)',
           numbers: `L_2 = ${texMat(d.L)}`, spoiler: true },
         polesCard(ctx, d, 'dobs'),
       ];

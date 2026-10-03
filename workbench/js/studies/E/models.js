@@ -120,7 +120,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       slider(sec, { label: 'z amplitude', unit: 'm', min: 0, max: 0.25, step: 0.005, sig: 3, get: () => ctx.st.Az, set: (v) => { ctx.st.Az = v; ctx.update(); } });
       slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 45, step: 0.5, sig: 3, get: () => ctx.st.Ath, set: (v) => { ctx.st.Ath = v; ctx.update(); } });
       slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, get: () => ctx.st.f, set: (v) => { ctx.st.f = v; ctx.update(); } });
-      sec.append(el('p', { class: 'muted small', text: 'z(t) = z_e + A_z sin(2πft), θ(t) = A_θ sin(πft). No dynamics: the motion is imposed. The energy plot splits K into the block sliding along the beam, the block carried around by the beam, and the beam itself.' }));
+      sec.append(el('p', { class: 'muted small', text: 'z(t) = z_e + A_z sin(2πft), θ(t) = A_θ sin(πft). No dynamics: the motion is imposed. The energy plot splits K into three parts: watch which ones depend on z.' }));
     },
 
     extraPlot(ctx, res) {
@@ -128,9 +128,9 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       return {
         opts: { title: 'kinetic energy', yLabel: 'K [mJ]', unit: 'mJ' },
         data: { series: [
-          { label: '½m₁ż²', y: mJ(res.extras.Kr), color: '--series-2', width: 1.5 },
-          { label: '½m₁z²θ̇²', y: mJ(res.extras.Kt), color: '--series-3', width: 1.5 },
-          { label: '½(m₂ℓ²/3)θ̇²', y: mJ(res.extras.Kb), color: '--text-muted', width: 1.5 },
+          { label: 'block, along the beam', y: mJ(res.extras.Kr), color: '--series-2', width: 1.5 },
+          { label: 'block, carried by the beam', y: mJ(res.extras.Kt), color: '--series-3', width: 1.5 },
+          { label: 'beam', y: mJ(res.extras.Kb), color: '--text-muted', width: 1.5 },
           { label: 'total K', y: mJ(res.extras.K), color: '--series-1' },
         ] },
       };
@@ -142,11 +142,14 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Kinetic energy of a rigid body', page: 'p. 25 · Eq. 2.3',
           theory: 'K = \\tfrac12 m\\,\\mathbf v_{cm}^\\top\\mathbf v_{cm} + \\tfrac12\\boldsymbol\\omega^\\top J_{cm}\\boldsymbol\\omega' },
         { title: 'Block (point mass on the beam surface)', page: 'p. 385 · Fig. 20-1',
-          theory: '\\mathbf p_1 = z\\begin{bmatrix}\\cos\\theta\\\\ \\sin\\theta\\\\ 0\\end{bmatrix},\\quad \\mathbf v_1 = \\dot z\\begin{bmatrix}\\cos\\theta\\\\ \\sin\\theta\\\\ 0\\end{bmatrix} + z\\dot\\theta\\begin{bmatrix}-\\sin\\theta\\\\ \\cos\\theta\\\\ 0\\end{bmatrix},\\quad \\|\\mathbf v_1\\|^2 = \\dot z^2 + z^2\\dot\\theta^2' },
-        { title: 'Beam (thin rod about its end)', page: 'p. 23 · Eq. 2.2',
-          theory: 'J_{pivot} = \\frac{m_2\\ell^2}{12} + m_2\\left(\\frac{\\ell}{2}\\right)^2 = \\frac{m_2\\ell^2}{3}' },
+          theory: '\\mathbf p_1 = z\\begin{bmatrix}\\cos\\theta\\\\ \\sin\\theta\\\\ 0\\end{bmatrix},\\quad \\mathbf v_1 = \\dot{\\mathbf p}_1',
+          symbolic: '\\mathbf v_1 = \\dot z\\begin{bmatrix}\\cos\\theta\\\\ \\sin\\theta\\\\ 0\\end{bmatrix} + z\\dot\\theta\\begin{bmatrix}-\\sin\\theta\\\\ \\cos\\theta\\\\ 0\\end{bmatrix},\\quad \\|\\mathbf v_1\\|^2 = \\dot z^2 + z^2\\dot\\theta^2', spoiler: true },
+        { title: 'Beam (thin rod pivoted at its end)', page: 'p. 23 · Eq. 2.2',
+          theory: 'J_{cm} = \\frac{m\\ell^2}{12}\\;\\text{(thin rod)},\\quad J_{pivot} = J_{cm} + m d^2\\;\\text{(parallel axis)}',
+          symbolic: 'J_{pivot} = \\frac{m_2\\ell^2}{12} + m_2\\left(\\frac{\\ell}{2}\\right)^2 = \\frac{m_2\\ell^2}{3}', spoiler: true },
         { title: 'Result', page: 'p. 386 · E.2(a)',
-          theory: 'K = \\tfrac12 m_1\\big(\\dot z^2 + z^2\\dot\\theta^2\\big) + \\tfrac12\\frac{m_2\\ell^2}{3}\\dot\\theta^2',
+          theory: 'K = K_{block} + K_{beam}',
+          symbolic: 'K = \\tfrac12 m_1\\big(\\dot z^2 + z^2\\dot\\theta^2\\big) + \\tfrac12\\frac{m_2\\ell^2}{3}\\dot\\theta^2',
           numbers: `K = ${tex(p.m1 / 2)}\\,\\dot z^2 + ${tex(p.m1 / 2)}\\,z^2\\dot\\theta^2 + ${tex(p.m2 * p.ell ** 2 / 6)}\\,\\dot\\theta^2`, spoiler: true },
       ];
     },
@@ -177,7 +180,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     buildControls(parent, ctx) {
       const sec = section(parent, 'Open-loop simulation', 'p. 386 · E.3(e)');
       inputControls(sec, ctx, { comps: COMPS });
-      sec.append(el('p', { class: 'muted small', text: 'The block and beam has no stable equilibrium: even with the beam held level by F_fl(z), any tilt makes the block slide and the beam tip further. The energy plot checks the EOM: E(t) − E(0) must equal the work done by the generalized force Fℓcos θ.' }));
+      sec.append(el('p', { class: 'muted small', text: 'The block and beam has no stable equilibrium: any tilt makes the block slide and the beam tip further. The energy plot checks the EOM: E(t) − E(0) must equal the work done by F.' }));
     },
 
     extraPlot(ctx, res) {
@@ -196,7 +199,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       return {
         opts: { title: 'energy balance', yLabel: 'energy [mJ]', unit: 'mJ' },
         data: { series: [
-          { label: '∫ Fℓcos θ · θ̇ dt', y: W, color: '--series-2', dash: [5, 4], width: 2 },
+          { label: 'work done by F', y: W, color: '--series-2', dash: [5, 4], width: 2 },
           { label: 'E(t) − E(0) = ΔK + ΔP', y: En, color: '--series-1' },
         ] },
       };
@@ -207,18 +210,21 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const J0 = p.m2 * p.ell ** 2 / 3;
       return [
         { title: 'Euler-Lagrange equations', page: 'p. 18 · Eq. 1.8, p. 43',
-          theory: 'L = K - P,\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q,\\quad q = (z, \\theta)^\\top' },
+          theory: 'L = K - P,\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q' },
         { title: 'Potential energy', page: 'p. 386 · E.3(a)',
-          theory: 'P = m_1 g z\\sin\\theta + m_2 g\\tfrac{\\ell}{2}\\sin\\theta \\quad(P = 0 \\text{ with the beam level})',
+          theory: 'P = \\textstyle\\sum_i m_i g\\,h_i\\quad(h_i = \\text{height of each center of mass})',
+          symbolic: 'P = m_1 g z\\sin\\theta + m_2 g\\tfrac{\\ell}{2}\\sin\\theta \\quad(P = 0 \\text{ with the beam level})',
           numbers: `P = (${tex(p.m1 * p.g)}\\,z + ${tex(p.m2 * p.g * p.ell / 2)})\\sin\\theta`, spoiler: true },
-        { title: 'Generalized forces', page: 'p. 386 · E.3(c)',
-          theory: '\\tau = \\begin{bmatrix}0\\\\ F\\ell\\cos\\theta\\end{bmatrix},\\quad B = 0 \\;\\text{(no damping is modeled)}',
-          note: 'F is vertical at the beam tip, whose position is ℓ(cos θ, sin θ); the virtual work F·δ(ℓ sin θ) = Fℓ cos θ δθ.' },
+        { title: 'Generalized forces', page: 'p. 386 · E.3(b, c)',
+          theory: '\\tau_i = \\text{virtual work of the external forces per unit } \\delta q_i',
+          symbolic: 'q = (z, \\theta)^\\top,\\quad \\tau = \\begin{bmatrix}0\\\\ F\\ell\\cos\\theta\\end{bmatrix},\\quad B = 0',
+          spoiler: true },
         { title: 'Equations of motion', page: 'p. 386 · E.3(d)',
-          theory: 'm_1\\ddot z - m_1 z\\dot\\theta^2 + m_1 g\\sin\\theta = 0,\\quad \\left(\\frac{m_2\\ell^2}{3} + m_1 z^2\\right)\\ddot\\theta + 2m_1 z\\dot z\\dot\\theta + \\left(m_1 g z + m_2 g\\frac{\\ell}{2}\\right)\\cos\\theta = F\\ell\\cos\\theta',
+          theory: '\\text{apply the Euler-Lagrange equation to } q_1 = z \\text{ and } q_2 = \\theta',
+          symbolic: 'm_1\\ddot z - m_1 z\\dot\\theta^2 + m_1 g\\sin\\theta = 0,\\quad \\left(\\frac{m_2\\ell^2}{3} + m_1 z^2\\right)\\ddot\\theta + 2m_1 z\\dot z\\dot\\theta + \\left(m_1 g z + m_2 g\\frac{\\ell}{2}\\right)\\cos\\theta = F\\ell\\cos\\theta',
           numbers: `\\ddot z = z\\dot\\theta^2 - ${tex(p.g)}\\sin\\theta,\\quad (${tex(J0)} + ${tex(p.m1)}\\,z^2)\\,\\ddot\\theta = ${tex(p.ell)}F\\cos\\theta - ${tex(2 * p.m1)}\\,z\\dot z\\dot\\theta - (${tex(p.m1 * p.g)}\\,z + ${tex(p.m2 * p.g * p.ell / 2)})\\cos\\theta`, spoiler: true },
-        { title: 'Energy balance (a check on the EOM)', page: 'follows from E.3(d)',
-          theory: '\\frac{d}{dt}(K + P) = F\\ell\\cos\\theta\\;\\dot\\theta' },
+        { title: 'Energy balance (a check on the EOM)', page: 'follows from Eq. 1.8',
+          theory: '\\frac{d}{dt}(K + P) = \\tau^\\top\\dot q - \\dot q^\\top B\\dot q' },
       ];
     },
 
@@ -288,7 +294,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       });
       const inp = section(parent, 'Input F̃(t)', 'p. 386');
       inputControls(inp, ctx);
-      inp.append(el('p', { class: 'muted small', text: 'Start a hair off equilibrium and watch the linear model (dashed) and the nonlinear plant separate as the block slides. Jacobian: both modes ±λ, ±jλ. Feedback linearization: the m₁gz̃ coupling is gone and A has four poles at 0.' }));
+      inp.append(el('p', { class: 'muted small', text: 'Start a hair off equilibrium and watch the linear model (dashed) and the nonlinear plant separate as the block slides. Compare the eigenvalues of the two linearizations in the s-plane.' }));
     },
 
     outputSeries(ctx, res, sc, oi) {
@@ -306,17 +312,21 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const lam = Math.pow(p.m1 * p.g * p.g / jac.De, 0.25);
       return [
         { title: 'Nonlinear model', page: 'p. 386 · E.3(d)',
-          theory: '\\dot x = \\begin{bmatrix}\\dot z\\\\ \\dot\\theta\\\\ z\\dot\\theta^2 - g\\sin\\theta\\\\ \\dfrac{F\\ell\\cos\\theta - 2m_1z\\dot z\\dot\\theta - (m_1gz + m_2g\\frac{\\ell}{2})\\cos\\theta}{\\frac{m_2\\ell^2}{3} + m_1z^2}\\end{bmatrix}' },
+          theory: '\\dot x = f(x, u),\\quad x = (z, \\theta, \\dot z, \\dot\\theta)^\\top,\\quad u = F',
+          symbolic: '\\dot x = \\begin{bmatrix}\\dot z\\\\ \\dot\\theta\\\\ z\\dot\\theta^2 - g\\sin\\theta\\\\ \\dfrac{F\\ell\\cos\\theta - 2m_1z\\dot z\\dot\\theta - (m_1gz + m_2g\\frac{\\ell}{2})\\cos\\theta}{\\frac{m_2\\ell^2}{3} + m_1z^2}\\end{bmatrix}',
+          spoiler: true },
         { title: 'Equilibria', page: 'p. 60 · Eq. 4.1, E.4(a)',
-          theory: '\\dot x = 0:\\; \\theta_e = 0,\\; \\dot z_e = \\dot\\theta_e = 0,\\; z_e \\text{ arbitrary},\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2}',
+          theory: 'f(x_e, u_e) = 0',
+          symbolic: '\\theta_e = 0,\\; \\dot z_e = \\dot\\theta_e = 0,\\; z_e \\text{ arbitrary},\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2}',
           numbers: `F_e(z_e = ${fmt(zE, 3)}) = ${tex(jac.Fe)}\\;\\text{N}`, spoiler: true },
         { title: 'Jacobian linearization', page: 'p. 60 · Eq. 4.1, p. 83',
-          theory: 'J_e = \\frac{m_2\\ell^2}{3} + m_1z_e^2:\\quad \\ddot{\\tilde z} = -g\\tilde\\theta,\\quad \\ddot{\\tilde\\theta} = \\frac{\\ell\\tilde F - m_1 g\\tilde z}{J_e}',
-          numbers: `A = ${texMat(jac.A)},\\quad B = ${texMat(jac.B)},\\quad \\text{eig}(A) = \\pm${tex(lam)},\\;\\pm ${tex(lam)}j`, spoiler: true,
-          note: 'det(sI − A) = s⁴ − m₁g²/J_e: one unstable real pole for any z_e.' },
-        { title: 'Feedback linearization', page: 'p. 64, p. 388 · E.8(e)',
-          theory: 'F = F_{fl}(z) + \\tilde F,\\; F_{fl} = \\frac{m_1 g z}{\\ell} + \\frac{m_2 g}{2} \\;\\Rightarrow\\; J(z)\\ddot\\theta = \\ell\\cos\\theta\\,\\tilde F - 2m_1z\\dot z\\dot\\theta',
-          note: 'This cancels gravity on the beam at every z (exactly when θ = 0). The z equation z̈ = zθ̇² − g sin θ has no F in it, so no choice of F linearizes it directly: only the θ subsystem is feedback-linearizable this simply.' },
+          theory: '\\dot{\\tilde x} = \\frac{\\partial f}{\\partial x}\\Big|_e\\tilde x + \\frac{\\partial f}{\\partial u}\\Big|_e\\tilde u',
+          symbolic: 'J_e = \\frac{m_2\\ell^2}{3} + m_1z_e^2:\\quad \\ddot{\\tilde z} = -g\\tilde\\theta,\\quad \\ddot{\\tilde\\theta} = \\frac{\\ell\\tilde F - m_1 g\\tilde z}{J_e},\\quad \\det(sI - A) = s^4 - \\frac{m_1g^2}{J_e}',
+          numbers: `A = ${texMat(jac.A)},\\quad B = ${texMat(jac.B)},\\quad \\text{eig}(A) = \\pm${tex(lam)},\\;\\pm ${tex(lam)}j`, spoiler: true },
+        { title: 'Feedback linearization', page: 'p. 64',
+          theory: 'u = u_{fl}(x) + \\tilde u,\\quad u_{fl} \\text{ chosen to cancel the nonlinear terms}',
+          symbolic: 'F = F_{fl}(z) + \\tilde F,\\; F_{fl} = \\frac{m_1 g z}{\\ell} + \\frac{m_2 g}{2} \\;\\Rightarrow\\; J(z)\\ddot\\theta = \\ell\\cos\\theta\\,\\tilde F - 2m_1z\\dot z\\dot\\theta\\quad(\\text{the } z \\text{ equation has no } F\\text{: only the } \\theta \\text{ subsystem is linearized this simply})',
+          spoiler: true },
       ];
     },
 
@@ -387,7 +397,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const sec = section(parent, 'Input F̃(t)', 'p. 386 · E.5');
       modelToggle(sec, ctx);
       inputControls(sec, ctx);
-      sec.append(el('p', { class: 'muted small', text: 'A force pulse spins the beam up (θ ramps, b₀/s²), and the tilt makes the block accelerate (−g/s²). The dashed trace is the linear model you choose above.' }));
+      sec.append(el('p', { class: 'muted small', text: 'A force pulse spins the beam up, and the tilt makes the block accelerate. The dashed trace is the linear model you choose above.' }));
     },
     splane(ctx) {
       const lin = ctx.sys.linear(ctx.pModel, { comp: ctx.st.model === 'full' ? 'eq' : 'fl' });
@@ -398,16 +408,19 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const a = ctx.pModel.m1 * ctx.pModel.g ** 2 / lin.De;
       return [
         { title: 'Laplace transform of the linear EOM', page: 'p. 69–70, E.5(a)',
-          theory: 's^2\\tilde Z = -g\\tilde\\Theta,\\quad J_e s^2\\tilde\\Theta = \\ell\\tilde F - m_1 g\\tilde Z\\quad(\\text{zero initial conditions})' },
+          theory: '\\mathcal L\\{\\ddot y\\} = s^2Y(s) - sy(0) - \\dot y(0)\\;\\to\\; s^2Y(s)\\;(\\text{zero initial conditions})',
+          symbolic: 's^2\\tilde Z = -g\\tilde\\Theta,\\quad J_e s^2\\tilde\\Theta = \\ell\\tilde F - m_1 g\\tilde Z', spoiler: true },
         { title: 'Full transfer functions', page: 'p. 387 · E.5(b)',
-          theory: '\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{\\frac{\\ell}{J_e}s^2}{s^4 - \\frac{m_1g^2}{J_e}},\\quad \\frac{\\tilde Z}{\\tilde F} = \\frac{-\\frac{g\\ell}{J_e}}{s^4 - \\frac{m_1g^2}{J_e}},\\quad \\frac{\\tilde Z}{\\tilde\\Theta} = -\\frac{g}{s^2}',
+          theory: '\\text{solve the transformed equations for } \\tilde\\Theta/\\tilde F,\\; \\tilde Z/\\tilde F,\\; \\tilde Z/\\tilde\\Theta',
+          symbolic: '\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{\\frac{\\ell}{J_e}s^2}{s^4 - \\frac{m_1g^2}{J_e}},\\quad \\frac{\\tilde Z}{\\tilde F} = \\frac{-\\frac{g\\ell}{J_e}}{s^4 - \\frac{m_1g^2}{J_e}},\\quad \\frac{\\tilde Z}{\\tilde\\Theta} = -\\frac{g}{s^2}',
           numbers: `\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{${tex(lin.b0)}\\,s^2}{s^4 - ${tex(a)}},\\quad \\frac{\\tilde Z}{\\tilde F} = \\frac{${tex(-ctx.pModel.g * lin.b0)}}{s^4 - ${tex(a)}}`, spoiler: true },
-        { title: 'Simplified cascade (drop m₁g z̃)', page: 'p. 387 · E.5(c, d)',
-          theory: 'P_{in}(s) = \\frac{\\tilde\\Theta}{\\tilde F} = \\frac{\\ell / (\\frac{m_2\\ell^2}{3} + m_1 z_e^2)}{s^2},\\quad P_{out}(s) = \\frac{\\tilde Z}{\\tilde\\Theta} = -\\frac{g}{s^2}',
-          numbers: `P_{in} = \\frac{${tex(lin.b0)}}{s^2},\\quad P_{out} = \\frac{${tex(-ctx.pModel.g)}}{s^2}`, spoiler: true,
-          note: 'F_fl(z) in E.8(e) cancels exactly the dropped term, which is why the simplification is good under feedback linearization.' },
+        { title: 'Simplified cascade (drop m₁g z̃)', page: 'p. 72–74 · §5.3, p. 387 · E.5(c, d)',
+          theory: 'P(s) \\approx P_{in}(s)\\,P_{out}(s)\\;\\text{(cascade approximation)}',
+          symbolic: 'P_{in}(s) = \\frac{\\tilde\\Theta}{\\tilde F} = \\frac{\\ell / (\\frac{m_2\\ell^2}{3} + m_1 z_e^2)}{s^2},\\quad P_{out}(s) = \\frac{\\tilde Z}{\\tilde\\Theta} = -\\frac{g}{s^2}',
+          numbers: `P_{in} = \\frac{${tex(lin.b0)}}{s^2},\\quad P_{out} = \\frac{${tex(-ctx.pModel.g)}}{s^2}`, spoiler: true },
       ];
     },
+
     buildProblem(parent, ctx) {
       const lin = () => ctx.sys.linear(ctx.pModel, { comp: 'eq' });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch5, [
@@ -462,13 +475,15 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Jacobian linearization revisited', page: 'p. 83–84',
           theory: 'A = \\frac{\\partial f}{\\partial x}\\Big|_e,\\quad B = \\frac{\\partial f}{\\partial u}\\Big|_e,\\quad C = \\frac{\\partial h}{\\partial x}\\Big|_e,\\quad D = \\frac{\\partial h}{\\partial u}\\Big|_e' },
         { title: 'State-space model', page: 'p. 387 · E.6',
-          theory: '\\dot{\\tilde x} = \\begin{bmatrix}0&0&1&0\\\\0&0&0&1\\\\0&-g&0&0\\\\-\\frac{m_1g}{J_e}&0&0&0\\end{bmatrix}\\tilde x + \\begin{bmatrix}0\\\\0\\\\0\\\\ \\frac{\\ell}{J_e}\\end{bmatrix}\\tilde F,\\quad \\tilde y = \\begin{bmatrix}1&0&0&0\\\\0&1&0&0\\end{bmatrix}\\tilde x',
+          theory: '\\dot{\\tilde x} = A\\tilde x + B\\tilde u,\\quad \\tilde y = C\\tilde x + D\\tilde u',
+          symbolic: 'A = \\begin{bmatrix}0&0&1&0\\\\0&0&0&1\\\\0&-g&0&0\\\\-\\frac{m_1g}{J_e}&0&0&0\\end{bmatrix},\\quad B = \\begin{bmatrix}0\\\\0\\\\0\\\\ \\frac{\\ell}{J_e}\\end{bmatrix},\\quad C = \\begin{bmatrix}1&0&0&0\\\\0&1&0&0\\end{bmatrix}',
           numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)},\\quad C = ${texMat(C)},\\quad D = 0`, spoiler: true },
-        { title: 'Back to the transfer functions', page: 'p. 85 · Eq. 6.14–6.15',
-          theory: 'P(s) = C(sI - A)^{-1}B + D \\;(2\\times1),\\quad \\det(sI - A) = s^4 - \\frac{m_1 g^2}{J_e}',
+        { title: 'Back to the transfer functions', page: 'pp. 85–86 · Eq. 6.14–6.15',
+          theory: 'P(s) = C(sI - A)^{-1}B + D,\\quad \\text{poles: } \\det(sI - A) = 0',
           numbers: `\\det(sI - A) = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },
       ];
     },
+
     buildProblem(parent, ctx) {
       const ss = () => ctx.sys.linear(ctx.pModel, { comp: 'eq' });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch6, [{
