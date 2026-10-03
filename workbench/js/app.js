@@ -665,12 +665,8 @@ window.WB = window.WB || {};
     reveal: (key) => revealed.add(key),
     setMode(m) {
       if (S.mode === m) return;
-      // Entering work mode from explore: start from the explored gains so the
-      // response doesn't jump (chapters with a toWork hook decide what to copy).
-      if (m === 'work' && ctx) {
-        if (chapter().toWork) chapter().toWork(ctx);
-        else if (ctx.gains && ctx.gains.kP !== undefined) { S.ch[S.chapter].kP = ctx.gains.kP; S.ch[S.chapter].kD = ctx.gains.kD; }
-      }
+      // Work mode always keeps the user's own gains: explored (designed) gains
+      // are never copied in, so a Work-mode check can't pass by switching modes.
       S.mode = m;
       rebuild();
     },

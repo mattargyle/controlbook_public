@@ -44,11 +44,6 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     const w = ctx.st.w;
     return { K: w.K, kr: w.kr, ki: w.ki, L: w.L, lin: ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp }) };
   }
-  function toWork(ctx, level) {
-    const d = E.ssDesign(ctx.pModel, knobsOf(ctx.st), level);
-    ctx.st.w = { K: d.K.slice(), kr: d.kr ?? ctx.st.w.kr, ki: d.ki ?? ctx.st.w.ki, L: d.L ? d.L.map((r) => r.slice()) : ctx.st.w.L };
-  }
-
   // Closed-loop and observer eigenvalues for the current gains.
   function clPoles(ctx, level) {
     const { A, B, C } = ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp });
@@ -228,7 +223,6 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     return Object.assign({
       id: `ch${num}`, num, tab: `Ch ${num}`, title, pages, level,
       gains(ctx) { return gainsFor(ctx, level); },
-      toWork(ctx) { toWork(ctx, level); },
       controller(ctx, o) { return E.makeSS(ctx, ctx.gains, level, { comp: ctx.st.comp, est: ctx.st.est, antiwindup: ctx.st.antiwindup, dobs: ctx.st.dobs, zhat0: ctx.st.zhat0 || 0 }, o); },
       splane(ctx) { return { markers: markers(ctx, level), kindNames: { cl: 'controller pole', obs: 'observer pole', ol: 'open-loop pole', target: 'target pole' } }; },
       onPoleDrag: onDrag,

@@ -96,7 +96,7 @@ Optional:
 - `outputSeries(ctx, result, scaleFn, outputIndex)`: extra traces on output plot `outputIndex`, e.g. estimates
 - `simulate(ctx, common, plant)`: custom simulation; return the shape of `WB.sim.simulate`
 - `linearSim(ctx, common)`: linear-model overlay. Multi-output systems get none by default, so provide this if you want the dashed trace. Use `WB.design.linearPlant`
-- `reference(ctx, baseRef)`, `toWork(ctx)` (copy explored gains into work state)
+- `reference(ctx, baseRef)`. Work mode never inherits Explore's gains: don't copy designed gains into work state on a mode switch.
 - Flags: `openLoop` (no reference/metrics), `metrics: false`, `linear: false`
 
 The result object has a scalar channel 0 (`y, r, u, uDemand, uApplied, yMeas`), arrays per channel (`yAll[i]`, `rAll[i]`, `uDemandAll[i]`, `uAppliedAll[i]`, `yMeasAll[i]`), `x[k]` (state arrays), `t`, and `extras`.
