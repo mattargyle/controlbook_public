@@ -75,15 +75,9 @@
     return base;
   }
 
-  // Legend relabel: the shared s-plane legend calls 'obs' markers observer poles.
-  function relabel(map) {
-    if (typeof document === 'undefined') return;
-    queueMicrotask(() => {
-      document.querySelectorAll('#splane .legend-item').forEach((item) => {
-        for (const [k, txt] of Object.entries(map)) if (item.querySelector(`.mk-${k}`)) item.lastChild.textContent = txt;
-      });
-    });
-  }
+  // The successive-loop markers reuse the 'cl' / 'obs' kinds for the inner and
+  // outer loops; the s-plane renames them through data.legendNames (plot.js).
+  const LOOP_NAMES = { obs: 'outer-loop pole', cl: 'inner-loop pole' };
 
   // --------------------------------------------------------------- gains --
   function designed(ctx, st = ctx.st) {
@@ -112,7 +106,6 @@
     innerPoles(ctx, g).forEach((x, i) => mk.push({ ...x, kind: 'cl', label: `inner-loop pole ${i + 1}`, dragId: explore ? 0 : undefined }));
     outerPoles(ctx, g, filter, withI).forEach((x, i) => mk.push({ ...x, kind: 'obs', label: `outer-loop pole ${i + 1} (DC-gain model)`, dragId: explore && Math.abs(x.im) > 1e-9 ? 1 : undefined, noFit: Math.hypot(x.re, x.im) > 60 }));
     if (targets) for (const t of targets) mk.push({ ...t, kind: 'target', label: 'target pole (problem)' });
-    relabel({ obs: 'outer-loop pole', cl: 'inner-loop pole' });
     return mk;
   }
 
@@ -300,7 +293,7 @@
     },
 
     splane(ctx) {
-      return { markers: markers(ctx, { targets: ctx.S.mode === 'work' ? this.specPoles(ctx) : null }), zetaRay: ctx.S.mode === 'explore' ? ctx.st.zetaTh : null };
+      return { markers: markers(ctx, { targets: ctx.S.mode === 'work' ? this.specPoles(ctx) : null }), legendNames: LOOP_NAMES, zetaRay: ctx.S.mode === 'explore' ? ctx.st.zetaTh : null };
     },
     onPoleDrag: onDrag,
 
@@ -422,7 +415,7 @@
       box.replaceChildren(...rows);
     },
 
-    splane(ctx) { return { markers: markers(ctx, { withI: true }) }; },
+    splane(ctx) { return { markers: markers(ctx, { withI: true }), legendNames: LOOP_NAMES }; },
     onPoleDrag: onDrag,
 
     math(ctx) {
@@ -539,7 +532,7 @@
       };
     },
 
-    splane(ctx) { return { markers: markers(ctx, { withI: true }), zetaRay: ctx.S.mode === 'explore' ? ctx.st.zetaTh : null }; },
+    splane(ctx) { return { markers: markers(ctx, { withI: true }), legendNames: LOOP_NAMES, zetaRay: ctx.S.mode === 'explore' ? ctx.st.zetaTh : null }; },
     onPoleDrag: onDrag,
 
     math(ctx) {
@@ -752,5 +745,5 @@
     },
   };
 
-  B.slc = { innerPoles, outerPoles, outerPoly, fullPoles, markers, relabel, rootLocus, qOf };
+  B.slc = { innerPoles, outerPoles, outerPoly, fullPoles, markers, LOOP_NAMES, rootLocus, qOf };
 })();
