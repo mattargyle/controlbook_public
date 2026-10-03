@@ -1,0 +1,815 @@
+// Study E, Chapters 8–10 and Appendix P.6: successive loop closure with PD in both
+// loops (E.8), system type (E.9), root locus versus the outer integrator gain
+// (E.P.6), and the digital nested PID (E.10).
+//
+// Inner loop θ: F̃ = kPθ(θ_r − θ) − kDθ θ̇ on P_in = b0/s².
+// Outer loop z: θ_r = kPz(z_r − z) − kDz ż (+ kIz ∫e) on P_out = −g/s², with the
+// inner loop replaced by its DC gain (Fig. 8-11, p. 118). F = F_fl(z) + F̃.
+window.WB = window.WB || {};
+WB.studies = WB.studies || {};
+WB.studies.E = WB.studies.E || { chapters: {} };
+
+(function () {
+  const { el, slider, segmented, section } = WB.ui;
+  const M = WB.math;
+  const L = WB.la;
+  const { tex, texPole, fmt, fmtPole } = M;
+  const E = WB.E;
+  const PD = () => WB.pd;
+  const CH = WB.studies.E.chapters;
+
+  const KNOBS = (st) => ({ trTh: st.trTh, zetaTh: st.zetaTh, M: st.M, zetaZ: st.zetaZ, rule: st.rule || '2.2' });
+  const designed = (ctx, st = ctx.st) => E.pdDesign(ctx.pModel, KNOBS(st));
+  const workGains = (st) => ({ kPth: st.kPth, kDth: st.kDth, kPz: st.kPz, kDz: st.kDz, kIz: st.kIz || 0, kIth: st.kIth || 0 });
+  // Work-mode starting gains: stable on the exact model, deliberately not an answer.
+  const W0 = { kPth: 3, kDth: 1.5, kPz: -0.01, kDz: -0.05 };
+
+  // ------------------------------------------------------------ shared UI --
+  function compControl(parent, ctx) {
+    segmented(parent, {
+      label: 'Gravity / equilibrium force',
+      options: [
+        { value: 'fl', label: 'F<sub>fl</sub>(z) (E.8e)', title: 'F = m1 g z/ℓ + m2 g/2 + F̃, with the measured z' },
+        { value: 'eq', label: 'F<sub>e</sub> at z<sub>e</sub>', title: 'F = F_e + F̃, constant' },
+        { value: 'none', label: 'none' },
+      ],
+      get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+    });
+  }
+
+  function workGainSliders(parent, ctx, { kI = false, kIth = false } = {}) {
+    E.knob(parent, ctx, 'kPth', 'k<sub>P<sub>θ</sub></sub>', 0, 10, 0.001);
+    E.knob(parent, ctx, 'kDth', 'k<sub>D<sub>θ</sub></sub>', 0, 5, 0.001);
+    E.knob(parent, ctx, 'kPz', 'k<sub>P<sub>z</sub></sub>', -0.15, 0, 0.00001, { unit: 'rad/m' });
+    E.knob(parent, ctx, 'kDz', 'k<sub>D<sub>z</sub></sub>', -0.3, 0, 0.00001, { unit: 'rad·s/m' });
+    if (kI) E.knob(parent, ctx, 'kIz', 'k<sub>I<sub>z</sub></sub>', -0.05, 0, 0.00001, { unit: 'rad/(m·s)' });
+    if (kIth) E.knob(parent, ctx, 'kIth', 'k<sub>I<sub>θ</sub></sub>', 0, 5, 0.001);
+  }
+
+  function designKnobs(parent, ctx, { rule = true } = {}) {
+    E.knob(parent, ctx, 'trTh', 't<sub>r<sub>θ</sub></sub>', 0.05, 3, 0.005, { unit: 's' });
+    E.knob(parent, ctx, 'zetaTh', 'ζ<sub>θ</sub>', 0.3, 1.5, 0.005);
+    E.knob(parent, ctx, 'M', 'M = t<sub>r<sub>z</sub></sub>/t<sub>r<sub>θ</sub></sub>', 1.5, 30, 0.1, { sig: 3, hint: 'bandwidth separation; the book suggests 5–10 (p. 118)' });
+    E.knob(parent, ctx, 'zetaZ', 'ζ<sub>z</sub>', 0.3, 1.5, 0.005);
+    if (rule) {
+      segmented(parent, {
+        label: 'ω<sub>n</sub> from t<sub>r</sub>',
+        options: [{ value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5' }, { value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))' }],
+        get: () => ctx.st.rule, set: (v) => { ctx.st.rule = v; ctx.update(); },
+      });
+    }
+  }
+
+  function gainReadout(parent, ctx, keys = ['kPth', 'kDth', 'kPz', 'kDz']) {
+    const names = { kPth: 'kPθ', kDth: 'kDθ', kPz: 'kPz', kDz: 'kDz', kIz: 'kIz', kIth: 'kIθ' };
+    E.readout(parent, () => keys.map((k) => [names[k], fmt(ctx.gains[k], 4)]));
+  }
+
+  // Inner/outer separation readout from the current gains.
+  function separationReadout(parent, ctx) {
+    E.readout(parent, () => {
+      const g = ctx.gains, b0 = ctx.sys.linear(ctx.pModel).b0;
+      const wi = Math.sqrt(Math.max(0, b0 * g.kPth)), wo = Math.sqrt(Math.max(0, -ctx.pModel.g * g.kPz));
+      return [['ωn,θ', `${fmt(wi, 3)} rad/s`], ['ωn,z', `${fmt(wo, 3)} rad/s`], ['ratio', fmt(wi / wo, 3)]];
+    });
+  }
+
+  // s-plane: inner loop (θ) poles and outer loop (z) poles, plus target rings.
+  function loopMarkers(ctx, { drag = false, targets = null } = {}) {
+    const g = ctx.gains, p = ctx.pModel;
+    const b0 = ctx.sys.linear(p).b0;
+    const mk = [{ re: 0, im: 0, kind: 'ol', label: 'double pole of b₀/s² and −g/s²' }];
+    const zoomOuter = ctx.st.zoom === 'outer';
+    E.innerPoles(b0, g).forEach((q) => mk.push({ ...q, kind: 'obs', label: 'inner-loop pole (θ)', dragId: drag ? 0 : undefined, noFit: zoomOuter }));
+    E.outerPoles(p, g).forEach((q) => mk.push({ ...q, kind: 'cl', label: 'outer-loop pole (z, inner loop as k_DC)', dragId: drag ? 1 : undefined }));
+    if (targets) {
+      const d = targets;
+      E.innerPoles(b0, d).forEach((q) => mk.push({ ...q, kind: 'target', label: 'target pole (inner spec)', noFit: zoomOuter }));
+      E.outerPoles(p, d).forEach((q) => mk.push({ ...q, kind: 'target', label: 'target pole (outer spec)' }));
+    }
+    return mk;
+  }
+  const KIND_NAMES = { obs: 'inner-loop pole (θ)', cl: 'outer-loop pole (z)', ol: 'open-loop poles', target: 'target pole (spec)' };
+
+  function loopDrag(ctx, id, re, im) {
+    const st = ctx.st;
+    re = Math.min(-1e-3, re);
+    const wn = Math.hypot(re, im);
+    const zeta = Math.max(0.3, Math.min(1, -re / wn));
+    const tr = st.rule === 'tp' ? Math.PI / (2 * wn * Math.sqrt(Math.max(1e-6, 1 - zeta * zeta))) : 2.2 / wn;
+    if (id === 0) { const trZ = st.M * st.trTh; st.zetaTh = zeta; st.trTh = Math.max(0.02, tr); st.M = Math.max(1.5, trZ / st.trTh); }
+    else { st.zetaZ = zeta; st.M = Math.max(1.5, tr / st.trTh); }
+    ctx.update();
+  }
+
+  function zoomControl(parent, ctx) {
+    segmented(parent, {
+      label: 's-plane scale',
+      options: [{ value: 'both', label: 'both loops' }, { value: 'outer', label: 'zoom to outer loop' }],
+      get: () => ctx.st.zoom, set: (v) => { ctx.st.zoom = v; ctx.update(); },
+    });
+  }
+
+  function thetaRSeries(ctx, res, sc, oi) {
+    if (oi !== 1 || !res.extras.thetaR) return [];
+    return [{ label: 'θᵣ (outer-loop command)', y: sc(res.extras.thetaR), color: '--series-3', dash: [4, 3], width: 1.5 }];
+  }
+
+  // Math cards shared by the successive-loop chapters.
+  function designModelCard(ctx) {
+    const lin = ctx.sys.linear(ctx.pModel);
+    return {
+      title: 'Design model (cascade)', page: 'p. 117 · Fig. 8-10, p. 387 · E.5(c)',
+      theory: 'P_{in}(s) = \\frac{b_0}{s^2},\\; b_0 = \\frac{\\ell}{\\frac{m_2\\ell^2}{3} + m_1 z_e^2},\\quad P_{out}(s) = -\\frac{g}{s^2},\\quad z_e = \\tfrac{\\ell}{2}',
+      numbers: `b_0 = ${tex(lin.b0)},\\quad P_{in} = \\frac{${tex(lin.b0)}}{s^2},\\quad P_{out} = \\frac{${tex(-ctx.pModel.g)}}{s^2}`,
+      spoiler: true,
+    };
+  }
+  function equilibriumCard(ctx) {
+    const p = ctx.pModel, s = ctx.sys;
+    return {
+      title: 'x_e, F_e and feedback linearization', page: 'p. 386 · E.4, p. 388 · E.8(e)',
+      theory: 'x_e = (\\tfrac{\\ell}{2}, 0, 0, 0),\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2},\\quad F = F_{fl}(z) + \\tilde F,\\; F_{fl}(z) = \\frac{m_1 g z}{\\ell} + \\frac{m_2 g}{2}',
+      numbers: `F_e = ${tex(s.Fe(p))}\\,\\text{N},\\quad F_{fl}(z) = ${tex(p.m1 * p.g / p.ell)}\\,z + ${tex(p.m2 * p.g / 2)}`,
+      spoiler: true,
+      note: 'F_e is one number for one z_e. F_fl(z) follows the block, so the beam stays balanced wherever the block is; that removes the m₁g z̃ term the design model drops.',
+    };
+  }
+  function innerCard(ctx, d) {
+    return {
+      title: 'Inner loop (θ)', page: 'p. 124–125 (B.8), p. 387 · E.8(b, c)',
+      theory: '\\frac{\\Theta}{\\Theta_r} = \\frac{b_0 k_{P_\\theta}}{s^2 + b_0 k_{D_\\theta}s + b_0 k_{P_\\theta}},\\quad k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{DC_\\theta} = 1',
+      numbers: `\\omega_{n_\\theta} = ${tex(d.wTh)}\\;\\Rightarrow\\; k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\quad p = ${E.innerPoles(d.b0, d).map((q) => texPole(q)).join(',\\;')}`,
+      spoiler: true,
+    };
+  }
+  function outerCard(ctx, d) {
+    return {
+      title: 'Outer loop (z), inner loop as its DC gain', page: 'p. 118 · Fig. 8-11, p. 387 · E.8(d)',
+      theory: '\\frac{Z}{Z_r} = \\frac{-g k_{DC}k_{P_z}}{s^2 - g k_{DC}k_{D_z}s - g k_{DC}k_{P_z}},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g k_{DC}},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g k_{DC}}',
+      numbers: `t_{r_z} = ${tex(d.trZ)}\\,\\text{s},\\; \\omega_{n_z} = ${tex(d.wZ)}\\;\\Rightarrow\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)}`,
+      spoiler: true,
+      note: 'Both outer gains are negative: tilting the beam up (θ > 0) sends the block toward the pivot.',
+    };
+  }
+  function separationCard(ctx) {
+    const g = ctx.gains, p = ctx.pModel;
+    const b0 = ctx.sys.linear(p).b0;
+    const pi = E.innerPoles(b0, g), po = E.outerPoles(p, g);
+    const full = E.nestedPoles(p, g, 'fl');
+    const wi = Math.sqrt(Math.max(0, b0 * g.kPth)), wo = Math.sqrt(Math.max(0, -p.g * g.kPz));
+    return {
+      title: 'Bandwidth separation', page: 'p. 117–118, p. 315 (B.17c)',
+      theory: 't_{r_z} = M\\,t_{r_\\theta},\\; M \\approx 5\\text{–}10 \\;\\Rightarrow\\; \\omega_{n_\\theta} = M\\omega_{n_z}',
+      numbers: `\\text{inner } ${pi.map((q) => texPole(q)).join(',\\;')},\\quad \\text{outer } ${po.map((q) => texPole(q)).join(',\\;')},\\quad \\omega_{n_\\theta}/\\omega_{n_z} = ${tex(wi / wo, 3)}`,
+      note: `Poles of the actual 4th-order nested loop (design model): ${E.poleText(full)}. They sit close to the two separate designs when the separation is large.`,
+    };
+  }
+
+  // The sampled F_fl(z_k) is held for T_s while gravity on the block changes
+  // continuously; with the tiny E.8 outer gains this matters (see ISSUES.md).
+  function holdCard(ctx) {
+    const p = ctx.pModel, g = ctx.gains, Ts = ctx.S.sim.Ts;
+    return {
+      title: 'Sampling the feedback-linearizing force', page: 'p. 155–158 (digital implementation)',
+      theory: 'F_{fl}(z_k) \\text{ held over } [t_k, t_k + T_s] \\Rightarrow \\text{uncancelled } \\frac{m_1 g}{\\ell}\\big(z(t) - z_k\\big) \\approx \\frac{m_1 g}{\\ell}\\dot z\\,(t - t_k)',
+      numbers: `\\text{average } \\frac{m_1 g T_s}{2\\ell} = ${tex(p.m1 * p.g * Ts / (2 * p.ell))}\\;\\text{N·s/m vs. the designed } |k_{P_\\theta}k_{D_z}| = ${tex(Math.abs(g.kPth * g.kDz))}`,
+      note: 'The held force lags the block, which acts like negative damping on ż. With the E.8 gains and T_s = 0.01 s it eats more than half of the outer-loop damping: the simulated overshoot is ~48% instead of ~4%. Try T_s = 0.001 s (left panel): ~7%. The dashed linear model has no sampling of F_fl, so it shows the design.',
+    };
+  }
+
+  // Peak |F| demanded for a z̃_r step from rest at z_e, gains designed from t_rz
+  // (with t_rθ = t_rz/M), F_fl(z) on, no saturation. Used for E.8(f).
+  function peakForTrZ(ctx, trZ, k) {
+    const p = ctx.pModel, s = ctx.sys;
+    const d = E.pdDesign(p, { ...k, trTh: trZ / k.M });
+    const z0 = s.ze(p);
+    const out = WB.sim.simulate({
+      plant: { f: (x, u) => s.f(x, u, p), h: s.h, uLimit: Infinity },
+      controller: E.nestedPID(ctx, d, { comp: 'fl', meas: 'state' }),
+      reference: () => z0 + k.step, disturbance: null, noise: null,
+      x0: [z0, 0, 0, 0], Ts: ctx.S.sim.Ts, tEnd: Math.max(5, 5 * trZ),
+    });
+    let peak = 0;
+    for (const u of out.uDemand) peak = Math.max(peak, Math.abs(u));
+    return peak;
+  }
+  function fastestTrZ(ctx, k) {
+    const Fmax = ctx.sys.uLimit(ctx.pModel);
+    let lo = 0.1, hi = 10;  // E.8 nominal t_rz; much slower loops go unstable on this step
+    if (peakForTrZ(ctx, hi, k) > Fmax) return NaN;
+    for (let i = 0; i < 40; i++) {
+      const mid = 0.5 * (lo + hi);
+      if (peakForTrZ(ctx, mid, k) > Fmax) lo = mid; else hi = mid;
+    }
+    return hi;
+  }
+
+  function useGains(ctx, vals) {
+    ctx.app.setMode('work');
+    Object.assign(ctx.st, vals);
+    ctx.update();
+  }
+
+  // ------------------------------------------------------------- Chapter 8 --
+  CH.ch8 = {
+    id: 'ch8', num: 8, tab: 'Ch 8', title: 'Successive loop closure (PD)', pages: 'pp. 107–136',
+
+    defaults(sys) {
+      const pr = sys.problems.ch8;
+      return { comp: 'fl', ...W0, trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaZ: pr.zetaZ, rule: '2.2', zoom: 'both' };
+    },
+    simDefaults(sys) { return sys.problems.ch8.sim; },
+    gains(ctx) { return ctx.S.mode === 'work' ? workGains(ctx.st) : designed(ctx); },
+    toWork(ctx) { const g = designed(ctx); Object.assign(ctx.st, { kPth: g.kPth, kDth: g.kDth, kPz: g.kPz, kDz: g.kDz }); },
+    controller(ctx, o) { return E.nestedPID(ctx, ctx.gains, { comp: ctx.st.comp, meas: 'state' }, o); },
+    linearSim(ctx, c) { return E.nestedLinearSim(ctx, c, ctx.gains, {}); },
+    linearLabel: 'linear design model',
+    targets(ctx) { return { tr: designed(ctx).trZ, zeta: ctx.st.zetaZ }; },
+    outputSeries: thetaRSeries,
+
+    buildControls(parent, ctx) {
+      const sec = section(parent, 'PD inner and outer loops', 'p. 117 · Fig. 8-10');
+      compControl(sec, ctx);
+      if (ctx.S.mode === 'work') workGainSliders(sec, ctx);
+      separationReadout(sec, ctx);
+      const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Design knobs', 'p. 387 · E.8(b, d)');
+      designKnobs(spec, ctx);
+      if (ctx.S.mode === 'explore') {
+        spec.append(el('p', { class: 'muted small', text: 'Drag an inner (θ) or outer (z) pole. Moving the outer pair changes M; moving the inner pair keeps t_rz.' }));
+        gainReadout(spec, ctx);
+      }
+      zoomControl(spec, ctx);
+    },
+
+    splane(ctx) {
+      const work = ctx.S.mode === 'work';
+      return { markers: loopMarkers(ctx, { drag: !work, targets: work ? designed(ctx) : null }), kindNames: KIND_NAMES, zetaRay: ctx.st.zetaZ < 1 ? ctx.st.zetaZ : null };
+    },
+    onPoleDrag: loopDrag,
+
+    extraPlot(ctx, res) {
+      return {
+        opts: { title: 'force split F = F_ff + F̃', yLabel: 'F [N]', unit: 'N' },
+        data: { series: [
+          { label: ctx.st.comp === 'fl' ? 'F_fl(z)' : ctx.st.comp === 'eq' ? 'F_e' : 'no feedforward', y: Array.from(res.extras.ff || []), color: '--text-muted', width: 1.5 },
+          { label: 'F̃ (PD)', y: Array.from(res.extras.Ft || []), color: '--series-2', width: 1.5 },
+        ] },
+      };
+    },
+
+    math(ctx) {
+      const d = designed(ctx);
+      const Fmax = ctx.sys.uLimit(ctx.pModel);
+      return [
+        designModelCard(ctx), equilibriumCard(ctx), innerCard(ctx, d), outerCard(ctx, d), separationCard(ctx), holdCard(ctx),
+        { title: 'Saturation and the outer rise time', page: 'p. 119–121 · Eq. 8.8, Fig. 8-13',
+          theory: '|F_{fl}(z) + \\tilde F| \\le F_{max},\\quad \\tilde F(0^+) = k_{P_\\theta}k_{P_z}\\,\\tilde z_r \\;(\\text{negative for } \\tilde z_r > 0)',
+          numbers: `F_{max} = ${tex(Fmax)}\\,\\text{N},\\quad F_{fl}(z_e + 0.25) = ${tex(ctx.sys.Ffl(ctx.sys.ze(ctx.pModel) + 0.25, ctx.pModel))}\\,\\text{N}`,
+          spoiler: true,
+          note: 'The first kick tilts the beam down and lowers F, where there is plenty of room. The binding limit comes later, when the beam brakes the block near the end of the beam and F_fl(z) has grown.' },
+      ];
+    },
+
+    buildProblem(parent, ctx) {
+      const prob = ctx.sys.problems.ch8;
+      const spec = () => E.pdDesign(ctx.pModel, { trTh: prob.trTh, zetaTh: prob.zetaTh, M: prob.M, zetaZ: prob.zetaZ, rule: '2.2' });
+      const num = PD().num;
+      PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a', title: '(a) Operating point for design',
+          html: 'Block diagram: z<sub>r</sub> → [k<sub>P<sub>z</sub></sub>, k<sub>D<sub>z</sub></sub>s] → θ<sub>r</sub> → [k<sub>P<sub>θ</sub></sub>, k<sub>D<sub>θ</sub></sub>s] → F̃ → (+ F<sub>fl</sub>) → plant, with θ fed back to the inner loop and z to the outer loop (Fig. 8-10, p. 118).',
+          inputs: { ze: 'z<sub>e</sub> [m]', Fe: 'F<sub>e</sub> [N]' },
+          check: (v) => PD().checkNumbers(v, { ze: ctx.sys.ze(ctx.pModel), Fe: ctx.sys.Fe(ctx.pModel) }, { ze: 'ze', Fe: 'Fe' }),
+          solution: () => [
+            { tex: `z_e = \\tfrac{\\ell}{2} = ${tex(ctx.sys.ze(ctx.pModel))},\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2} = \\frac{(m_1 + m_2)g}{2} = ${tex(ctx.sys.Fe(ctx.pModel))}\\,\\text{N}` },
+          ],
+        },
+        {
+          id: 'b', title: `(b) Inner loop: t<sub>r<sub>θ</sub></sub> = ${prob.trTh} s, ζ<sub>θ</sub> = ${prob.zetaTh}`,
+          inputs: { kPth: 'k<sub>P<sub>θ</sub></sub>', kDth: 'k<sub>D<sub>θ</sub></sub>' },
+          check: (v) => PD().checkNumbers(v, { kPth: spec().kPth, kDth: spec().kDth }, { kPth: 'kPθ', kDth: 'kDθ' }),
+          solution: () => {
+            const d = spec();
+            return [
+              { tex: `b_0 = \\frac{\\ell}{m_2\\ell^2/3 + m_1\\ell^2/4} = ${tex(d.b0)},\\quad \\omega_{n_\\theta} = \\frac{2.2}{${prob.trTh}} = ${tex(d.wTh)}` },
+              { tex: `s^2 + b_0k_{D_\\theta}s + b_0k_{P_\\theta} = s^2 + 2\\zeta\\omega_n s + \\omega_n^2 \\Rightarrow k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)}` },
+              { html: 'Same steps as B.8(b) (pp. 124–125), with P<sub>in</sub> = b₀/s² from E.5(c).' },
+            ];
+          },
+        },
+        {
+          id: 'c', title: '(c) Inner-loop DC gain',
+          inputs: { kdc: 'k<sub>DC<sub>θ</sub></sub>' },
+          check: (v) => PD().checkNumbers(v, { kdc: 1 }, { kdc: 'kDC' }),
+          solution: () => [{ tex: 'k_{DC_\\theta} = \\lim_{s\\to0}\\frac{b_0k_{P_\\theta}}{s^2 + b_0k_{D_\\theta}s + b_0k_{P_\\theta}} = 1' }, { html: 'P<sub>in</sub> has no a₀ term (no gravity spring once F<sub>fl</sub> is used), unlike the pendulum\'s k<sub>DC</sub> = 1.89 in B.8.' }],
+        },
+        {
+          id: 'd', title: `(d) Outer loop: t<sub>r<sub>z</sub></sub> = ${prob.M}·t<sub>r<sub>θ</sub></sub>, ζ<sub>z</sub> = ${prob.zetaZ}`,
+          inputs: { kPz: 'k<sub>P<sub>z</sub></sub>', kDz: 'k<sub>D<sub>z</sub></sub>' },
+          check: (v) => PD().checkNumbers(v, { kPz: spec().kPz, kDz: spec().kDz }, { kPz: 'kPz', kDz: 'kDz' }),
+          actions: [{
+            label: 'Use my gains',
+            run: (v) => {
+              const a = E.answersOf(ctx, prob.id);
+              const vals = { kPth: num(a['b.kPth']), kDth: num(a['b.kDth']), kPz: num(v.kPz), kDz: num(v.kDz) };
+              if (Object.values(vals).some((x) => x === null)) return { ok: false, msg: 'Enter kPθ, kDθ in (b) and kPz, kDz here first.' };
+              useGains(ctx, vals); return null;
+            },
+          }],
+          solution: () => {
+            const d = spec();
+            return [
+              { tex: `\\omega_{n_z} = \\frac{2.2}{${prob.M}\\cdot${prob.trTh}} = ${tex(d.wZ)},\\quad s^2 - g k_{D_z}s - g k_{P_z} = s^2 + 2\\zeta_z\\omega_{n_z}s + \\omega_{n_z}^2` },
+              { tex: `k_{P_z} = -\\frac{\\omega_{n_z}^2}{g} = ${tex(d.kPz)},\\quad k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g} = ${tex(d.kDz)}` },
+              { html: 'Unlike the pendulum (B.8(d), pp. 125–127), −g/s² has no zeros, so no zero-cancelling filter is needed and plain PD gets the full second-order match.' },
+            ];
+          },
+        },
+        {
+          id: 'e', title: '(e) Simulate the square wave 0.25 ± 0.15 m at 0.01 Hz',
+          html: 'Passes when, with F<sub>fl</sub>(z) on, |z<sub>r</sub> − z| just before the first switch (t = 50 s) is under 5 mm and F stays inside ±F<sub>max</sub>.',
+          check: () => {
+            const res = ctx.app.result();
+            if (ctx.st.comp !== 'fl') return { ok: false, msg: 'Select F_fl(z): the problem asks for the actual block position in the equilibrium force.' };
+            const i = E.beforeSwitch(ctx, res);
+            const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]);
+            let peak = 0; for (const u of res.uDemand) peak = Math.max(peak, Math.abs(u));
+            const ok = e < 0.005 && peak <= ctx.sys.uLimit(ctx.pModel);
+            return { ok, msg: `error ${fmt(1000 * e, 3)} mm at t = ${fmt(res.t[i], 3)} s, peak |F| = ${fmt(peak, 3)} N.` };
+          },
+          solution: () => [{ html: 'With the E.8 gains the design is a slow second-order step (t<sub>r</sub> ≈ 10 s, ~4% overshoot), and F stays between about 9.5 and 13 N. The simulation at T<sub>s</sub> = 0.01 s overshoots by ~48% because F<sub>fl</sub>(z) is sampled and held (see the "Sampling the feedback-linearizing force" card); at T<sub>s</sub> = 0.001 s it is ~7%. Switch the equilibrium force to F<sub>e</sub> or none to see why F<sub>fl</sub>(z) matters: with F<sub>e</sub> the uncancelled m₁g z̃ term shifts the loop poles; with none the beam falls.' }],
+        },
+        {
+          id: 'f', title: `(f) Fastest t<sub>r<sub>z</sub></sub> without saturating on a ${prob.stepZ} m step of z̃<sub>r</sub>`,
+          html: `Checked by simulation: block at rest at z<sub>e</sub>, z̃<sub>r</sub> steps to ${prob.stepZ} m, t<sub>r<sub>θ</sub></sub> = t<sub>r<sub>z</sub></sub>/${prob.M}, ζ = ${prob.zetaTh}, F<sub>fl</sub>(z) on. The peak demanded |F| should land between 95% and 100% of F<sub>max</sub>.`,
+          inputs: { trZ: 't<sub>r<sub>z</sub></sub> [s]' },
+          check: (v) => {
+            const trZ = num(v.trZ);
+            if (trZ === null || trZ <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
+            const k = { trTh: 1, zetaTh: prob.zetaTh, M: prob.M, zetaZ: prob.zetaZ, rule: '2.2', step: prob.stepZ };
+            const pk = peakForTrZ(ctx, trZ, k) / ctx.sys.uLimit(ctx.pModel), pct = (100 * pk).toFixed(1);
+            if (pk > 1.0005) return { ok: false, msg: `Peak demand is ${pct}% of Fmax, so it saturates. Slow it down.` };
+            if (pk < 0.95) return { ok: false, msg: `Peak demand is ${pct}% of Fmax. You can go faster.` };
+            return { ok: true, msg: `Peak demand is ${pct}% of Fmax.` };
+          },
+          actions: [{
+            label: 'Try it',
+            run: (v) => {
+              const trZ = num(v.trZ);
+              if (trZ === null || trZ <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
+              ctx.app.setMode('explore');
+              Object.assign(ctx.st, { trTh: trZ / prob.M, M: prob.M, zetaTh: prob.zetaTh, zetaZ: prob.zetaZ, rule: '2.2', comp: 'fl' });
+              Object.assign(ctx.S.sim, { type: 'step', amplitude: prob.stepZ, tStep: 0, y0: ctx.sys.ze(ctx.pModel), tEnd: Math.max(10, 6 * trZ) });
+              ctx.update();
+              return null;
+            },
+          }],
+          solution: () => {
+            const k = { trTh: 1, zetaTh: prob.zetaTh, M: prob.M, zetaZ: prob.zetaZ, rule: '2.2', step: prob.stepZ };
+            const tr = fastestTrZ(ctx, k);
+            const d = E.pdDesign(ctx.pModel, { ...k, trTh: tr / prob.M });
+            const p = ctx.pModel, z0 = ctx.sys.ze(p);
+            return [
+              { html: `The Eq. 8.8 bound alone does not settle it here. Right after the step, ż = θ̇ = θ = 0, so F̃(0⁺) = k<sub>P<sub>θ</sub></sub>k<sub>P<sub>z</sub></sub>·0.25 is <em>negative</em> (the beam tilts down to start the block moving out). On that side the room is F<sub>fl</sub>(z<sub>e</sub>) + F<sub>max</sub> = ${fmt(ctx.sys.Ffl(z0, p) + ctx.sys.uLimit(p), 3)} N. The binding limit is the braking phase: the beam tilts up while the block nears z = ${fmt(z0 + prob.stepZ, 3)} m, where F<sub>fl</sub> = ${fmt(ctx.sys.Ffl(z0 + prob.stepZ, p), 3)} N leaves only ${fmt(ctx.sys.uLimit(p) - ctx.sys.Ffl(z0 + prob.stepZ, p), 3)} N for F̃.` },
+              { tex: `\\text{bisection on the simulated peak}:\\quad t_{r_z} \\approx ${tex(tr, 3)}\\,\\text{s}\\;(t_{r_\\theta} = ${tex(tr / prob.M, 3)}),\\quad k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)}` },
+              { html: 'This reads "step of 0.25 on z̃<sub>r</sub>" as z<sub>r</sub> going from z<sub>e</sub> to z<sub>e</sub> + 0.25 with the block starting at z<sub>e</sub>. Starting at z = 0 instead gives t<sub>r<sub>z</sub></sub> ≈ 1.04 s (see ISSUES.md).' },
+            ];
+          },
+        },
+      ]);
+    },
+  };
+
+  // ------------------------------------------------------------- Chapter 9 --
+  // Reference shapes on z: step, ramp (slope [m/s]), parabola (r = A t², [m/s²]).
+  function shapedReference(ctx, base) {
+    const S = ctx.S, A = S.sim.amplitude, t0 = S.sim.tStep, z0 = S.sim.y0;
+    if (ctx.st.input === 'ramp') return (t) => (t < t0 ? z0 : z0 + A * (t - t0));
+    if (ctx.st.input === 'parabola') return (t) => (t < t0 ? z0 : z0 + A * (t - t0) ** 2);
+    return base;
+  }
+
+  CH.ch9 = {
+    id: 'ch9', num: 9, tab: 'Ch 9', title: 'System type (nested loops)', pages: 'pp. 137–154',
+    defaults(sys) {
+      const pr = sys.problems.ch8;
+      return { comp: 'fl', ...W0, kIz: 0, trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaZ: pr.zetaZ, rule: '2.2', kIzx: 0, input: 'step', zoom: 'both' };
+    },
+    simDefaults(sys) { return sys.problems.ch9.sim; },
+    gains(ctx) { return ctx.S.mode === 'work' ? workGains(ctx.st) : { ...designed(ctx), kIz: ctx.st.kIzx }; },
+    toWork(ctx) { const g = designed(ctx); Object.assign(ctx.st, { kPth: g.kPth, kDth: g.kDth, kPz: g.kPz, kDz: g.kDz, kIz: ctx.st.kIzx }); },
+    controller(ctx, o) { return E.nestedPID(ctx, ctx.gains, { comp: ctx.st.comp, meas: 'state' }, o); },
+    reference: shapedReference,
+    outputSeries: thetaRSeries,
+
+    analysis(ctx) {
+      const g = ctx.gains, p = ctx.pModel, b0 = ctx.sys.linear(p).b0;
+      const hasI = Math.abs(g.kIz) > 0;
+      const MaIn = b0 * g.kPth;                // lim s² P_in C_in, C_in = kP + kD s
+      const MaOut = -p.g * g.kPz;              // lim s² P_out C_out (PD)
+      return {
+        inType: 2, inParab: 1 / MaIn, inDistType: 0, inDist: 1 / g.kPth,
+        outType: hasI ? 3 : 2, outParab: hasI ? 0 : 1 / MaOut,
+        outDistType: hasI ? 1 : 0, outDist: hasI ? 1 / g.kIz : 1 / g.kPz,
+        forceToZ: hasI ? 0 : -1 / (g.kPth * g.kPz),   // whole nested loop, force d [N] → z [m]
+        hasI,
+      };
+    },
+
+    buildControls(parent, ctx) {
+      const sec = section(parent, 'Nested PD / PID', 'p. 140–142 (B.9)');
+      compControl(sec, ctx);
+      segmented(sec, {
+        label: 'Reference on z (amplitude = size [m], slope [m/s] or coefficient [m/s²])',
+        options: [{ value: 'step', label: 'step' }, { value: 'ramp', label: 'ramp' }, { value: 'parabola', label: 'parabola' }],
+        get: () => ctx.st.input, set: (v) => { ctx.st.input = v; ctx.update(); },
+      });
+      if (ctx.S.mode === 'work') workGainSliders(sec, ctx, { kI: true });
+      else {
+        designKnobs(sec, ctx, { rule: false });
+        E.knob(sec, ctx, 'kIzx', 'k<sub>I<sub>z</sub></sub>', -0.002, 0, 0.000005, { unit: 'rad/(m·s)' });
+        gainReadout(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz', 'kIz']);
+      }
+      const ty = section(parent, 'System type analysis', 'p. 141 · Table 9-1');
+      const box = el('div', { class: 'metrics' });
+      ty.append(box);
+      WB.ui.addRefresher(() => this.renderType(box, ctx));
+    },
+
+    renderType(box, ctx) {
+      const a = this.analysis(ctx), S = ctx.S, st = ctx.st;
+      const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
+      const show = S.mode === 'explore' || ctx.app.isRevealed('E:ch9:type');
+      const A = S.sim.amplitude;
+      const predZ = st.input === 'parabola' ? 2 * A * a.outParab : 0;  // r = A t² ⇒ R = 2A/s³
+      const res = ctx.app.result();
+      const n = res ? res.t.length - 1 : 0;
+      const eEnd = res ? res.rAll[0][n] - res.yAll[0][n] : NaN;
+      const rows = [];
+      if (show) {
+        rows.push(row('inner loop (θ) tracking type', `type ${a.inType}`));
+        rows.push(row('inner input-disturbance type', `type ${a.inDistType}`));
+        rows.push(row('outer loop (z) tracking type', `type ${a.outType}`));
+        rows.push(row('outer input-disturbance type', `type ${a.outDistType}`));
+        rows.push(row(`predicted e_z (${st.input})`, isFinite(predZ) ? `${fmt(predZ, 3)} m` : '∞'));
+        rows.push(row(`predicted e_z from force d = ${fmt(S.sim.dist, 3)} N`, `${fmt(a.forceToZ * S.sim.dist, 3)} m`));
+      } else {
+        rows.push(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the predicted types and errors', onclick: () => { ctx.app.reveal('E:ch9:type'); WB.ui.refreshAll(); } }));
+      }
+      rows.push(row('simulated z_r − z at t_end', isFinite(eEnd) ? `${fmt(eEnd, 3)} m` : '—'));
+      box.replaceChildren(...rows);
+    },
+
+    splane(ctx) { return { markers: loopMarkers(ctx), kindNames: KIND_NAMES }; },
+
+    math(ctx) {
+      const a = this.analysis(ctx);
+      return [
+        designModelCard(ctx),
+        { title: 'Error constants and system type', page: 'p. 141 · Table 9-1',
+          theory: 'M_p = \\lim_{s\\to0} PC,\\quad M_v = \\lim_{s\\to0} sPC,\\quad M_a = \\lim_{s\\to0} s^2PC,\\quad e_{step} = \\tfrac{1}{1+M_p},\\; e_{ramp} = \\tfrac{1}{M_v},\\; e_{parab} = \\tfrac{1}{M_a}' },
+        { title: 'Inner loop: P_in C_in = b₀(k_D s + k_P)/s²', page: 'p. 143 (C.9 has the same plant)',
+          theory: '\\text{two free integrators} \\Rightarrow \\text{type 2},\\quad M_a = b_0 k_{P_\\theta},\\quad \\frac{P_{in}}{1 + P_{in}C_{in}}\\Big|_{s\\to0} = \\frac{1}{k_{P_\\theta}}',
+          numbers: `e_{parab} = \\frac{1}{b_0k_{P_\\theta}} = ${tex(a.inParab)},\\quad e_{d,step} = \\frac{1}{k_{P_\\theta}} = ${tex(a.inDist)}\\;\\text{rad/N}`, spoiler: true },
+        { title: 'Outer loop: P_out C_out = −g(k_D s² + k_P s + k_I)/s³', page: 'p. 141–142 (B.9)',
+          theory: 'k_I = 0: \\text{type 2},\\; M_a = -gk_{P_z};\\quad k_I \\ne 0: \\text{type 3},\\quad \\frac{P_{out}}{1+P_{out}C_{out}}\\Big|_{s\\to0} = \\frac{1}{k_{P_z}} \\;\\text{(PD)},\\; \\to \\frac{1}{k_{I_z}}\\frac{1}{s} \\;\\text{(PID)}',
+          numbers: a.hasI ? `\\text{type 3; input-disturbance type 1, ramp error } \\frac{1}{k_{I_z}} = ${tex(a.outDist)}` : `e_{parab} = -\\frac{1}{gk_{P_z}} = ${tex(a.outParab)},\\quad e_{d,step} = \\frac{1}{k_{P_z}} = ${tex(a.outDist)}\\;\\text{m/rad}`,
+          spoiler: true },
+        { title: 'A force disturbance through both loops', page: 'follows from p. 143–144',
+          theory: '\\text{steady state: } \\theta = 0,\\; \\tilde F = -d \\Rightarrow \\theta_r = -\\frac{d}{k_{P_\\theta}} \\Rightarrow e_z = -\\frac{d}{k_{P_\\theta}k_{P_z}}\\;(\\text{PD}),\\quad 0\\;(\\text{PID})',
+          numbers: `-\\frac{1}{k_{P_\\theta}k_{P_z}} = ${tex(a.forceToZ)}\\;\\text{m/N}`, spoiler: true,
+          note: 'With the E.8 gains this is about 110 m per newton: the slow outer loop can only command tiny beam angles, so any unmodeled force pushes the block off the beam. This is why E.10 needs integrators and faster loops.' },
+      ];
+    },
+
+    buildProblem(parent, ctx) {
+      const prob = ctx.sys.problems.ch9;
+      const a = () => this.analysis(ctx);
+      const absCheck = (v, truth, labels) => {
+        const vv = { ...v };
+        for (const k of Object.keys(truth)) { const g = PD().num(v[k]); if (g !== null && truth[k] !== 0) vv[k] = String(Math.abs(g) * Math.sign(truth[k])); }
+        return PD().checkNumbers(vv, truth, labels);
+      };
+      PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a1', title: '(a) Inner loop under PD: tracking',
+          html: 'Errors for a unit input (unit parabola: R(s) = 1/s³), using the current gains.',
+          inputs: { type: 'type', step: 'e<sub>step</sub>', ramp: 'e<sub>ramp</sub>', parab: 'e<sub>parab</sub> [rad]' },
+          check: (v) => PD().checkNumbers(v, { type: 2, step: 0, ramp: 0, parab: a().inParab }, { parab: 'e_parab' }),
+          solution: () => [
+            { tex: `P_{in}C_{in} = \\frac{b_0(k_{D_\\theta}s + k_{P_\\theta})}{s^2} \\Rightarrow \\text{type 2},\\quad e_{parab} = \\frac{1}{b_0 k_{P_\\theta}} = ${tex(a().inParab)}` },
+            { html: 'Step and ramp errors are zero. Book convention (p. 145): the loop gain with C = k<sub>P</sub> + k<sub>D</sub>s; with the derivative on the output the type is the same but the error values can differ.' },
+          ],
+        },
+        {
+          id: 'a2', title: '(a) Inner loop: input disturbance',
+          inputs: { type: 'type', e: 'e<sub>ss</sub> per N of step d [rad/N]' },
+          check: (v) => absCheck(v, { type: 0, e: a().inDist }, { e: 'e_ss' }),
+          solution: () => [{ tex: `\\lim_{s\\to0}\\frac{P_{in}}{1 + P_{in}C_{in}} = \\lim_{s\\to0}\\frac{b_0}{s^2 + b_0(k_{D_\\theta}s + k_{P_\\theta})} = \\frac{1}{k_{P_\\theta}} = ${tex(a().inDist)} \\Rightarrow \\text{type 0}` }],
+        },
+        {
+          id: 'b1', title: '(b) Outer loop under PD (k<sub>I<sub>z</sub></sub> = 0)',
+          inputs: { type: 'type', parab: 'e<sub>parab</sub> [m]' },
+          check: (v) => {
+            if (a().hasI) return { ok: false, msg: 'Set kIz = 0 first.' };
+            return PD().checkNumbers(v, { type: 2, parab: a().outParab }, { parab: 'e_parab' });
+          },
+          solution: () => [{ tex: `P_{out}C_{out} = \\frac{-g(k_{D_z}s + k_{P_z})}{s^2} \\Rightarrow \\text{type 2},\\quad e_{parab} = \\frac{1}{M_a} = -\\frac{1}{gk_{P_z}}${a().hasI ? '' : ' = ' + tex(a().outParab)}` }, { html: 'Step and ramp errors are zero.' }],
+        },
+        {
+          id: 'b2', title: '(b) Outer loop with an integrator (k<sub>I<sub>z</sub></sub> ≠ 0)',
+          inputs: { type: 'type' },
+          check: (v) => {
+            if (!a().hasI) return { ok: false, msg: 'Set kIz ≠ 0 first.' };
+            return PD().checkNumbers(v, { type: 3 }, {});
+          },
+          solution: () => [{ tex: 'P_{out}C_{out} = \\frac{-g(k_Ds^2 + k_Ps + k_I)}{s^3} \\Rightarrow \\text{type 3: zero error to steps, ramps and parabolas}' }],
+        },
+        {
+          id: 'b3', title: '(b) Outer loop: input disturbance (on the beam angle)',
+          html: 'Magnitudes. PD: error per unit step d; PID: error per unit ramp slope of d.',
+          inputs: { tPD: 'type (PD)', ePD: '|e| PD [m/rad]', tPID: 'type (PID)' },
+          check: (v) => {
+            const g = ctx.gains;
+            return absCheck(v, { tPD: 0, ePD: 1 / g.kPz, tPID: 1 }, { ePD: 'PD error' });
+          },
+          solution: () => {
+            const g = ctx.gains;
+            return [
+              { tex: `\\text{PD: }\\lim_{s\\to0}\\frac{-g}{s^2 - g(k_{D_z}s + k_{P_z})} = \\frac{1}{k_{P_z}} = ${tex(1 / g.kPz)}\\;(\\text{type 0})` },
+              { tex: `\\text{PID: }\\lim_{s\\to0} s\\frac{-g}{s^3 - g(k_{D_z}s^2 + k_{P_z}s + k_{I_z})}\\frac{1}{s^2} = \\frac{1}{k_{I_z}}\\;(\\text{type 1})` },
+              { html: 'The "Force disturbance" card shows what this means for a force on the beam: divide again by k<sub>P<sub>θ</sub></sub>.' },
+            ];
+          },
+        },
+      ]);
+    },
+  };
+
+  // ------------------------------------------------- Appendix P.6 (root locus) --
+  function rootLocus(den, num, kMax, steps = 300) {
+    const branches = [];
+    let prev = null;
+    for (let i = 0; i <= steps; i++) {
+      const k = kMax * Math.pow(i / steps, 2);
+      let r = L.roots(L.polyAdd(den, L.polyScale(num, k)));
+      if (prev) {
+        const used = new Set(), ordered = [];
+        for (const q of prev) {
+          let best = -1, bd = Infinity;
+          r.forEach((c, j) => { if (!used.has(j)) { const d = Math.hypot(c.re - q.re, c.im - q.im); if (d < bd) { bd = d; best = j; } } });
+          used.add(best); ordered.push(r[best]);
+        }
+        r = ordered;
+      } else {
+        r.forEach(() => branches.push([]));
+      }
+      r.forEach((c, j) => branches[j].push(c));
+      prev = r;
+    }
+    return branches;
+  }
+
+  CH.p6 = {
+    id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I (outer loop)', pages: 'pp. 465–474',
+    defaults(sys) {
+      const pr = sys.problems.ch8;
+      return { comp: 'fl', trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaZ: pr.zetaZ, rule: '2.2', kI: -0.0003, kMaxFactor: 1.5, zoom: 'outer' };
+    },
+    simDefaults(sys) { return sys.problems.p6.sim; },
+    gains(ctx) { return { ...designed(ctx), kIz: ctx.st.kI }; },
+    controller(ctx, o) { return E.nestedPID(ctx, ctx.gains, { comp: ctx.st.comp, meas: 'state' }, o); },
+    outputSeries: thetaRSeries,
+
+    // 1 + k L(s) = 0 with k = −k_I ≥ 0 and L(s) = g k_DC / (s³ − g k_DC k_Dz s² − g k_DC k_Pz s)
+    evans(ctx) {
+      const d = designed(ctx), g = ctx.pModel.g;
+      const den = [1, -g * d.kDC * d.kDz, -g * d.kDC * d.kPz, 0];
+      const num = [g * d.kDC];
+      return { d, den, num, kCrit: den[1] * den[2] / num[0] };
+    },
+    clPoly(ev, kI) { return L.polyAdd(ev.den, L.polyScale(ev.num, -kI)); },
+
+    buildControls(parent, ctx) {
+      const sec = section(parent, 'PD from E.8, then add k_I < 0', 'p. 388 · E.P.6');
+      compControl(sec, ctx);
+      designKnobs(sec, ctx, { rule: false });
+      E.knob(sec, ctx, 'kI', 'k<sub>I<sub>z</sub></sub>', -0.003, 0, 0.000002, { unit: 'rad/(m·s)', sig: 3 });
+      E.knob(sec, ctx, 'kMaxFactor', 'locus to', 0.2, 5, 0.1, { unit: '× |kI,crit|', sig: 2 });
+      sec.append(el('p', { class: 'muted small', text: 'Drag a closed-loop pole along the locus to set k_I.' }));
+      if (ctx.S.mode === 'explore') gainReadout(sec, ctx, ['kPz', 'kDz', 'kIz']);  // E.8(d) answers stay hidden in Work mode
+      zoomControl(sec, ctx);
+    },
+
+    splane(ctx) {
+      const ev = this.evans(ctx);
+      const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, -ctx.st.kI * 1.2, 1e-6);
+      const loci = rootLocus(ev.den, ev.num, kMax);
+      const markers = L.roots(ev.den).map((q, i) => ({ ...q, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
+      L.roots(this.clPoly(ev, ctx.st.kI)).forEach((q, i) => markers.push({ ...q, kind: 'cl', label: `closed-loop pole at kI = ${fmt(ctx.st.kI, 3)}`, dragId: i }));
+      const fitR = Math.max(...L.roots(ev.den).map((q) => Math.hypot(q.re, q.im))) * 1.6;
+      return { markers, loci, fitR };
+    },
+
+    onPoleDrag(ctx, id, re, im) {
+      const ev = this.evans(ctx);
+      const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, 1e-6);
+      let best = -ctx.st.kI, bd = Infinity;
+      for (let i = 0; i <= 400; i++) {
+        const k = kMax * i / 400;
+        for (const q of L.roots(L.polyAdd(ev.den, L.polyScale(ev.num, k)))) {
+          const d = Math.hypot(q.re - re, q.im - im);
+          if (d < bd) { bd = d; best = k; }
+        }
+      }
+      ctx.st.kI = -best;
+      ctx.update();
+    },
+
+    math(ctx) {
+      const ev = this.evans(ctx);
+      return [
+        { title: 'Closed outer loop with PID (inner loop as k_DC = 1)', page: 'p. 470 (A.P.6 form)',
+          theory: '\\Delta_{cl}(s) = s^3 - gk_{D_z}s^2 - gk_{P_z}s - gk_{I_z}',
+          numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(this.clPoly(ev, ctx.st.kI))}`, spoiler: true },
+        { title: 'Evans form (negated, since k_I < 0)', page: 'p. 466, p. 388 · E.P.6',
+          theory: '1 + (-k_{I_z})\\,L(s) = 0,\\quad L(s) = \\frac{g}{s^3 - gk_{D_z}s^2 - gk_{P_z}s}',
+          numbers: `L(s) = \\frac{${tex(ev.num[0])}}{${WB.tf.polyTex(ev.den)}},\\quad k_{P_z} = ${tex(ev.d.kPz)},\\; k_{D_z} = ${tex(ev.d.kDz)}`, spoiler: true },
+        { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
+          theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ stable} \\iff c_i > 0,\\; c_2c_1 > c_0 \\;\\Rightarrow\\; k_{I,crit} = -g\\,k_{D_z}k_{P_z}',
+          numbers: `k_{I,crit} = ${tex(-ev.kCrit)}`, spoiler: true,
+          note: 'Any k_I between k_I,crit and 0 is stable; the smaller |k_I|, the less the PD pair moves and the slower the integrator removes errors.' },
+      ];
+    },
+
+    buildProblem(parent, ctx) {
+      const prob = ctx.sys.problems.p6;
+      PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a', title: 'Evans form: 1 + (−k<sub>I</sub>) c / (s³ + d<sub>2</sub>s² + d<sub>1</sub>s) = 0',
+          html: 'Uses the PD gains from the current t<sub>r<sub>θ</sub></sub>, M, ζ (E.8: 1 s, 10, 0.707).',
+          inputs: { c: 'c', d2: 'd<sub>2</sub>', d1: 'd<sub>1</sub>' },
+          check: (v) => { const ev = this.evans(ctx); return PD().checkNumbers(v, { c: ev.num[0], d2: ev.den[1], d1: ev.den[2] }, {}); },
+          solution: () => {
+            const ev = this.evans(ctx);
+            return [
+              { tex: 's^3 - gk_{D_z}s^2 - gk_{P_z}s - gk_{I_z} = 0 \\;\\Rightarrow\\; 1 + (-k_{I_z})\\frac{g}{s^3 - gk_{D_z}s^2 - gk_{P_z}s} = 0' },
+              { tex: `c = g = ${tex(ev.num[0])},\\quad d_2 = ${tex(ev.den[1])},\\quad d_1 = ${tex(ev.den[2])}` },
+            ];
+          },
+        },
+        {
+          id: 'b', title: 'Most negative stable k<sub>I</sub>',
+          inputs: { k: 'k<sub>I,crit</sub>' },
+          check: (v) => PD().checkNumbers(v, { k: -this.evans(ctx).kCrit }, { k: 'kI,crit' }),
+          solution: () => [{ tex: `c_2c_1 > c_0:\\; (-gk_{D_z})(-gk_{P_z}) > -gk_{I_z} \\Rightarrow k_{I_z} > -gk_{D_z}k_{P_z} = ${tex(-this.evans(ctx).kCrit)}` }],
+        },
+        {
+          id: 'c', title: 'Pick k<sub>I</sub> that barely moves the PD poles',
+          html: 'Checks the current k<sub>I</sub>: the complex pair must stay within 10% (in |p|) of the PD-only poles, and the new real pole must be slower than them.',
+          check: () => {
+            const ev = this.evans(ctx), kI = ctx.st.kI;
+            if (!(kI < 0)) return { ok: false, msg: 'Set kI < 0.' };
+            const pd = E.outerPoles(ctx.pModel, ev.d);
+            const cl = L.roots(this.clPoly(ev, kI));
+            const cpx = cl.filter((q) => Math.abs(q.im) > 1e-9), real = cl.filter((q) => Math.abs(q.im) <= 1e-9);
+            if (cpx.length !== 2) return { ok: false, msg: 'The PD pair has split; |kI| is too large.' };
+            const ratio = Math.hypot(cpx[0].re, cpx[0].im) / Math.hypot(pd[0].re, pd[0].im);
+            const slow = real.length === 1 && Math.abs(real[0].re) < Math.abs(pd[0].re);
+            return { ok: Math.abs(ratio - 1) < 0.1 && slow, msg: `|p| ratio ${fmt(ratio, 3)}, real pole ${real.length ? fmtPole(real[0]) : '—'}.` };
+          },
+          solution: () => {
+            const ev = this.evans(ctx);
+            const cl = L.roots(this.clPoly(ev, -1e-4));
+            return [{ html: `With the E.8 gains, k<sub>I</sub> ≈ −1×10⁻⁴ moves the pair by about 7% (poles ${E.poleText(cl)}); anything in roughly (−1.3×10⁻⁴, 0) passes the 10% test. The integrator pole is then very slow (time constant ≈ ${fmt(-1 / cl.find((q) => Math.abs(q.im) < 1e-9).re, 3)} s), so it takes minutes to remove an error. That is the price of the weak E.8 outer loop.` }];
+          },
+        },
+      ]);
+    },
+  };
+
+  // ------------------------------------------------------------ Chapter 10 --
+  CH.ch10 = {
+    id: 'ch10', num: 10, tab: 'Ch 10', title: 'Digital nested PID', pages: 'pp. 155–169',
+    defaults(sys) {
+      const pr = sys.problems.ch10;
+      return {
+        comp: 'fl', antiwindup: 'gate', vbar: 0.05, sigma: pr.sigma, extra: 'deriv',
+        ...W0, kIz: 0, kIth: 0,
+        trTh: 0.4, zetaTh: 0.707, M: 10, zetaZ: 0.707, rule: '2.2', kIzx: -0.01, kIthx: 0, zoom: 'both',
+      };
+    },
+    simDefaults(sys) { return { ...sys.problems.ch10.sim, mismatch: sys.problems.ch10.mismatch }; },
+    gains(ctx) { return ctx.S.mode === 'work' ? workGains(ctx.st) : { ...designed(ctx), kIz: ctx.st.kIzx, kIth: ctx.st.kIthx }; },
+    toWork(ctx) { const g = designed(ctx); Object.assign(ctx.st, { kPth: g.kPth, kDth: g.kDth, kPz: g.kPz, kDz: g.kDz, kIz: ctx.st.kIzx, kIth: ctx.st.kIthx }); },
+    opts(ctx) { return { comp: ctx.st.comp, meas: 'dirty', sigma: ctx.st.sigma, antiwindup: ctx.st.antiwindup, vbar: ctx.st.vbar }; },
+    controller(ctx, o) { return E.nestedPID(ctx, ctx.gains, this.opts(ctx), o); },
+    linearSim(ctx, c) { return E.nestedLinearSim(ctx, c, ctx.gains, this.opts(ctx)); },
+    linearLabel: 'linear design model (exact parameters)',
+    targets(ctx) { return ctx.S.mode === 'explore' ? { tr: designed(ctx).trZ } : {}; },
+    outputSeries: thetaRSeries,
+
+    buildControls(parent, ctx) {
+      const sec = section(parent, 'Nested PID from measured z, θ', 'p. 155, p. 389 · E.10(b)');
+      if (ctx.S.mode === 'work') workGainSliders(sec, ctx, { kI: true, kIth: true });
+      else {
+        designKnobs(sec, ctx, { rule: false });
+        E.knob(sec, ctx, 'kIzx', 'k<sub>I<sub>z</sub></sub>', -0.05, 0, 0.00001, { unit: 'rad/(m·s)' });
+        E.knob(sec, ctx, 'kIthx', 'k<sub>I<sub>θ</sub></sub>', 0, 5, 0.001);
+        gainReadout(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz', 'kIz', 'kIth']);
+      }
+      separationReadout(sec, ctx);
+      const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.3–10.4');
+      E.knob(imp, ctx, 'sigma', 'σ', 0.002, 0.5, 0.001, { unit: 's', sig: 3, hint: 'dirty-derivative bandwidth 1/σ rad/s' });
+      segmented(imp, {
+        label: 'Anti-windup on the z integrator',
+        options: [{ value: 'gate', label: 'integrate when |ż| < v̄ (E.10c)' }, { value: 'none', label: 'none' }],
+        get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+      });
+      E.knob(imp, ctx, 'vbar', 'v̄', 0.005, 0.5, 0.005, { unit: 'm/s', sig: 3, disabled: () => ctx.st.antiwindup !== 'gate' });
+      compControl(imp, ctx);
+      segmented(imp, {
+        label: 'Extra plot',
+        options: [{ value: 'deriv', label: 'ż estimate' }, { value: 'int', label: 'z integrator' }],
+        get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); },
+      });
+      zoomControl(imp, ctx);
+    },
+
+    splane(ctx) { return { markers: loopMarkers(ctx), kindNames: KIND_NAMES }; },
+
+    extraPlot(ctx, res) {
+      if (ctx.st.extra === 'int') {
+        return { opts: { title: 'z integrator ∫e_z dt', yLabel: '∫e dt [m·s]', unit: 'm·s' },
+          data: { series: [{ label: '∫(z_r − z) dt', y: Array.from(res.extras.Iz || []), color: '--series-1' }] } };
+      }
+      return {
+        opts: { title: 'ż(t)', yLabel: 'ż [m/s]', unit: 'm/s' },
+        data: {
+          series: [
+            { label: 'dirty-derivative estimate', y: Array.from(res.extras.zdHat || []), color: '--series-2', width: 1.5 },
+            { label: 'true ż', y: res.x.map((x) => x[2]), color: '--series-1' },
+          ],
+          hlines: ctx.st.antiwindup === 'gate' ? [{ y: ctx.st.vbar, label: '+v̄', color: '--text-muted', fit: false }, { y: -ctx.st.vbar, label: '−v̄', color: '--text-muted', fit: false }] : [],
+        },
+      };
+    },
+
+    math(ctx) {
+      const st = ctx.st, Ts = ctx.S.sim.Ts;
+      const beta = (2 * st.sigma - Ts) / (2 * st.sigma + Ts), gamma = 2 / (2 * st.sigma + Ts);
+      const d = designed(ctx);
+      return [
+        { title: 'Nested digital PID', page: 'p. 158–159 · Listing 10.1, p. 163 (B.10)',
+          theory: '\\theta_r = k_{P_z}e_z + k_{I_z}\\textstyle\\int e_z - k_{D_z}\\dot{\\hat z},\\quad \\tilde F = k_{P_\\theta}(\\theta_r - \\theta) + k_{I_\\theta}\\textstyle\\int e_\\theta - k_{D_\\theta}\\dot{\\hat\\theta},\\quad F = F_{fl}(z) + \\tilde F' },
+        { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
+          theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)',
+          numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad ${tex(beta)},\\quad ${tex(gamma)}`, spoiler: true },
+        { title: 'Anti-windup when k_I < 0', page: 'p. 157 · §10.1.1, p. 389 · E.10(c)',
+          theory: '\\text{integrate } e_z \\text{ only while } |\\dot{\\hat z}| < \\bar v',
+          note: 'Saturation happens at F, inside the inner loop, so the outer integrator never sees u_sat − u_unsat. A scheme that unwinds on saturation of the outer output has nothing to act on; gating on |ż| works regardless of the sign of k_I.' },
+        { title: 'Gains from the knobs', page: 'p. 387 · E.8',
+          theory: 'k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g}',
+          numbers: `k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)},\\quad k_{I,crit} = ${tex(-ctx.pModel.g * d.kDz * d.kPz)}`, spoiler: true },
+        separationCard(ctx),
+      ];
+    },
+
+    buildProblem(parent, ctx) {
+      const prob = ctx.sys.problems.ch10;
+      PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'b1', title: '(b) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
+          inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
+          check: (v) => PD().checkNumbers(v, { a: 0.09 / 0.11, b: 2 / 0.11 }, {}),
+          solution: () => [{ tex: '\\frac{0.09}{0.11} = 0.8182,\\quad \\frac{2}{0.11} = 18.18' }],
+        },
+        {
+          id: 'b2', title: '(b) Tune so there is no steady-state error, with 20% parameter error',
+          html: 'Checks the current simulation (with the plant mismatch in the left panel): |z<sub>r</sub> − z| just before the first switch must be under 2 mm.',
+          check: () => {
+            const res = ctx.app.result();
+            const i = E.beforeSwitch(ctx, res);
+            const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]);
+            const mm = Object.values(ctx.S.mismatch).some((v) => v !== 0);
+            const ok = e < 0.002 && isFinite(e);
+            return { ok, msg: `error ${fmt(1000 * e, 3)} mm at t = ${fmt(res.t[i], 3)} s${mm ? '' : ' (no mismatch set!)'}.` };
+          },
+          solution: () => [
+            { html: 'With the E.8 gains the loop cannot survive even 1% error in m₂: an unmodeled force ΔF tilts the beam by ΔF/k<sub>P<sub>θ</sub></sub> before the outer loop (whose authority is only |k<sub>P<sub>z</sub></sub>| ≈ 0.005 rad per metre of error) can react, and the block slides off (see the E.9 force-disturbance card). No integrator gain fixes that.' },
+            { html: 'Make the loops faster first, keeping the separation: t<sub>r<sub>θ</sub></sub> ≈ 0.4 s, M = 10 (t<sub>r<sub>z</sub></sub> = 4 s), ζ = 0.707, then add k<sub>I<sub>z</sub></sub> ≈ −0.01 (k<sub>I,crit</sub> ≈ −0.024 for these gains) with the |ż| &lt; 0.05 m/s gate. With the default mismatch (m₁ +12%, m₂ −9%, ℓ +15%) the error before the switch is well under 1 mm. These are the Explore-mode defaults.' },
+          ],
+        },
+        {
+          id: 'c', title: '(c) Sign of k<sub>I<sub>z</sub></sub>',
+          inputs: { s: 'sign (+1 or −1)' },
+          check: (v) => PD().checkNumbers(v, { s: -1 }, { s: 'sign' }),
+          solution: () => [{ html: 'k<sub>P<sub>z</sub></sub> and k<sub>D<sub>z</sub></sub> are negative because a positive beam angle accelerates the block toward the pivot (z̈ = −gθ), so k<sub>I<sub>z</sub></sub> must be negative as well. The saturation is on F in the inner loop, so the outer integrator cannot unwind from u<sub>sat</sub> − u<sub>unsat</sub>; integrating only while |ż| is small stops windup during the large moves.' }],
+        },
+      ]);
+    },
+  };
+
+  WB.E.pid = { workGains, designed, compControl, workGainSliders, designKnobs, gainReadout, separationReadout, loopMarkers, KIND_NAMES, thetaRSeries, designModelCard, separationCard, peakForTrZ, fastestTrZ };
+})();
