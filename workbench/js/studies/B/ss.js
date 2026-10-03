@@ -219,13 +219,6 @@
       },
       splane(ctx) { return { markers: markers(ctx, level, this.prob(ctx)) }; },
       onPoleDrag: onDrag,
-      // Entering Work mode from Explore: start from the explored gains.
-      toWork(ctx) {
-        const g = ctx.gains, w = ctx.st.w;
-        KEYS.forEach((k, i) => { w[k] = g.K[i]; });
-        if (isFinite(g.kr)) w.kr = g.kr;
-        if (isFinite(g.ki)) w.ki = g.ki;
-      },
       targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.trTh * ctx.st.M } : {}; },
       prob(ctx) { const pr = ctx.sys.problems[`ch${num}`]; return pr.book || pr.repo; },
     }, extra);
