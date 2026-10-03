@@ -77,7 +77,13 @@ for (const [name, level, extra] of [['sf', 'sf', {}], ['sfi', 'sfi', {}], ['obs'
 // C.18 loopshaping, repo listings
 { const st = C.freq.presetRepo(nom, C.freq.c10(sys, nom));
   run('ls', C.freq.loopshapeController(ctxOf(st, {}))); }
-return { out, gains };
+// Outer design-model poles with an integrator (C.9/C.10/C.P.6) and the C.17 bandwidths, C.10 gains.
+const g10 = C.freq.c10(sys, nom);
+const outerPoles = C.lib.outerPoles(nom, g10).map((q) => [q.re, q.im]);
+const lp = C.freq.loops({ pModel: nom }, g10);
+const freq = { outerPoles, bwIn: lp.bwIn, bwOut: lp.bwOut, pmIn: lp.mgIn.pm, wcIn: lp.mgIn.wc, pmOut: lp.mgOut.pm, wcOut: lp.mgOut.wc,
+  g: [g10.kPth, g10.kDth, g10.kPphi, g10.kIphi, g10.kDphi] };
+return { out, gains, freq };
 """ % {"mis": str(MIS).replace("'", '"'), "ks": KS, "cases": str({k: [v[0], v[1], v[2], v[3]] for k, v in CASES.items()}).replace("'", '"').replace("True", "true").replace("False", "false"), "n": N}
 
 
@@ -167,7 +173,47 @@ def main():
     ge.append(abs(np.array(jg["obs"]["L"]) - ctrls["obs"].L).max())
     ge.append(abs(np.array(jg["dobs"]["L2"]) - ctrls["dobs"].L).max())
     print(f"gains: max |py - js| over K, k_r, k_I, L (4x2, YT) and L2 (5x2, YT) = {max(ge):.3e}")
-    return 0 if worst < 1e-9 else 1
+    fe = check_frequency(res["freq"])
+    return 0 if worst < 1e-9 and fe < 1e-6 else 1
+
+
+def check_frequency(f):
+    """Outer-loop poles with k_I and the C.17 margins/bandwidths, against python-control."""
+    import control as ct
+    from scipy.optimize import brentq
+    kPth, kDth, kPphi, kIphi, kDphi = f["g"]
+    Js, Jp, k, b, sig = 5.0, 1.0, 0.1, 0.05, 0.05
+    # Fig. 6-10: theta_r = (kP + kI/s)(phi_r - phi) - kD s phi, phi = G theta_r, k_DCtheta = 1
+    G = ct.tf([b, k], [Jp, b, k])
+    T = ct.feedback(ct.tf([kPphi, kIphi], [1, 0]) * ct.feedback(G, ct.tf([kDphi, 0], [1])))
+    py_p = sorted(ct.poles(T), key=lambda z: (round(z.real, 9), z.imag))
+    js_p = sorted([complex(*q) for q in f["outerPoles"]], key=lambda z: (round(z.real, 9), z.imag))
+    e_p = max(abs(a - c) for a, c in zip(py_p, js_p))
+    # C.17 loops (hw16.py)
+    Lin = ct.tf([1], [Js + Jp, 0, 0]) * ct.tf([kDth + sig * kPth, kPth], [sig, 1])
+    Lout = ct.tf([b / Jp, k / Jp], [1, b / Jp, k / Jp]) * ct.tf([kDphi + kPphi * sig, kPphi + kIphi * sig, kIphi], [sig, 1, 0])
+    Tin, Tout = ct.feedback(Lin), ct.feedback(Lout)
+    # inner: ct.bandwidth(T_in) = 17.538 stops at its own tolerance; refine the same crossing with brentq
+    w0 = float(ct.bandwidth(Tin))
+    bw_in = brentq(lambda x: abs(Tin(1j * x)) - np.sqrt(0.5), 0.5 * w0, 2 * w0, xtol=1e-14)
+    # outer: highest frequency with |T| >= -3 dB (the first crossing, which ct.bandwidth reports, is a dip near 0.08)
+    w = np.logspace(-4, 4, 200001)
+    m = np.abs(Tout(1j * w))
+    i = np.nonzero(m >= np.sqrt(0.5))[0][-1]
+    bw_out = brentq(lambda x: abs(Tout(1j * x)) - np.sqrt(0.5), w[i], w[i + 1], xtol=1e-14)
+    gm_i, pm_i, _, wc_i = ct.margin(Lin)
+    gm_o, pm_o, _, wc_o = ct.margin(Lout)
+    rows = [("outer poles with k_I (Fig. 6-10)", e_p),
+            ("C.17 inner bandwidth", abs(bw_in - f["bwIn"])), ("C.17 outer bandwidth (last -3 dB)", abs(bw_out - f["bwOut"])),
+            ("C.17 bandwidth ratio", abs(bw_in / bw_out - f["bwIn"] / f["bwOut"])),
+            ("C.17 inner PM [deg]", abs(pm_i - f["pmIn"])), ("C.17 inner w_co", abs(wc_i - f["wcIn"])),
+            ("C.17 outer PM [deg]", abs(pm_o - f["pmOut"])), ("C.17 outer w_co", abs(wc_o - f["wcOut"]))]
+    print(f"frequency-domain (C.10 gains): bw_in = {bw_in:.6f}, bw_out = {bw_out:.6f}, ratio = {bw_in / bw_out:.4f}, "
+          f"ct.bandwidth: T_in {w0:.4f}, T_out {float(ct.bandwidth(Tout)):.4f} (first crossing)")
+    for name, e in rows:
+        print(f"  {name:36s} |py - js| = {e:.3e}")
+    # margins are found on a grid in WB.tf.margins (shared code), so they agree to ~1e-4, not 1e-9
+    return max(e for name, e in rows if "PM" not in name and "w_co" not in name)
 
 
 if __name__ == "__main__":

@@ -111,9 +111,10 @@
           else I = Inew;
           ePrev = e;
         }
-        const tau = M.saturate(tauU, uLim);
-        tauPrev = tau;
-        return { u: tau, thHat: xu[0], phHat: xu[1], thdHat: xu[2], phdHat: xu[3], dhat: dh, integrator: I };
+        // The observer uses the saturated τ (tau_d1 in the repo); the demand is
+        // returned unsaturated and the simulation clips it.
+        tauPrev = M.saturate(tauU, uLim);
+        return { u: tauU, thHat: xu[0], phHat: xu[1], thdHat: xu[2], phdHat: xu[3], dhat: dh, integrator: I };
       },
     };
   }
@@ -221,7 +222,7 @@
     return {
       title: 'State-space model', page: 'p. 92, p. 193 · Eq. 11.40',
       theory: '\\dot x = Ax + B\\tau,\\quad x = (\\theta, \\phi, \\dot\\theta, \\dot\\phi)^\\top,\\quad y = (\\theta, \\phi)^\\top,\\quad y_r = \\phi = \\begin{bmatrix}0 & 1 & 0 & 0\\end{bmatrix}x',
-      numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
+      numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`, spoiler: true,
     };
   }
   function polesCard(ctx, d, level) {
@@ -278,12 +279,6 @@
         return { markers: markers(ctx, level, specOf(ctx, pr, level).poles), legendNames: { cl: 'controller pole', obs: 'observer pole', target: 'target pole (problem)' } };
       },
       onPoleDrag: onDrag,
-      // Entering Work mode from Explore starts from the explored design (as in study A).
-      toWork(ctx) {
-        const g = ctx.gains, w = ctx.st.w;
-        Object.assign(w, { K1: g.K[0], K2: g.K[1], K3: g.K[2], K4: g.K[3], kr: g.kr ?? w.kr, ki: g.ki ?? w.ki });
-        if (ctx.st.obs && ctx.st.obsW) ctx.st.obsW = { ...ctx.st.obs };
-      },
       targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.M * ctx.st.trTh } : {}; },
     }, extra);
   }
@@ -417,7 +412,7 @@
     if (level === 'dobs') {
       const { B } = lib().ss(ctx.pModel);
       const { A2, C2 } = augD(A, B, C);
-      cards.push({ title: 'Disturbance observer', page: 'p. 240–241, p. 257 · Listing 14.4',
+      cards.push({ title: 'Disturbance observer', page: 'p. 240–241, pp. 258–259 · Listing 14.6',
         theory: 'A_2 = \\begin{bmatrix}A & B\\\\ 0 & 0\\end{bmatrix},\\; C_2 = \\begin{bmatrix}C & 0\\end{bmatrix},\\quad \\tau = -K\\hat x - k_I\\textstyle\\int e - \\hat d',
         numbers: `\\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` + (d.L2 ? `,\\quad L_2^\\top = ${texMat(L.T(d.L2))}` : ''), spoiler: true });
     }
@@ -471,19 +466,20 @@
         },
         {
           id: 'e', title: '(e) Add an input disturbance of 1.0 N·m',
-          html: 'Set d = 1 in the left panel. The integrator acts on φ<sub>r</sub> − φ̂, and φ̂ is biased by the unmodeled d, so φ settles away from φ<sub>r</sub>. C.14 removes the bias.',
-          check: () => {
+          html: 'Set d = 1 in the left panel, then measure the run. There is no single right number here; compare φ − φ̂ and φ<sub>r</sub> − φ at the end, and see C.14.',
+          actions: [{ label: 'Measure', run: () => {
             const res = ctx.app.result(), n = res.t.length - 1;
             if (!(Math.abs(ctx.S.sim.dist) > 0)) return { ok: false, msg: 'Set d ≠ 0 first.' };
             const bias = (res.yAll[1][n] - res.extras.phHat[n]) * R2D;
             return { ok: true, msg: `At t_end: φ − φ̂ = ${fmt(bias, 3)}°, φ_r − φ = ${fmt((res.rAll[0][n] - res.yAll[1][n]) * R2D, 3)}°.` };
-          },
+          } }],
+          solution: () => [{ html: 'The integrator drives φ<sub>r</sub> − φ̂ to zero, but the observer does not model d, so φ̂ is biased and φ settles away from φ<sub>r</sub>. The disturbance observer of C.14 removes that bias.' }],
         },
       ]);
     },
   });
 
-  CH.ch14 = base('dobs', 14, 'Disturbance observers', 'pp. 254–258', {
+  CH.ch14 = base('dobs', 14, 'Disturbance observers', 'pp. 254–259', {
     defaults(sys) { const pr = sys.problems.ch14; return stateDefaults(pr, { obs: obsDefaults(pr), obsW: obsDefaults({ ...pr, obsFactor: 4 }), pD: pr.pD, dobs: true, xhat0: 0, antiwindup: 'none' }); },
     simDefaults(sys) { return { ...sys.problems.ch14.sim, mismatch: sys.problems.ch14.mismatch }; },
     outputSeries: obsSeries,
@@ -495,7 +491,7 @@
       ] } };
     },
     buildControls(parent, ctx) {
-      const sec = section(parent, 'Controller (uses x̂, subtracts d̂)', 'p. 256 · Listing 14.4');
+      const sec = section(parent, 'Controller (uses x̂, subtracts d̂)', 'pp. 258–259 · Listing 14.6');
       segmented(sec, {
         label: 'Disturbance observer',
         options: [{ value: true, label: 'on' }, { value: false, label: 'off: C.13 observer (C.14a)' }],
@@ -543,7 +539,7 @@
             const bias = Math.abs(res.yAll[1][n] - res.extras.phHat[n]) * R2D, e = errBeforeSwitch(ctx);
             return { ok: bias < 0.05 && e < 0.1, msg: `d̂ = ${fmt(res.extras.dhat[n], 3)} vs d = ${fmt(ctx.S.sim.dist, 3)}; |φ − φ̂| = ${fmt(bias, 3)}°; error before the switch ${fmt(e, 3)}°.` };
           },
-          solution: () => [{ html: 'The repo uses the C.13 observer poles plus p<sub>d</sub> = −10 (Listing 14.4). d̂ also absorbs the torque the model gets wrong because of the parameter mismatch, so it settles near d but not exactly on it.' }],
+          solution: () => [{ html: 'The repo uses the C.13 observer poles plus p<sub>d</sub> = −10 (Listing 14.6, p. 258). d̂ also absorbs the torque the model gets wrong because of the parameter mismatch, so it settles near d but not exactly on it.' }],
         },
       ]);
     },

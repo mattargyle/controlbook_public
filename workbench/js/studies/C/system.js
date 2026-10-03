@@ -29,7 +29,7 @@ WB.studies.C = WB.studies.C || { chapters: {} };
       { key: 'Jp', label: 'J<sub>p</sub>', unit: 'kg·m²', value: 1.0, min: 0.1, max: 5, step: 0.01 },
       { key: 'k', label: 'k', unit: 'N·m', value: 0.1, min: 0.005, max: 1, step: 0.005 },
       { key: 'b', label: 'b', unit: 'N·m·s', value: 0.05, min: 0, max: 0.5, step: 0.005 },
-      { key: 'tau_max', label: 'τ<sub>max</sub>', unit: 'N·m', value: 5.0, min: 0.5, max: 20, step: 0.1 },
+      { key: 'tau_max', label: 'τ<sub>max</sub>', unit: 'N·m', value: 5.0, min: 0.5, max: 100, step: 0.1 },   // up to 100 so C.8(e) can run unsaturated
     ],
     constants: {},
     // Parameters that satelliteDynamics(alpha) perturbs.
@@ -342,7 +342,7 @@ WB.studies.C = WB.studies.C || { chapters: {} };
     const a2 = p.Jp + p.b * kDC * g.kDphi;
     const a1 = p.b + p.b * kDC * g.kPphi + p.k * kDC * g.kDphi;
     const a0 = p.k + p.k * kDC * g.kPphi;
-    if (g.kIphi) return [a2, a1 + p.b * kDC * g.kIphi, a0, p.k * kDC * g.kIphi].map((c) => c / a2);  // P.6
+    if (g.kIphi) return [a2, a1, a0 + p.b * kDC * g.kIphi, p.k * kDC * g.kIphi].map((c) => c / a2);  // P.6, Fig. 6-10
     return [1, a1 / a2, a0 / a2];
   }
   const outerPoles = (p, g) => L.roots(outerCharPoly(p, g));
