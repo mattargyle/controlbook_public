@@ -71,7 +71,7 @@
     },
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'Prescribed motion', 'p. 37 · Listing 2.6');
+      const sec = section(parent, 'Prescribed motion', 'pp. 38–39 · Listing 2.6');
       slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 360, step: 1, sig: 3, get: () => ctx.st.Ath, set: (v) => { ctx.st.Ath = v; ctx.update(); } });
       slider(sec, { label: 'φ amplitude', unit: '°', min: 0, max: 360, step: 0.1, sig: 3, get: () => ctx.st.Aph, set: (v) => { ctx.st.Aph = v; ctx.update(); } });
       slider(sec, { label: 'f', unit: 'Hz', min: 0.01, max: 1, step: 0.01, sig: 3, get: () => ctx.st.f, set: (v) => { ctx.st.f = v; ctx.update(); } });
@@ -80,11 +80,12 @@
     },
 
     extraPlot(ctx, res) {
+      const show = ctx.S.mode === 'explore';
       return {
         opts: { title: 'kinetic energy', yLabel: 'K [J]', unit: 'J' },
         data: { series: [
-          { label: 'body ½Jsθ̇²', y: Array.from(res.extras.Ks), color: '--series-2', width: 1.5 },
-          { label: 'panel ½Jpφ̇²', y: Array.from(res.extras.Kp), color: '--series-3', width: 1.5 },
+          { label: show ? 'body ½Jsθ̇²' : 'body', y: Array.from(res.extras.Ks), color: '--series-2', width: 1.5 },
+          { label: show ? 'panel ½Jpφ̇²' : 'panel', y: Array.from(res.extras.Kp), color: '--series-3', width: 1.5 },
           { label: 'total K', y: Array.from(res.extras.K), color: '--series-1' },
         ] },
       };
@@ -98,7 +99,8 @@
         { title: 'Two rotating bodies, no translation', page: 'p. 36',
           theory: '\\mathbf v_{cm} = 0,\\quad \\boldsymbol\\omega_s = \\dot\\theta\\,\\hat k,\\quad \\boldsymbol\\omega_p = \\dot\\phi\\,\\hat k' },
         { title: 'Result', page: 'p. 36 · Eq. 2.5',
-          theory: 'K = \\tfrac12 J_s\\dot\\theta^2 + \\tfrac12 J_p\\dot\\phi^2',
+          theory: 'K = \\textstyle\\sum_i \\tfrac12\\,\\boldsymbol\\omega_i^\\top J_i\\boldsymbol\\omega_i \\text{ for bodies that only rotate}',
+          symbolic: 'K = \\tfrac12 J_s\\dot\\theta^2 + \\tfrac12 J_p\\dot\\phi^2',
           numbers: `K = ${tex(p.Js / 2)}\\,\\dot\\theta^2 + ${tex(p.Jp / 2)}\\,\\dot\\phi^2`, spoiler: true },
       ];
     },
@@ -145,7 +147,7 @@
       return {
         opts: { title: 'energy balance', yLabel: 'energy [mJ]', unit: 'mJ' },
         data: { series: [
-          { label: '∫(τθ̇ − b(θ̇−φ̇)²) dt', y: W, color: '--series-2', dash: [5, 4], width: 2 },
+          { label: ctx.S.mode === 'explore' ? '∫(τθ̇ − b(θ̇−φ̇)²) dt' : 'work by τ − damper loss', y: W, color: '--series-2', dash: [5, 4], width: 2 },
           { label: 'E(t) − E(0) = ΔK + ΔP', y: E, color: '--series-1' },
         ] },
       };
@@ -155,16 +157,20 @@
       const p = ctx.pModel;
       return [
         { title: 'Generalized coordinates and forces', page: 'p. 52',
-          theory: 'q = (\\theta, \\phi)^\\top,\\quad \\tau = (\\tau, 0)^\\top,\\quad -B\\dot q = -\\begin{bmatrix} b & -b\\\\ -b & b\\end{bmatrix}\\begin{bmatrix}\\dot\\theta\\\\ \\dot\\phi\\end{bmatrix}' },
-        { title: 'Potential energy (spring only)', page: 'p. 52',
-          theory: 'P = \\tfrac12 k(\\phi - \\theta)^2,\\quad L = \\tfrac12 J_s\\dot\\theta^2 + \\tfrac12 J_p\\dot\\phi^2 - \\tfrac12 k(\\phi-\\theta)^2' },
+          theory: '\\text{generalized forces: torques acting on each coordinate},\\quad \\text{friction: } -B\\dot q',
+          symbolic: 'q = (\\theta, \\phi)^\\top,\\quad \\tau = (\\tau, 0)^\\top,\\quad -B\\dot q = -\\begin{bmatrix} b & -b\\\\ -b & b\\end{bmatrix}\\begin{bmatrix}\\dot\\theta\\\\ \\dot\\phi\\end{bmatrix}', spoiler: true },
+        { title: 'Potential energy', page: 'p. 52',
+          theory: '\\text{torsional spring with deflection } \\delta:\\; P = \\tfrac12 k\\,\\delta^2,\\quad L = K - P',
+          symbolic: 'P = \\tfrac12 k(\\phi - \\theta)^2,\\quad L = \\tfrac12 J_s\\dot\\theta^2 + \\tfrac12 J_p\\dot\\phi^2 - \\tfrac12 k(\\phi-\\theta)^2', spoiler: true },
         { title: 'Euler-Lagrange equations', page: 'p. 18 · Eq. 1.8, p. 53',
           theory: '\\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q' },
         { title: 'Equations of motion', page: 'p. 53 · Eq. 3.3',
-          theory: '\\begin{bmatrix}J_s & 0\\\\ 0 & J_p\\end{bmatrix}\\begin{bmatrix}\\ddot\\theta\\\\ \\ddot\\phi\\end{bmatrix} = \\begin{bmatrix}\\tau - b(\\dot\\theta - \\dot\\phi) - k(\\theta - \\phi)\\\\ -b(\\dot\\phi - \\dot\\theta) - k(\\phi - \\theta)\\end{bmatrix}',
+          theory: 'M\\ddot q = \\tau - B\\dot q - \\frac{\\partial P}{\\partial q} \\;\\text{(constant } M\\text{)}',
+          symbolic: '\\begin{bmatrix}J_s & 0\\\\ 0 & J_p\\end{bmatrix}\\begin{bmatrix}\\ddot\\theta\\\\ \\ddot\\phi\\end{bmatrix} = \\begin{bmatrix}\\tau - b(\\dot\\theta - \\dot\\phi) - k(\\theta - \\phi)\\\\ -b(\\dot\\phi - \\dot\\theta) - k(\\phi - \\theta)\\end{bmatrix}',
           numbers: `\\ddot\\theta = ${tex(1 / p.Js)}\\tau - ${tex(p.b / p.Js)}(\\dot\\theta - \\dot\\phi) - ${tex(p.k / p.Js)}(\\theta - \\phi),\\quad \\ddot\\phi = -${tex(p.b / p.Jp)}(\\dot\\phi - \\dot\\theta) - ${tex(p.k / p.Jp)}(\\phi - \\theta)`, spoiler: true },
         { title: 'Energy balance (a check on the EOM)', page: 'follows from Eq. 3.3',
-          theory: '\\frac{d}{dt}(K + P) = \\tau\\dot\\theta - b(\\dot\\theta - \\dot\\phi)^2' },
+          theory: '\\frac{d}{dt}(K + P) = \\tau^\\top\\dot q - \\dot q^\\top B\\dot q',
+          symbolic: '\\frac{d}{dt}(K + P) = \\tau\\dot\\theta - b(\\dot\\theta - \\dot\\phi)^2', spoiler: true },
       ];
     },
 
@@ -172,18 +178,19 @@
       const p = () => ctx.pModel;
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch3, [
         {
-          id: 'a', title: '(a) P = c (φ − θ)²',
+          id: 'a', title: '(a) P = c·δ², where δ is the deflection of the spring',
           inputs: { c: 'c [N·m]' },
           check: (v) => PD().checkNumbers(v, { c: p().k / 2 }, {}),
           solution: () => [{ tex: `P = \\tfrac12 k(\\phi - \\theta)^2 \\Rightarrow c = ${tex(p().k / 2)}` }],
         },
         {
-          id: 'd', title: '(d) θ̈ = c<sub>1</sub>τ + c<sub>2</sub>(θ̇ − φ̇) + c<sub>3</sub>(θ − φ), φ̈ = d<sub>1</sub>(φ̇ − θ̇) + d<sub>2</sub>(φ − θ)',
-          inputs: { c1: 'c<sub>1</sub>', c2: 'c<sub>2</sub>', c3: 'c<sub>3</sub>', d1: 'd<sub>1</sub>', d2: 'd<sub>2</sub>' },
-          check: (v) => PD().checkNumbers(v, { c1: 1 / p().Js, c2: -p().b / p().Js, c3: -p().k / p().Js, d1: -p().b / p().Jp, d2: -p().k / p().Jp }, {}),
+          id: 'd', title: '(d) θ̈ = c<sub>1</sub>τ + c<sub>2</sub>θ̇ + c<sub>3</sub>φ̇ + c<sub>4</sub>θ + c<sub>5</sub>φ and φ̈ = d<sub>1</sub>θ̇ + d<sub>2</sub>φ̇ + d<sub>3</sub>θ + d<sub>4</sub>φ',
+          inputs: { c1: 'c<sub>1</sub>', c2: 'c<sub>2</sub>', c3: 'c<sub>3</sub>', c4: 'c<sub>4</sub>', c5: 'c<sub>5</sub>', d1: 'd<sub>1</sub>', d2: 'd<sub>2</sub>', d3: 'd<sub>3</sub>', d4: 'd<sub>4</sub>' },
+          check: (v) => { const q = p(); return PD().checkNumbers(v, { c1: 1 / q.Js, c2: -q.b / q.Js, c3: q.b / q.Js, c4: -q.k / q.Js, c5: q.k / q.Js, d1: q.b / q.Jp, d2: -q.b / q.Jp, d3: q.k / q.Jp, d4: -q.k / q.Jp }, {}); },
           solution: () => [
-            { tex: `c_1 = \\tfrac{1}{J_s} = ${tex(1 / p().Js)},\\; c_2 = -\\tfrac{b}{J_s} = ${tex(-p().b / p().Js)},\\; c_3 = -\\tfrac{k}{J_s} = ${tex(-p().k / p().Js)}` },
-            { tex: `d_1 = -\\tfrac{b}{J_p} = ${tex(-p().b / p().Jp)},\\; d_2 = -\\tfrac{k}{J_p} = ${tex(-p().k / p().Jp)}` },
+            { tex: `\\ddot\\theta = \\tfrac{1}{J_s}\\tau - \\tfrac{b}{J_s}(\\dot\\theta - \\dot\\phi) - \\tfrac{k}{J_s}(\\theta - \\phi),\\quad \\ddot\\phi = -\\tfrac{b}{J_p}(\\dot\\phi - \\dot\\theta) - \\tfrac{k}{J_p}(\\phi - \\theta)` },
+            { tex: `c_1 = ${tex(1 / p().Js)},\\; c_2 = ${tex(-p().b / p().Js)},\\; c_3 = ${tex(p().b / p().Js)},\\; c_4 = ${tex(-p().k / p().Js)},\\; c_5 = ${tex(p().k / p().Js)}` },
+            { tex: `d_1 = ${tex(p().b / p().Jp)},\\; d_2 = ${tex(-p().b / p().Jp)},\\; d_3 = ${tex(p().k / p().Jp)},\\; d_4 = ${tex(-p().k / p().Jp)}` },
             { html: 'Book: Eq. 3.3 (p. 53).' },
           ],
         },
@@ -207,7 +214,7 @@
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Release from rest', 'p. 67 · Eq. 4.15');
-      sec.append(el('p', { class: 'muted small', text: 'Set θ(0) ≠ φ(0) in the left panel (initial conditions) and let go with τ = 0. The spring and damper pull the two bodies together; they come to rest at an equilibrium with θₑ = φₑ.' }));
+      sec.append(el('p', { class: 'muted small', text: 'Set θ(0) ≠ φ(0) in the left panel (initial conditions) and let go with τ = 0. The spring and damper pull the two bodies together; they come to rest at an equilibrium.' }));
       inputControls(sec, ctx);
     },
 
@@ -223,7 +230,7 @@
       return {
         opts: { title: 'angular momentum and spring deflection', yLabel: 'value', unit: '' },
         data: { series: [
-          { label: 'Js θ̇ + Jp φ̇ [kg·m²/s]', y: res.x.map((x) => p.Js * x[2] + p.Jp * x[3]), color: '--series-2', width: 1.5 },
+          { label: ctx.S.mode === 'explore' ? 'Js θ̇ + Jp φ̇ [kg·m²/s]' : 'angular momentum [kg·m²/s]', y: res.x.map((x) => p.Js * x[2] + p.Jp * x[3]), color: '--series-2', width: 1.5 },
           { label: 'φ − θ [°]', y: res.x.map((x) => (x[1] - x[0]) * R2D), color: '--series-1' },
         ] },
       };
@@ -241,15 +248,18 @@
         { title: 'Equations of motion', page: 'p. 67 · Eq. 4.13–4.14',
           theory: 'J_s\\ddot\\theta + b(\\dot\\theta - \\dot\\phi) + k(\\theta - \\phi) = \\tau,\\quad J_p\\ddot\\phi + b(\\dot\\phi - \\dot\\theta) + k(\\phi - \\theta) = 0' },
         { title: 'Equilibria f(xₑ, uₑ) = 0', page: 'p. 67 · Eq. 4.15',
-          theory: '\\theta_e = \\phi_e \\text{ (any value)},\\quad \\dot\\theta_e = \\dot\\phi_e = 0,\\quad \\tau_e = 0',
-          note: 'The model is already linear, so no linearization is needed. The equilibrium tells the controller that θ and φ must be commanded to the same angle.' },
+          theory: '\\dot x = f(x, u) = 0 \\text{ at } (x_e, u_e)',
+          symbolic: '\\theta_e = \\phi_e \\text{ (any value)},\\quad \\dot\\theta_e = \\dot\\phi_e = 0,\\quad \\tau_e = 0', spoiler: true,
+          note: 'The model is already linear, so no linearization is needed.' },
         { title: 'Where it comes to rest (not in the book)', page: 'conservation of angular momentum',
-          theory: '\\tau = 0 \\Rightarrow \\tfrac{d}{dt}(J_s\\dot\\theta + J_p\\dot\\phi) = 0 \\Rightarrow \\theta_\\infty = \\phi_\\infty = \\frac{J_s\\theta_0 + J_p\\phi_0}{J_s + J_p}',
+          theory: '\\text{no external torque} \\Rightarrow \\text{total angular momentum is constant}',
+          symbolic: '\\tau = 0 \\Rightarrow \\tfrac{d}{dt}(J_s\\dot\\theta + J_p\\dot\\phi) = 0 \\Rightarrow \\theta_\\infty = \\phi_\\infty = \\frac{J_s\\theta_0 + J_p\\phi_0}{J_s + J_p}',
           numbers: `\\theta_\\infty = ${tex(this.finalAngle(ctx))}^\\circ`, spoiler: true },
         { title: 'Eigenvalues of A', page: 'p. 92 (A from C.6)',
-          theory: '\\det(sI - A) = s^2\\left(s^2 + \\frac{b(J_s + J_p)}{J_sJ_p}s + \\frac{k(J_s + J_p)}{J_sJ_p}\\right)',
+          theory: '\\det(sI - A) = 0',
+          symbolic: '\\det(sI - A) = s^2\\left(s^2 + \\frac{b(J_s + J_p)}{J_sJ_p}s + \\frac{k(J_s + J_p)}{J_sJ_p}\\right)',
           numbers: `\\text{eig}(A) = ${L.eig(A).map((q) => texPole(q)).join(',\\;')}`, spoiler: true,
-          note: 'The double pole at 0 is the free rigid-body rotation; the lightly damped pair is the panel flexing against the body.' },
+          note: 'Hover the s-plane markers to read the eigenvalues.' },
       ];
     },
 
@@ -296,7 +306,7 @@
     id: 'ch5', num: 5, tab: 'Ch 5', title: 'Transfer functions', pages: 'pp. 77–79',
     defaults() { return { inp: { shape: 'pulse', amp: 0.1, freq: 0.05, width: 2 }, overlay: 'cascade' }; },
     simDefaults(sys) { return sys.problems.ch5.sim; },
-    linearLabel: 'cascade approximation (Fig. 5-3)',
+    linearLabel: 'cascade approximation (parts d–e)',
     linearSim(ctx, c) {
       if (ctx.st.overlay !== 'cascade') return null;
       const { A, B } = cascadeAB(ctx.pModel);
@@ -307,10 +317,10 @@
       inputControls(sec, ctx);
       segmented(sec, {
         label: 'Dashed overlay',
-        options: [{ value: 'cascade', label: 'cascade 1/((Js+Jp)s²) → Φ/Θ' }, { value: 'none', label: 'none' }],
+        options: [{ value: 'cascade', label: 'cascade approximation (d–e)' }, { value: 'none', label: 'none' }],
         get: () => ctx.st.overlay, set: (v) => { ctx.st.overlay = v; ctx.update(); },
       });
-      sec.append(el('p', { class: 'muted small', text: 'The cascade treats the body as a rigid Js + Jp that drives the panel, ignoring the panel\'s reaction on the body. Compare the dashed traces with the full model: the error shrinks as Jp/Js gets smaller (left panel).' }));
+      sec.append(el('p', { class: 'muted small', text: 'The dashed traces are the cascade approximation of parts (d) and (e) (Fig. 5-3) driven by the same torque. Compare them with the full model, and vary Jp/Js in the left panel.' }));
     },
     splane(ctx) {
       const d = tfData(ctx.pModel);
@@ -322,17 +332,22 @@
       const p = ctx.pModel, d = tfData(p);
       return [
         { title: 'Laplace transform of the EOM', page: 'p. 78 · Eq. 5.3–5.4',
-          theory: '\\left(s^2 + \\tfrac{b}{J_s}s + \\tfrac{k}{J_s}\\right)\\Theta = \\left(\\tfrac{b}{J_s}s + \\tfrac{k}{J_s}\\right)\\Phi + \\tfrac{1}{J_s}\\tau,\\quad \\left(s^2 + \\tfrac{b}{J_p}s + \\tfrac{k}{J_p}\\right)\\Phi = \\left(\\tfrac{b}{J_p}s + \\tfrac{k}{J_p}\\right)\\Theta' },
+          theory: '\\mathcal L\\{\\dot y\\} = sY(s) - y(0),\\quad \\mathcal L\\{\\ddot y\\} = s^2Y(s) - sy(0) - \\dot y(0)',
+          spoiler: true,
+          symbolic: '\\left(s^2 + \\tfrac{b}{J_s}s + \\tfrac{k}{J_s}\\right)\\Theta = \\left(\\tfrac{b}{J_s}s + \\tfrac{k}{J_s}\\right)\\Phi + \\tfrac{1}{J_s}\\tau,\\quad \\left(s^2 + \\tfrac{b}{J_p}s + \\tfrac{k}{J_p}\\right)\\Phi = \\left(\\tfrac{b}{J_p}s + \\tfrac{k}{J_p}\\right)\\Theta' },
         { title: 'Transfer matrix', page: 'p. 78–79 · Eq. 5.6',
-          theory: '\\frac{\\Theta}{\\tau} = \\frac{\\frac{1}{J_s}s^2 + \\frac{b}{J_sJ_p}s + \\frac{k}{J_sJ_p}}{s^2\\left(s^2 + \\frac{b(J_s+J_p)}{J_sJ_p}s + \\frac{k(J_s+J_p)}{J_sJ_p}\\right)},\\quad \\frac{\\Phi}{\\tau} = \\frac{\\frac{b}{J_sJ_p}s + \\frac{k}{J_sJ_p}}{s^2\\left(s^2 + \\cdots\\right)}',
+          theory: '\\begin{bmatrix}\\Theta\\\\ \\Phi\\end{bmatrix} = M(s)^{-1}\\begin{bmatrix}1/J_s\\\\ 0\\end{bmatrix}\\tau',
+          symbolic: '\\frac{\\Theta}{\\tau} = \\frac{\\frac{1}{J_s}s^2 + \\frac{b}{J_sJ_p}s + \\frac{k}{J_sJ_p}}{s^2\\left(s^2 + \\frac{b(J_s+J_p)}{J_sJ_p}s + \\frac{k(J_s+J_p)}{J_sJ_p}\\right)},\\quad \\frac{\\Phi}{\\tau} = \\frac{\\frac{b}{J_sJ_p}s + \\frac{k}{J_sJ_p}}{s^2\\left(s^2 + \\cdots\\right)}',
           numbers: `\\frac{\\Theta}{\\tau} = \\frac{${WB.tf.polyTex(d.num)}}{${WB.tf.polyTex(d.den)}}`, spoiler: true },
         { title: 'Panel subsystem', page: 'p. 78 · Eq. 5.5',
-          theory: '\\frac{\\Phi(s)}{\\Theta(s)} = \\frac{\\frac{b}{J_p}s + \\frac{k}{J_p}}{s^2 + \\frac{b}{J_p}s + \\frac{k}{J_p}}',
+          theory: '\\frac{\\Phi(s)}{\\Theta(s)} = \\frac{\\Phi/\\tau}{\\Theta/\\tau}',
+          symbolic: '\\frac{\\Phi(s)}{\\Theta(s)} = \\frac{\\frac{b}{J_p}s + \\frac{k}{J_p}}{s^2 + \\frac{b}{J_p}s + \\frac{k}{J_p}}',
           numbers: `\\frac{\\Phi}{\\Theta} = \\frac{${WB.tf.polyTex(d.out.num)}}{${WB.tf.polyTex(d.out.den)}}`, spoiler: true },
         { title: 'Body subsystem, (Js + Jp)/Js ≈ 1', page: 'p. 79',
-          theory: '\\frac{\\Theta}{\\tau} = \\frac{\\frac{1}{J_s}\\left(s^2 + \\frac{b}{J_p}s + \\frac{k}{J_p}\\right)}{s^2\\frac{J_s+J_p}{J_s}\\left(\\frac{J_s}{J_s+J_p}s^2 + \\frac{b}{J_p}s + \\frac{k}{J_p}\\right)} \\approx \\frac{1}{(J_s + J_p)s^2}',
+          theory: '\\text{factor } \\tfrac{J_s + J_p}{J_s} \\text{ out of the denominator, then set } \\tfrac{J_s}{J_s + J_p} \\approx 1',
+          symbolic: '\\frac{\\Theta}{\\tau} = \\frac{\\frac{1}{J_s}\\left(s^2 + \\frac{b}{J_p}s + \\frac{k}{J_p}\\right)}{s^2\\frac{J_s+J_p}{J_s}\\left(\\frac{J_s}{J_s+J_p}s^2 + \\frac{b}{J_p}s + \\frac{k}{J_p}\\right)} \\approx \\frac{1}{(J_s + J_p)s^2}',
           numbers: `\\frac{\\Theta}{\\tau} \\approx \\frac{1}{${tex(d.J)}\\,s^2},\\quad \\frac{J_s + J_p}{J_s} = ${tex(d.J / p.Js)}`, spoiler: true,
-          note: 'Setting J_s/(J_s+J_p) ≈ 1 inside the bracket makes it cancel the numerator. The cancelled pair is not exact: the zeros sit at √(k/J_p) and the poles at √(k(J_s+J_p)/(J_sJ_p)), about 10% apart for the book values. The pole-zero pair is visible in the s-plane.' },
+          note: 'The cancellation is only approximate; compare the poles and zeros in the s-plane.' },
       ];
     },
     buildProblem(parent, ctx) {
@@ -345,10 +360,10 @@
           solution: () => { const x = d(); return [{ tex: `\\frac{\\Theta}{\\tau} = \\frac{${WB.tf.polyTex(x.num)}}{s^2(s^2 + ${tex(x.den[1])}s + ${tex(x.den[2])})}` }, { html: 'Book: Eq. 5.6 (p. 79).' }]; },
         },
         {
-          id: 'c', title: '(c) Φ/Θ = (c<sub>1</sub>s + c<sub>0</sub>) / (s² + c<sub>1</sub>s + c<sub>0</sub>)',
-          inputs: { c1: 'c<sub>1</sub>', c0: 'c<sub>0</sub>' },
-          check: (v) => PD().checkNumbers(v, { c1: d().out.num[0], c0: d().out.num[1] }, {}),
-          solution: () => [{ tex: `c_1 = \\tfrac{b}{J_p} = ${tex(d().out.num[0])},\\quad c_0 = \\tfrac{k}{J_p} = ${tex(d().out.num[1])}` }, { html: 'Book: Eq. 5.5 (p. 78).' }],
+          id: 'c', title: '(c) Φ/Θ = (n<sub>1</sub>s + n<sub>0</sub>) / (s² + d<sub>1</sub>s + d<sub>0</sub>)',
+          inputs: { n1: 'n<sub>1</sub>', n0: 'n<sub>0</sub>', d1: 'd<sub>1</sub>', d0: 'd<sub>0</sub>' },
+          check: (v) => PD().checkNumbers(v, { n1: d().out.num[0], n0: d().out.num[1], d1: d().out.den[1], d0: d().out.den[2] }, {}),
+          solution: () => [{ tex: `n_1 = d_1 = \\tfrac{b}{J_p} = ${tex(d().out.num[0])},\\quad n_0 = d_0 = \\tfrac{k}{J_p} = ${tex(d().out.num[1])}` }, { html: 'Book: Eq. 5.5 (p. 78).' }],
         },
         {
           id: 'd', title: '(d) Θ/τ ≈ 1/(J s²)',
@@ -389,9 +404,10 @@
         { title: 'States, input and measured outputs', page: 'p. 91',
           theory: 'x = (\\theta, \\phi, \\dot\\theta, \\dot\\phi)^\\top,\\quad u = \\tau,\\quad y = (\\theta,\\; \\phi - \\theta)^\\top' },
         { title: 'State-space model', page: 'p. 92–93',
-          theory: 'A = \\begin{bmatrix}0 & 0 & 1 & 0\\\\ 0 & 0 & 0 & 1\\\\ -\\frac{k}{J_s} & \\frac{k}{J_s} & -\\frac{b}{J_s} & \\frac{b}{J_s}\\\\ \\frac{k}{J_p} & -\\frac{k}{J_p} & \\frac{b}{J_p} & -\\frac{b}{J_p}\\end{bmatrix},\\quad B = \\begin{bmatrix}0\\\\0\\\\ \\frac{1}{J_s}\\\\ 0\\end{bmatrix},\\quad C = \\begin{bmatrix}1 & 0 & 0 & 0\\\\ -1 & 1 & 0 & 0\\end{bmatrix},\\quad D = 0',
+          theory: '\\dot x = Ax + Bu,\\quad y = Cx + Du,\\quad A = \\frac{\\partial f}{\\partial x},\\; B = \\frac{\\partial f}{\\partial u}',
+          symbolic: 'A = \\begin{bmatrix}0 & 0 & 1 & 0\\\\ 0 & 0 & 0 & 1\\\\ -\\frac{k}{J_s} & \\frac{k}{J_s} & -\\frac{b}{J_s} & \\frac{b}{J_s}\\\\ \\frac{k}{J_p} & -\\frac{k}{J_p} & \\frac{b}{J_p} & -\\frac{b}{J_p}\\end{bmatrix},\\quad B = \\begin{bmatrix}0\\\\0\\\\ \\frac{1}{J_s}\\\\ 0\\end{bmatrix},\\quad C = \\begin{bmatrix}1 & 0 & 0 & 0\\\\ -1 & 1 & 0 & 0\\end{bmatrix},\\quad D = 0',
           numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)},\\quad C = ${texMat(Cbook)}`, spoiler: true,
-          note: 'The later chapters and _C_satellite/python use y = (θ, φ), i.e. C = [I 0]. Both are observable.' },
+          note: 'The later chapters and _C_satellite/python measure y = (θ, φ) instead.' },
         { title: 'Transfer function from the state space', page: 'p. 93',
           theory: 'H(s) = C(sI - A)^{-1}B + D',
           numbers: `\\det(sI - A) = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },

@@ -3,7 +3,7 @@
 As of 2026-10-03. This covers Design Study C (satellite attitude control): problems C.2–C.6, C.8–C.18 and C.P.6.
 
 I found these while building the workbench:
-- 23 problems in the book's worked solutions;
+- 23 problems in the book's worked solutions (one of them, C.9/C.16's system type, also affects the repo);
 - 6 places where the book and `_C_satellite/python` disagree;
 - 9 bugs or robustness problems in the repo code.
 
@@ -33,20 +33,20 @@ Page numbers are PDF pages (book page + 8).
 | C.12 | 211–212 | The printed A uses yet another set of numbers. | B₃ = 0.21 and row 4 = (0.14, −0.14, …). The step 2 poles (|p| = 1.5 and 0.99) match neither C.11's text (1.98, 1.5) nor its listing. p_I = −1 in the text, −2 in the listing. |
 | C.12 | 212 | The printed values cannot be reproduced from the solution's own data. | Δ_ol = s⁵ + 0.0611s⁴ + 0.1657s³, the desired polynomial, and K₁ = (19.15, 43.41, 16.72, 111.63, −14.52) do not follow from its own A₁ and poles. Placing those poles on the printed A₁ gives (30.12, 196.76, 21.26, 287.40, −75.36). |
 | C.12(a) | 211–214 | The problem asks for an integrator with anti-windup, but the listing has none. | `hw12` then winds up and diverges; see the repo table. The workbench offers "hold integrator while saturated." |
+| C.9(a), C.16(a); Notes p. 153 | 151, 153, 299 | The inner-loop answers (type 2; parabola error (Js+Jp)/k_P; C.16's 2A/M_a) hold for PD on the error (Fig. 9-11). The book's own controllers (Listings 8.4, 10.4; ctrlPD.py, ctrlPID.py) differentiate θ instead. The Notes on p. 153 say moving the derivative does not change the type. | With the derivative on θ, E/R = ((Js+Jp)s² + k_Ds)/((Js+Jp)s² + k_Ds + k_P): type 1, ramp error k_D/k_P, and a parabola is not tracked at all. The plant has no damping, so the k_Ds term sits in the error numerator. The workbench accepts the book's answer, explains the difference, and also accepts type 1 with e_ramp = k_D/k_P. |
 | C.13 | 234, 237 | The prose cites "line 25/26," "lines 40–48/41–49" and "lines 50–56/51–57" for the observer. | The code is at lines ~98, 113–121 and 123–128 of Listing 13.3. |
-| C.15(a) | 280 | The text says the magnitude is "two straight lines passing through the 0 dB line at ω = 1." | The 1/(Js + Jp) = 1/6 factor puts the line at −15.6 dB at ω = 1. |
 | C.16 | 298–301 | The problem says to use the C.10 gains, but the figures and numbers come from the C.8 loops. | The C.8 loops have k_Pθ = 77.9: B₂ = 22.3 dB, |C_in(j0.1)| = 38 dB, outer |PC(j10)| = −8.4 dB. With C.10's gains (k_Pθ = 181.5) these are 29.6 dB, 45.2 dB and −8.25 dB. Part (a)'s prose also says "B₂ = 20 dB," then uses 22.3. |
 | C.16(a), Eq. 16.12 | 299 | It treats θ_r = 20t² as R(s) = 20/s³ and answers e = A/M_a = 1.53. | L{20t²} = 40/s³, so e = 2A/M_a = 3.08 for the C.8 loops (1.32 for C.10's). Same factor-2 error as A.16(b). |
 | C.16(c) | 298 | The part says "using PI control," but the outer loop is C.10's PID. | — |
 | C.17 | 321–322 | The problem says to use the C.10 gains, but the reported margins come from the C.8 loops. | Inner PM = 56.16° at 6.97 rad/s matches the C.8 loops exactly; C.10's gains give 48.2° at 10.4 rad/s. The outer PM 110.92° is near the 111.3° of either set. |
 | C.18(a) | 362–363 | The text designs C_in = 45·8/(s + 8) on a rate-damped plant, but Listing 18.7 is a different design. | The text's plant is built from Θ/τ = (1/Js)/(s² + (b/Js)s + k/Js), which drops the panel coupling. Its rate gain is k_Dθ = 38.92, the C.8 loops' value, although the problem says C.10's (59.4): Figs. 18-29/18-30 (PM 84.93° at 1.15, 76.86° at 1.14 rad/s) reproduce exactly with 38.92. Listing 18.7 instead puts a lead at 0.41 rad/s with M = 15 on 1/(6s²), with no rate feedback. |
 | C.18(b) | 366 | The derivation gives the right Φ/Θ_r′ numerator, but the plant is then written with the wrong one. | The derivation gives σbs² + (σk + b)s + k; P_out is written with σs + 1. |
-| C.18(b) | 367–368 | Figs. 18-33/18-34 do not correspond to the printed listings. | They report PM = −36.4° before the gain, then 51.75° at 0.15 rad/s with GM 17.45 dB. These reproduce exactly for the listing's outer model with the *book-text* inner loop and the C.8 k_Dφ = 8.243. The printed listings (lead inner loop, C.10 gains) give 55.5° at 0.149 rad/s with GM 14.1 dB, and the correctly derived plant gives about 83°. The workbench's *Book text* preset reproduces the figures. |
+| C.18(b) | 367–368 | Figs. 18-33/18-34 do not correspond to the printed listings. | They report PM = −36.4° before the gain, then 51.75° at 0.15 rad/s with GM 17.45 dB. They are reproduced closely (−36.47° and 51.78° at 0.149 rad/s, GM 17.43 dB) by the listing's outer model with the *book-text* inner loop and the C.8 k_Dφ = 8.243. The printed listings (lead inner loop, C.10 gains) give 55.5° at 0.149 rad/s with GM 14.1 dB, and the correctly derived plant gives about 83°. The workbench's *Book text* preset reproduces the figures. |
 | C.18(b) | 367–368 | The lag is described inconsistently. | The text says "z = 2.0, M = 60," and the code sets z = 2.0 but calls get_control_lag(0.5, 60). The printed lag "(s + 0.5)/0.0083" is missing "s +" in the denominator. |
 
 Smaller notation issues:
 - C.6 measures y = (θ, φ − θ) (star tracker + strain gauge). Every later chapter and the repo use y = (θ, φ). Both are observable.
-- The Appendix P.6 figure is numbered 6-10, which collides with Chapter 6.
+- Appendix P.6 numbers its figures 6-1 to 6-10. Its Figs. 6-1 to 6-5 collide with Figs. 6-1 to 6-5 of the Part III introduction (pp. 94–97), which are different figures.
 
 ## Book vs. repo code
 
@@ -64,7 +64,7 @@ Smaller notation issues:
 | File | Issue | Effect |
 | --- | --- | --- |
 | `ctrlStateFeedbackIntegrator.py` (and Listing 12.3) | `phi = x[0, 0]` reads θ, so the integrator acts on φ_r − θ while the gains were placed for φ_r − φ. | With d = 1 (hw12), the unpatched controller diverges even with α = 0 (|φ| reaches 94 rad in 100 s). Patched to x[1, 0], it is bounded for α = 0, but still diverges for some α = 0.2 draws: τ saturates and the integrator winds up. `regress_C.py` patches it in memory; the workbench integrates φ. |
-| `ctrlDisturbanceObserver.py` / `hw14` | No anti-windup. With α = 0.2 the loop diverges whenever the true Js is about 10% or more above nominal. | 6 of 40 random α = 0.2 draws diverge without noise, 10 of 40 with the book's noise. The linearized loop stays stable (max Re λ ≈ −0.54 for Js +12%), and with no torque limit it converges. So the divergence is saturation-driven windup. The workbench pages use a draw with Js −12%, and offer anti-windup. |
+| `ctrlDisturbanceObserver.py` / `hw14` | No anti-windup. With α = 0.2 the loop diverges for a sizable fraction of parameter draws, mostly those with the true Js above nominal. | With `np.random.seed(s)` then `satelliteDynamics(alpha=0.2)` for s = 0–39, d = 1, the hw14 reference, 50 s, and "diverged" meaning |φ| > 0.5 rad: 13 of 40 draws diverge without noise (seeds 4, 6, 8, 10, 13, 15, 18, 24, 25, 30, 32, 36, 37) and 15 of 40 with the book's noise (adds 29 and 39). With only Js changed, the onset is between +8% and +10%; with the other parameters also perturbed it can start lower. An independent check counted 14/40 without noise with a different horizon and criterion. The linearized loop stays stable (max Re λ ≈ −0.54 for Js +12%), and with no torque limit it converges. So the divergence is saturation-driven windup. The workbench pages use a draw with Js −12%, and offer anti-windup. |
 | `ctrlLoopshape.py`, `transferFunction` | For a strictly proper numerator it sets `C[0, i] = num.item(i)` instead of `num.item(i − (n − m − 1))`. | Raises IndexError for C_out, so `method="state_space"` (the class default) never runs. `regress_C.py` patches it in memory; the workbench filter uses the correct indexing. |
 | `ctrlStateFeedback.py` | k_r uses C_r = [1, 0, 0, 0] (θ) although the reference is φ. | Numerically the same, but misleading. |
 | `ctrlPD.py` | t_rθ = 1.75 "tuned to not saturate the input" | Saturates; see C.8(f). |
