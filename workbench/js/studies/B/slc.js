@@ -194,10 +194,12 @@
         theory: 'P_{in}(s) = \\frac{-\\frac{1}{m_1\\frac{\\ell}{6} + m_2\\frac{2\\ell}{3}}}{s^2 - \\frac{(m_1+m_2)g}{m_1\\frac{\\ell}{6} + m_2\\frac{2\\ell}{3}}} = \\frac{b_0}{s^2 + a_0}',
         numbers: `b_0 = ${tex(pin.b0)},\\quad a_0 = ${tex(pin.a0)}`, spoiler: true },
       { title: 'Inner closed loop', page: 'p. 125',
-        theory: '\\Delta_{cl}(s) = s^2 - \\frac{k_{D\\theta}}{J}s - \\Big(\\frac{(m_1+m_2)g}{J} + \\frac{k_{P\\theta}}{J}\\Big),\\quad J = m_1\\tfrac{\\ell}{6} + m_2\\tfrac{2\\ell}{3}',
+        theory: '\\Delta_{cl}(s) = s^2 + b_0 k_{D\\theta}\\,s + (a_0 + b_0 k_{P\\theta})\\quad \\text{(Fig. 8-14: } k_P \\text{ on the error, } k_D s \\text{ on } \\theta)',
+        symbolic: '\\Delta_{cl}(s) = s^2 - \\frac{k_{D\\theta}}{J}s - \\Big(\\frac{(m_1+m_2)g}{J} + \\frac{k_{P\\theta}}{J}\\Big),\\quad J = m_1\\tfrac{\\ell}{6} + m_2\\tfrac{2\\ell}{3}',
         numbers: `\\Delta_{cl} = s^2 + ${tex(pin.b0 * g.kDth)}\\,s + ${tex(pin.a0 + pin.b0 * g.kPth)},\\quad p = ${texPole(ip[0])},\\; ${texPole(ip[1])}`, spoiler: true },
       { title: 'Inner gains from the spec', page: 'p. 125',
-        theory: 'k_{P\\theta} = -(m_1+m_2)g - J\\,\\omega_{n\\theta}^2,\\quad k_{D\\theta} = -2\\zeta_\\theta\\omega_{n\\theta} J,\\quad k_{DC\\theta} = \\frac{k_{P\\theta}}{(m_1+m_2)g + k_{P\\theta}}',
+        theory: '\\Delta_{cl} = s^2 + 2\\zeta\\omega_n s + \\omega_n^2,\\; \\omega_n = \\frac{2.2}{t_r}:\\quad k_P = \\frac{\\omega_n^2 - a_0}{b_0},\\; k_D = \\frac{2\\zeta\\omega_n}{b_0},\\quad k_{DC} = \\frac{\\Theta}{R_\\Theta}\\Big|_{s=0}',
+        symbolic: 'k_{P\\theta} = -(m_1+m_2)g - J\\,\\omega_{n\\theta}^2,\\quad k_{D\\theta} = -2\\zeta_\\theta\\omega_{n\\theta} J,\\quad k_{DC\\theta} = \\frac{k_{P\\theta}}{(m_1+m_2)g + k_{P\\theta}}',
         numbers: `k_{P\\theta} = ${tex(g.kPth)},\\quad k_{D\\theta} = ${tex(g.kDth)},\\quad k_{DC\\theta} = ${tex(g.kDC)}`, spoiler: true },
     ];
   }
@@ -210,11 +212,13 @@
         numbers: `\\sqrt{3g/2\\ell} = ${tex(q)}`, spoiler: true,
         note: 'A PD controller cannot match a third-order characteristic polynomial to s² + 2ζωₙs + ωₙ², so the LHP zero is cancelled first (p. 126).' },
       { title: 'Zero-canceling filter (with gain)', page: 'p. 126 · Fig. 8-16',
-        theory: 'F(s) = \\frac{-\\frac{1}{k_{DC\\theta}}\\frac{3}{2\\ell}}{s + \\sqrt{3g/2\\ell}} \\;\\Rightarrow\\; k_{DC}\\,F(s)\\,\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{s - \\sqrt{3g/2\\ell}}{s^2}',
+        theory: 'F(s) = \\frac{k_F}{s + p_F} \\text{ cancels the LHP zero and the gains } k_{DC}\\text{ and } -\\tfrac{2\\ell}{3}',
+        symbolic: 'F(s) = \\frac{-\\frac{1}{k_{DC\\theta}}\\frac{3}{2\\ell}}{s + \\sqrt{3g/2\\ell}} \\;\\Rightarrow\\; k_{DC}\\,F(s)\\,\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{s - \\sqrt{3g/2\\ell}}{s^2}',
         numbers: `F(s) = \\frac{${tex(zf.a)}}{s + ${tex(zf.b)}}`, spoiler: true,
         note: ctx.st.filter ? 'Implemented with one Euler step per sample (zeroCancelingFilter, Listing 8.3).' : 'The filter is off: θ_r is the PD output itself, and the outer loop is third order.' },
       { title: 'Outer gains', page: 'p. 127 · Eq. 8.12–8.13',
-        theory: 'a = \\frac{k_{Pz}}{1 + k_{Dz}} = -\\sqrt{\\tfrac{2\\ell}{3g}}\\,\\omega_{nz}^2,\\quad b = \\frac{k_{Dz}}{1 + k_{Dz}} = \\sqrt{\\tfrac{2\\ell}{3g}}\\big(a - 2\\zeta_z\\omega_{nz}\\big),\\quad k_{Dz} = \\frac{b}{1 - b},\\; k_{Pz} = \\frac{a}{1 - b}',
+        theory: '\\text{close PD } (k_{Pz} \\text{ on the error, } k_{Dz}s \\text{ on } z) \\text{ around } \\frac{s - q}{s^2} \\text{ and match } s^2 + 2\\zeta_z\\omega_{nz}s + \\omega_{nz}^2',
+        symbolic: 'a = \\frac{k_{Pz}}{1 + k_{Dz}} = -\\sqrt{\\tfrac{2\\ell}{3g}}\\,\\omega_{nz}^2,\\quad b = \\frac{k_{Dz}}{1 + k_{Dz}} = \\sqrt{\\tfrac{2\\ell}{3g}}\\big(a - 2\\zeta_z\\omega_{nz}\\big),\\quad k_{Dz} = \\frac{b}{1 - b},\\; k_{Pz} = \\frac{a}{1 - b}',
         numbers: `k_{Pz} = ${tex(g.kPz)},\\quad k_{Dz} = ${tex(g.kDz)}${withI ? `,\\quad k_{Iz} = ${tex(g.kIz)}` : ''},\\quad p_{out} = ${op.map((x) => texPole(x)).join(',\\;')}`, spoiler: true,
         note: ctx.st.formula === 'listing' && ctx.S.mode === 'explore' ? 'Using Listing 8.3 (ctrlPD.py). Its k_Dz expression is not Eq. 8.13, so the outer ζ comes out larger than ζ_z (ISSUES.md).' : undefined },
     ];
@@ -340,9 +344,10 @@
         },
         {
           id: 'e', title: '(e) Balance from θ(0) = 10° with |F| ≤ 5 N',
-          html: 'Uses the current simulation (Work mode gains). Passes if the pendulum never passes 45° and both |θ| < 1° and |z − r| < 5 cm at t = 10 s. Set θ(0) in the left panel.',
+          html: 'Uses the current simulation (Work mode gains). Requires θ(0) = 10° (left panel; the chapter default). Passes if the pendulum never passes 45° and both |θ| < 1° and |z − r| < 5 cm at t = 10 s.',
           check: () => {
             if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
+            if (Math.abs((ctx.S.sim.init.theta0 ?? 0) - 10) > 0.25) return { ok: false, msg: `Set θ(0) = 10° in the left panel (now ${fmt(ctx.S.sim.init.theta0 ?? 0, 3)}°).` };
             const res = ctx.app.result(), Ts = ctx.S.sim.Ts;
             const i10 = Math.min(res.t.length - 1, Math.round(10 / Ts));
             let maxTh = 0; for (const x of res.x) maxTh = Math.max(maxTh, Math.abs(x[1]));
@@ -618,7 +623,7 @@
   B.chapters.p6 = {
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–472',
 
-    defaults() { return { trTh: 0.2, zetaTh: 0.707, M: 10, zetaZ: 0.707, formula: 'book', kappa: 0.05, model: 'filter', filter: true, kMax: 1 }; },
+    defaults() { return { trTh: 0.2, zetaTh: 0.707, M: 10, zetaZ: 0.707, formula: 'book', kappa: 0.01, model: 'filter', filter: true, kMax: 1 }; },
     simDefaults(sys) { return sys.problems.p6.sim; },
     gains(ctx) { const g = designed(ctx, { ...ctx.st, kIz: -ctx.st.kappa }); return g; },
     controller(ctx, { linear = false } = {}) {
@@ -658,7 +663,8 @@
       slider(sec, { label: 'κ = −k<sub>Iz</sub>', min: 0, max: 1, step: 0.0005, sig: 3, get: () => ctx.st.kappa, set: (v) => { ctx.st.kappa = v; ctx.update(); } });
       slider(sec, { label: 'locus to κ =', min: 0.05, max: 10, log: true, sig: 3, get: () => ctx.st.kMax, set: (v) => { ctx.st.kMax = v; ctx.update(); } });
       sec.append(el('p', { class: 'muted small', text: 'k_Pz and k_Dz are negative for this plant, so the useful integrator gain is negative too; the locus is drawn for k_Iz = −κ, κ ≥ 0. Drag a closed-loop pole along it to set κ.' }));
-      readout(sec, ctx, ['kPth', 'kDth', 'kDC', 'kPz', 'kDz', 'kIz']);
+      // the PD gains are the B.10 answers: show them only in Explore mode
+      readout(sec, ctx, ctx.S.mode === 'explore' ? ['kPth', 'kDth', 'kDC', 'kPz', 'kDz', 'kIz'] : ['kIz']);
     },
 
     splane(ctx) {
@@ -739,7 +745,7 @@
             const slow = real.length === 1 && real[0].re < 0 && Math.abs(real[0].re) < Math.abs(pdc.re);
             return { ok: Math.abs(ratio - 1) < 0.1 && slow, msg: `|p| ratio ${fmt(ratio, 3)}, integrator pole ${real.length ? fmtPole(real[0]) : '—'}.` };
           },
-          solution: () => [{ html: 'With the B.10 gains, κ ≈ 0.02–0.1 keeps the pair close; the listing\'s k<sub>Iz</sub> = −0.05 is in that range. The book stops at the rlocus command (p. 472).' }],
+          solution: () => [{ html: 'With the B.10 gains, κ ≲ 0.02 keeps the pair within 10% (κ = 0.01: |p| ratio 0.96, integrator pole at −0.05). The listing\'s k<sub>Iz</sub> = −0.05 moves the poles more: the pair shrinks to 0.73 of its PD size and the integrator pole sits at −0.44. That trades a less damped, slower pair for faster removal of the steady-state error. The book stops at the rlocus command (p. 472).' }],
         },
       ]);
     },

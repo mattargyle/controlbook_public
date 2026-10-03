@@ -3,7 +3,7 @@
 As of 2026-10-03. This covers Design Study B (the pendulum on a cart): problems B.2–B.6, B.8–B.18 and B.P.6.
 
 I found these while building the workbench:
-- 20 problems in the book's worked solutions;
+- 21 problems in the book's worked solutions;
 - 6 places where the book and `_B_pendulum/python` disagree;
 - 4 bugs in the repo code.
 
@@ -30,15 +30,16 @@ Page numbers are PDF pages (book page + 8).
 | B.12 | 207–208 | The same ℓ = 0.5 m matrices. The printed K₁ = (−5.3744, −32.1057, −4.5745, −5.1545, 3.0101) is the ℓ = 0.5 m answer. | With ℓ = 1 m: K = (−10.749, −55.544, −9.3037, −13.462), k_I = 6.0202. |
 | B.12 | 207–208 | Step 2 says the B.11 poles are −1.4140 ± j1.4144 and −0.8 ± j0.6, with p_I = −10. The polynomial it then expands uses the B.8 poles (−1.0369 ± j1.0372, −3.1108 ± j3.1117) and (s + 2). | The listing uses p_I = −2. The workbench uses −2. |
 | B.12 | 207–208 | 𝒞_{A1,B1} starts with "00.94118". a_A1 = (0.0471, −34.588, 1.3835, 0, 0) has +1.3835, while Δ_ol two lines above has −1.3835s². | Typos. |
-| B.13 | 233 | The prose says the observer is updated on line 25, with RK4 on lines 40–48 and the observer equations on lines 50–56. | In Listing 13.2 these are around lines 105, 121–128 and 130–135. |
+| B.13 | 234 | The prose says the observer is updated on line 25, with RK4 on lines 40–48 and the observer equations on lines 50–56. | In Listing 13.2 these are around lines 105, 121–128 and 130–135. |
 | B.15 | 277 | Eq. 15.17 gives the inner Bode constant as 0.0659, while the phase expression next to it uses 0.0816. | 1/((m₁+m₂)g) = 0.0816 (−21.8 dB). |
 | B.15 | 278 | P_out's Bode form is written 0.174(jω/3.83 + 1)(−jω/3.83 + 1)/(jω)². 0.174 is (2/3)/3.83. | The constant is g = 9.8 (19.8 dB). Fig. 15-14 agrees with 9.8: 59.8 dB at ω = 0.1. |
-| B.16 | 297–298 | The answers read 6.5 dB → 47% and −32.2 dB → 2.45% from Fig. 16-10, but the problem says to use the B.10 gains. | With the B.10 gains (hw16.py): B_r = 17.67 dB → 13.1%, |PC(j200)| = −39.0 dB → 1.12%. 6.5 dB matches the t_r,θ = 0.5 s (B.8) gains. |
+| B.16 | 297–298 | The answers read 6.5 dB → 47% and −32.2 dB → 2.45% from Fig. 16-10, but the problem says to use the B.10 gains. | With the B.10 gains (hw16.py): B_r = 17.67 dB → 13.1%, |PC(j200)| = −39.0 dB → 1.12%. 6.5 dB is close to the t_r,θ = 0.5 s (B.8) gains (|L(j1)| = 6.23 dB), but the figure's −32.2 dB, read at ω = 100 rad/s although ω_no = 200, matches neither gain set. |
 | B.16(c) | 297 | B_r = 154 dB, "|e(t)| ≤ 100e−08". | 100e−08 is 1·10⁻⁶. With the B.10 gains, B_r = 173.8 dB, γ_r = 2.04·10⁻⁹ and |e| ≤ 1.02·10⁻⁷. |
-| B.17 | 316–317 | Fig. 17-12 reports GM −6.62, PM 32.88° with crossover ≈ 10 rad/s and bandwidth ≈ 19 rad/s. | With the B.10 gains (hw17.py): PM = 29.7° at 17.1 rad/s; the phase is −180° as ω → 0, so GM = 1/|L(0)| = −18.1 dB; bandwidth 27.9 rad/s (−3 dB from |T(0)| = k_DC). |
-| B.17(b) | 317–318 | The outer-loop figure shows a crossover near 1 rad/s with PM 72°. | With the B.10 gains, hw17's P_out·C_out never drops below +4.6 dB: P_out → −2ℓ/3 and C_out → (k_Dz + σk_Pz)/σ at high frequency, so |L| → 4.5. There is no crossover (python-control reports infinite margins). The loop the code actually closes, C_out · filter · inner closed loop · P_out, crosses over at 1.4 rad/s with PM 29.6° (gain margins −12.3 dB at 0.45 rad/s and +7.0 dB at 3.7 rad/s), bandwidth 4.2 rad/s, and a bandwidth separation of 6.6× from the inner loop. |
+| B.17 | 316–317 | Fig. 17-12 reports GM −6.62, PM 32.88° with crossover ≈ 10 rad/s and bandwidth ≈ 19 rad/s. | With the B.10 gains (hw17.py): PM = 29.7° at 17.1 rad/s; the phase is −180° as ω → 0, so GM = 1/|L(0)| = −18.1 dB; bandwidth 27.59 rad/s (3 dB below |T(0)| = k_DC, as control.bandwidth defines it). The book's figure is close to the t_r,θ = 0.5 s gains but does not match them exactly either (PM 37.2° at 6.66 rad/s, GM −6.5 dB with σ = 0.05). |
+| B.17(b) | 317–318 | The outer-loop figure shows a crossover near 1 rad/s with PM 72°. | With the B.10 gains, hw17's P_out·C_out never drops below +4.6 dB: P_out → −2ℓ/3 and C_out → (k_Dz + σk_Pz)/σ at high frequency, so |L| → 4.5. There is no crossover (python-control reports infinite margins). The loop the code actually closes, C_out · filter · inner closed loop · P_out, crosses over at 1.4 rad/s with PM 29.6° (gain margins −12.3 dB at 0.45 rad/s and +7.0 dB at 3.7 rad/s), bandwidth 4.136 rad/s, and a bandwidth separation of 6.67× from the inner loop (27.59/4.136). |
 | B.18(a) | 349–350 | The text designs C_lead = −155.12 (s/10.72 + 1)/(s/120 + 1) and calls it a lead "centered at 40 rad/s with a ratio of 13.9." | A ratio-13.9 lead at 40 rad/s has its pole at 40·√13.9 = 149 rad/s, not 120. Listing 18.5 (and the repo) use −800·lead(ω = 40, M = 15) instead. |
 | B.18(b) | 354–355 | The text's C_out = 0.469 (s + 0.194)/(s + 6.24) · (s + 0.0256)/(s + 0.0032) · 100/(s + 100) (lead at 1.1 rad/s, ratio 32, lag ratio 8, LPF 100). | Listing 18.6 and the repo use 0.1·lead(1, 20)·lag(0.04, 10)·lpf(50). Both designs are presets on the Ch 18 page. |
+| B.18 text designs | 349–355 | The text's own designs do not meet the problem's specs. | Inner C_lead: PM 53.4° at 21.6 rad/s (asked: ≈ 60°, crossover ≈ 40 rad/s). Outer: |PC(j0.0032)| ≈ 98.7 dB, short of the 100 dB that γ_r = 10⁻⁵ needs. |
 | B.P.6 | 471–472 | Fig. 6-9 closes the outer PID loop with k_DC but without the zero-canceling filter that B.8 adds. | With the B.8 or B.10 PD gains, that loop is already unstable at k_Iz = 0 (its cubic has a sign change; roots +2.15, −0.26, −7.48 for the B.8 gains). With the filter (as implemented), the locus starts stable and stays stable up to k_Iz = −0.235 (B.10 gains). The book stops at the rlocus command. |
 
 Smaller notation issues:
@@ -63,7 +64,7 @@ Smaller notation issues:
 | --- | --- | --- |
 | `_B_pendulum/python/ctrlPD.py:46–48` | Outer k_Dz from the wrong expression (same as Listing 8.3), so ζ_z is not met (1.29 instead of 0.707) | Open |
 | `_B_pendulum/python/ctrlLoopshape.py` `transferFunction` | For a strictly proper C with relative degree ≥ 2, `C[0, i] = num.item(i)` for i in range(n−m−1, n−1) indexes past the end of `num` (IndexError) or misplaces coefficients. It should be `num.item(i − (n−m−1))`. The repo's designs all have relative degree ≤ 1, so they are not affected. | Open |
-| `_B_pendulum/python/pendulumDynamicsSympy.py` | `dill.load(open("eom_case_study_B", "rb"))` segfaults under the repo's Python 3.14 `.venv`: the committed pickle of the lambdified EOM is from an older Python. | Open (regenerate with `hw03_pendulum_solving_for_state_variable_form.py`) |
+| `_B_pendulum/python/pendulumDynamicsSympy.py` | `dill.load(open("eom_case_study_B", "rb"))` loads, but the first call to the loaded function segfaults under the repo's Python 3.14 `.venv`: the committed pickle of the lambdified EOM is from an older Python. | Open (regenerate with `hw03_pendulum_solving_for_state_variable_form.py`) |
 | `_B_pendulum/python/hw13_pendulumSim.py` | The 0.05 N disturbance is always on (part e), although part (a) asks for none. | Open |
 
 ## How the workbench handles them
