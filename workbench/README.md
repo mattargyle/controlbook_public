@@ -2,11 +2,11 @@
 
 Interactive pages for working through the design studies. Open `index.html` directly in a browser; there's no build step or server. KaTeX loads from a CDN, and if you're offline the equations show as raw TeX.
 
-Deep links: `index.html#A/ch8/explore` (study / chapter / mode).
+Deep links: `index.html#A/ch8/explore` (study / chapter / mode). Work mode always starts from your own gains; Explore never writes into it.
 
 Page references (`p. 101 · Eq. 7.5`) are controlbook.pdf page numbers. They link to `../book_and_notes/controlbook.pdf#page=N`, which only resolves where the gitignored PDF exists locally. All links share one PDF tab.
 
-Issues found in the book and the repo code while building the arm pages are listed in [BOOK_ISSUES.md](BOOK_ISSUES.md).
+All six design studies (A–F) have a tab for every problem. Issues found in the book and the repo code are summarized in [BOOK_ISSUES.md](BOOK_ISSUES.md), with full per-study detail in `js/studies/<X>/ISSUES.md`.
 
 ## Modes
 

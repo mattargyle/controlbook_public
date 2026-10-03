@@ -1,6 +1,42 @@
-# Design Study A: issues found in the book and repo
+# Issues found in the book and the repo code
 
-As of 2026-10-03. This covers Design Study A (the single link robot arm): problems A.2–A.18 and A.P.6.
+As of 2026-10-03. These are problems found while building the workbench pages for all six design studies (A–F). Every item was checked twice: once by the agent that built the study, and once by an independent verifier that re-derived the numbers from the PDF. Claims the verifier refuted were removed.
+
+Page numbers are controlbook.pdf pages (book page + 8).
+
+## Summary by study
+
+| Study | Book solutions? | Book errors | Book vs. repo | Repo bugs | Biggest items | Detail |
+| --- | --- | --- | --- | --- | --- | --- |
+| A arm | yes | 19 | 6 | 10 | A.16(b) answer off by 2×; A.8(b) "non-saturating" t_r saturates (120%); A.12 printed gains are for t_r = 0.4, not 0.489; `ctrlPID` anti-windup abs() bug (fixed, PR #1 on your fork) | below |
+| B pendulum | yes | 21 | 6 | 4 | B.11/B.12 matrices and gains printed for ℓ = 0.5 m, not 1 m; Listing 8.3 / `ctrlPD.py` outer k_Dz formula gives ζ = 1.29 instead of 0.707; B.15 Bode constants wrong; B.P.6 book model unstable for every k_I | [B/ISSUES.md](js/studies/B/ISSUES.md) |
+| C satellite | yes | 23 | 6 | 9 | C.11 printed for k = 0.15; C.12 numbers irreproducible; C.16–C.18 use C.8 gains, not C.10's; C.16(a) off by 2×; `ctrlStateFeedbackIntegrator` integrates θ instead of φ; `ctrlLoopshape(state_space)` crashes; C.18 outer plant has DC gain 10 instead of 1 | [C/ISSUES.md](js/studies/C/ISSUES.md) |
+| D mass-spring | no (homework) | — | — | — | PD on this type-0 plant leaves a k/(k+k_P) error, so D.8(b) and D.10 depend on whether F_e = k z_r is added (both readings supported) | [D/ISSUES.md](js/studies/D/ISSUES.md) |
+| E block-beam | no (homework) | — | — | — | E.8 gains cannot survive E.10's 20% uncertainty (a 0.2% mass error runs the block off the beam); holding F_fl(z) for one T_s = 0.01 s sample turns E.8's 4% overshoot into 48%; `testDynamics.py` uses g = 9.81 vs the book's 9.8 | [E/ISSUES.md](js/studies/E/ISSUES.md) |
+| F planar VTOL | no (homework) | — | — | 3 | Mixing sign flipped on four remote branches (2024Fall, 2024Winter, add_LQG, add_lqr); F.8(e) square half-period shorter than the z rise time; F.16(a) is 0 by the book but ≈ 292 m as implemented; F.18 loops conditionally stable | [F/ISSUES.md](js/studies/F/ISSUES.md) |
+
+For D, E and F the book has no worked solutions, so their files list ambiguous problem statements, fragile specs, and the workbench's own choices (each choice is labeled on the page).
+
+## Problems that repeat across studies
+
+These are worth knowing before working any study.
+
+| Pattern | Where | What goes wrong |
+| --- | --- | --- |
+| Parabola error off by 2× | A.16(b) p. 296, C.16(a) p. 299; Eq. 16.12 p. 295 | Eq. 16.12 defines the parabola as R(s) = A/s³, but the solutions plug the coefficient of t² straight in. L{At²} = 2A/s³, so e_ss = 2A/M_a. A.16(b): 0.4, not 0.2. C.16(a): 3.08 (C.8 loops), not 1.53. |
+| Derivative on the measurement changes the system type | A.9, C.9/C.16, F.9/F.16; Notes p. 153 | Table 9-1 (p. 141) assumes the whole PID acts on the error (Fig. 9-1). Every listing differentiates the measured output (Fig. 7-2), which removes the controller zero from r → y and lowers the tracking type by one. The Notes on p. 153 say the type is unchanged, which is false for these plants. A: e_ramp = (b + k_D)/k_P, not b/k_P. C: type 1 with e_ramp = k_D/k_P, not type 2. F.16(a): 292 m, not 0. Input-disturbance types are unaffected. The workbench accepts the book's answer and explains the implemented one. |
+| "Use the gains from X.10" but the figures use X.8's | A.16–A.17 (k_I = 0.25 vs 0.2), B.16–B.17, C.16–C.18 | The printed numbers come from different gains than the problem names. The workbench computes every readout from the current gains and quotes the book's values in the solutions. |
+| Printed numbers for different parameters or tuning | A.12 (t_r = 0.4 vs 0.489), B.11–B.12 (ℓ = 0.5 vs 1), C.11 (k = 0.15 vs 0.1), C.12 | The structure is right, but the numbers won't reproduce with the stated parameters. |
+| "Tuned to not saturate" values that saturate | A.8(b) t_r = 0.37 s (120% of τ_max), C.8(f) t_rθ = 1.75 s (137%) | The fastest non-saturating values are A: t_r = 0.489 s; C: t_rθ = 1.886 s. |
+| Anti-windup asked for but not implemented | A.12, C.12, C.14 | The listings have none. C's `hw12`/`hw14` diverge for some α = 0.2 draws because the integrator winds up during saturation. |
+| Observer slower than the controller | A.14, B.14 | Opposite of the usual 5–10× rule. |
+| Loopshaping text designs differ from the listings | A.18, B.18, C.18 | The text and listing designs are different, and some text designs miss their own specs (B.18). Several final loops are conditionally stable (A.18, E.17, F.18): the lag pushes the phase below −180° at low frequency. The workbench lists every gain-margin crossing. |
+| `ctrlLoopshape.transferFunction` indexing | B, C | For a strictly proper C it indexes past the numerator (IndexError) or misplaces coefficients. C's state-space path never runs. |
+| `testDynamics.py` gravity | E (9.81 vs the book's 9.8) | The test vectors need g = 9.81. |
+
+## Study A: single link arm (full detail)
+
+This covers Design Study A (the single link robot arm): problems A.2–A.18 and A.P.6.
 
 I found these while building the workbench:
 - 19 problems in the book's worked solutions;
@@ -15,7 +51,7 @@ Two of the book items change a numerical answer:
 
 Page numbers are PDF pages (book page + 8).
 
-## Errors in the book's worked solutions
+### Errors in the book's worked solutions
 
 | Problem | PDF page | Issue | Correct value / effect |
 | --- | --- | --- | --- |
@@ -53,7 +89,7 @@ Smaller notation issues:
 - The appendix figures are numbered 6-x, which collides with Chapter 6.
 - Chapter 9's error constant M_p shares a symbol with overshoot.
 
-## Book vs. repo code
+### Book vs. repo code
 
 | Topic | Book | Repo (`_A_arm/python`) |
 | --- | --- | --- |
@@ -64,7 +100,7 @@ Smaller notation issues:
 | A.18(c) implementation | State space, Euler with N = 10 substeps (Listing 18.2) | `hw18_armSim.py` uses `method="digital_filter"` (Tustin). The state-space option uses one RK4 step. `hw18` also uses α = 0.1. |
 | A.5 transfer function | From the feedback-linearized Eq. 4.7 | `hw05_arm_transfer_function.py` imports `hw06` and uses the Jacobian about θe = 0. Same result. |
 
-## Bugs in the repo code
+### Bugs in the repo code
 
 | File | Bug | Status |
 | --- | --- | --- |
@@ -79,7 +115,7 @@ Smaller notation issues:
 | `_A_arm/python/hw13_armSim.py` | The 0.01 disturbance is already active (part e) although part (a) asks for none. `dhat` is plotted as 0. | Open |
 | Cosmetic | `armParam.py` header says "Inverted Pendulum." `armDynamics.py` gives damping units as "Ns." `ctrlStateFeedback.py` has a stale "dirty derivatives" comment. Both book and repo say "observerable." | Open |
 
-## How the workbench handles them
+### How the workbench handles them
 
 | Item | Workbench behavior |
 | --- | --- |
