@@ -91,12 +91,6 @@
     return { kPth: w.kPth, kDth: w.kDth, kPz: w.kPz, kDz: w.kDz, kIz: w.kIz ?? 0, kDC: lib().dcGain(ctx.pModel, w.kPth) };
   }
 
-  // Entering Work mode from Explore: start from the explored gains.
-  function toWork(ctx) {
-    const g = ctx.gains;
-    Object.assign(ctx.st.w, { kPth: g.kPth, kDth: g.kDth, kPz: g.kPz, kDz: g.kDz, kIz: g.kIz ?? 0 });
-  }
-
   function markers(ctx, { withI = false, filter = ctx.st.filter, targets = null } = {}) {
     const p = ctx.pModel, g = ctx.gains, pin = ctx.sys.inner(p), q = qOf(p);
     const explore = ctx.S.mode === 'explore';
@@ -244,7 +238,6 @@
     },
     simDefaults(sys) { return sys.problems.ch8.sim; },
     gains: gainsFor,
-    toWork,
     controller(ctx, { linear = false } = {}) {
       return lib().slcPD({ g: ctx.gains, p: ctx.pModel, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(ctx.pModel), filter: ctx.st.filter, linear });
     },
@@ -366,7 +359,6 @@
     defaults() { return { trTh: 0.5, zetaTh: 0.707, M: 10, zetaZ: 0.707, formula: 'book', filter: true, kIz: 0, input: 'step', w: { ...W8 } }; },
     simDefaults(sys) { return sys.problems.ch9.sim; },
     gains: gainsFor,
-    toWork,
     controller(ctx, { linear = false } = {}) {
       return lib().slcPID({ g: ctx.gains, p: ctx.pModel, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(ctx.pModel), gate: false, deriv: 'state', thetaMax: Infinity, filter: ctx.st.filter, linear });
     },
@@ -493,7 +485,6 @@
     },
     simDefaults(sys) { return { ...sys.problems.ch10.sim, mismatch: sys.problems.ch10.mismatch }; },
     gains: gainsFor,
-    toWork,
     controller(ctx, { linear = false } = {}) {
       const st = ctx.st;
       return lib().slcPID({ g: ctx.gains, p: ctx.pModel, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(ctx.pModel), sigma: st.sigma, vbar: st.vbar, gate: st.gate, thetaMax: st.thetaMax * DEG, filter: st.filter, deriv: st.deriv, linear });
