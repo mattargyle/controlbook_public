@@ -146,7 +146,7 @@
       slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 20, log: true, sig: 3, get: () => ctx.st.w0, set: (v) => { ctx.st.w0 = v; ctx.update(); } });
       slider(sec, { label: 'A', unit: 'N', min: 0, max: 6, step: 0.01, sig: 3, get: () => ctx.st.A, set: (v) => { ctx.st.A = v; ctx.update(); } });
       segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => ctx.st.asym, set: (v) => { ctx.st.asym = v; ctx.update(); } });
-      lib.note(sec, 'After the transient (which decays like e^(−ζωₙt), about 20 s here) z is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀). Try ω₀ near 0.775 rad/s.');
+      lib.note(sec, 'After the transient (it decays like e^(−ζωₙt), slowly for this plant) z is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀). Sweep ω₀ and watch the amplitude to find the resonance.');
       if (ctx.S.mode === 'work') {
         const b = revealButton(ctx, 'D:ch15:bode', 'Reveal the Bode plot (compare with your sketch)');
         WB.ui.addRefresher(() => { b.hidden = ctx.app.isRevealed('D:ch15:bode'); });
@@ -254,14 +254,14 @@
       return [
         { title: 'Error with every input', page: 'p. 284 · Eq. 16.2–16.3',
           theory: 'E = \\frac{1}{1+PC}R + \\frac{PC}{1+PC}N,\\quad + \\frac{1}{1+PC}D_{out} + \\frac{P}{1+PC}D_{in}' },
-        { title: 'Type 1 from the Bode plot', page: 'p. 293 · Eq. 16.11',
+        { title: 'Type 1 from the Bode plot', page: 'p. 294 · Eq. 16.11',
           theory: 'M_v = \\lim_{\\omega\\to 0}|j\\omega\\,P(j\\omega)C(j\\omega)|,\\quad e_{ss} = \\frac{A}{M_v} \\text{ for a ramp of slope } A',
           symbolic: 'M_v = \\lim_{s\\to0} s\\,\\frac{1/m}{s^2 + \\frac bm s + \\frac km}\\,\\frac{k_I}{s} = \\frac{k_I}{k}',
           numbers: `M_v = ${tex(s.Mv)} \\Rightarrow e_{ramp} = ${tex(s.ramp)}\\,\\text{m}`, spoiler: true },
         { title: 'Input disturbance', page: 'p. 290 · Eq. 16.8, p. 291 · Eq. 16.9',
           theory: '20\\log|PC| - 20\\log|P| = 20\\log|C| \\ge B_{d_{in}} \\text{ for } \\omega \\le \\omega_{d_{in}},\\quad \\gamma_{d_{in}} = 10^{-B_{d_{in}}/20}',
           numbers: `|C(j\\omega_{d,in})| = ${tex(s.Bdin)}\\,\\text{dB} \\Rightarrow \\gamma_{d_{in}} = ${tex(s.gdin)}\\quad(\\text{exact } |P/(1+PC)| = ${tex(s.gdinExact)})`, spoiler: true,
-          note: `The book's rule assumes |PC| ≫ 1 at ω_d,in. Here |PC(j${fmt(ctx.st.wdin, 3)})| = ${fmt(absAt(s.Lg, ctx.st.wdin), 3)}, so the exact value differs from 1/|C|.` },
+          note: ctx.S.mode !== 'explore' ? 'The book\'s rule assumes |PC| ≫ 1 at ω_d,in. Check that assumption for your gains.' : `The book's rule assumes |PC| ≫ 1 at ω_d,in. Here |PC(j${fmt(ctx.st.wdin, 3)})| = ${fmt(absAt(s.Lg, ctx.st.wdin), 3)}, so the exact value differs from 1/|C|.` },
         { title: 'Noise', page: 'p. 287 · Eq. 16.6',
           theory: '20\\log|PC| \\le 20\\log\\gamma_n \\text{ for } \\omega \\ge \\omega_{no}',
           numbers: `|PC(j\\omega_{no})| = ${tex(db(s.gn))}\\,\\text{dB} \\Rightarrow \\gamma_n = ${tex(s.gn)}`, spoiler: true },

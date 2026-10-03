@@ -20,8 +20,11 @@
       update(r, x, yMeas, t) {
         const fin = inputForce(st, t);
         if (linear || !st.comp || st.comp === 'none') return fin;
-        if (st.comp === 'eq') return p.k * (st.zE || 0) + fin;
-        return p.k * x[0] + fin;
+        // D.4 in Work mode applies the student's own F_e / c (st.FeW, st.cW), so
+        // the force readout never shows the answer.
+        const work = ctx.S.mode === 'work' && st.FeW !== undefined;
+        if (st.comp === 'eq') return (work ? st.FeW : p.k * (st.zE || 0)) + fin;
+        return (work ? st.cW : p.k) * x[0] + fin;
       },
     };
   }
@@ -103,7 +106,7 @@
           theory: '\\mathbf p = (z, 0, 0)^\\top,\\quad \\boldsymbol\\omega = 0',
           symbolic: 'K = \\tfrac12 m\\dot z^2',
           numbers: `K = ${tex(p.m / 2)}\\,\\dot z^2`, spoiler: true,
-          note: 'The block slides without rotating, so only the translational term remains.' },
+          note: ctx.S.mode === 'explore' ? 'The block slides without rotating, so only the translational term remains.' : undefined },
       ];
     },
 
@@ -134,7 +137,7 @@
     buildControls(parent, ctx) {
       const sec = section(parent, 'Open-loop simulation', 'p. 378 · D.3(e)');
       inputControls(sec, ctx);
-      lib.note(sec, 'The energy plot checks the equations of motion: the change in K + P must equal the work done by F minus what the damper dissipates.');
+      lib.note(sec, 'The energy plot checks the equations of motion: the change in K + P must equal the net work done by the nonconservative forces.');
     },
 
     extraPlot(ctx, res) {
@@ -153,7 +156,7 @@
       return {
         opts: { title: 'energy balance', yLabel: 'energy [J]', unit: 'J' },
         data: { series: [
-          { label: '∫(F − bż)ż dt', y: Wk, color: '--series-2', dash: [5, 4], width: 2 },
+          { label: ctx.S.mode === 'explore' ? '∫(F − bż)ż dt' : 'net work of the nonconservative forces', y: Wk, color: '--series-2', dash: [5, 4], width: 2 },
           { label: 'E(t) − E(0) = ΔK + ΔP', y: E, color: '--series-1' },
         ] },
       };
@@ -164,18 +167,20 @@
       return [
         { title: 'Euler-Lagrange equations', page: 'p. 18 · Eq. 1.8, p. 43 · §3.1.4',
           theory: 'L = K - P,\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q' },
-        { title: 'Spring potential energy', page: 'p. 42 · Fig. 3-2',
-          theory: 'P = \\tfrac12 k z^2 \\;\\text{for a spring stretched by } z',
+        { title: 'Potential energy', page: 'p. 41–42 · §3.1.1',
+          theory: 'P = \\textstyle\\sum (\\text{gravity terms}) + \\sum (\\text{spring terms}),\\quad \\text{each set to zero at the rest configuration}',
+          symbolic: 'P = \\tfrac12 k z^2 \\quad(\\text{Fig. 3-2})',
           numbers: `P = ${tex(p.k / 2)}\\,z^2`, spoiler: true },
         { title: 'Generalized coordinates, forces, damping', page: 'p. 42 · §3.1.2, p. 43 · §3.1.3',
           theory: 'q = \\text{minimum set of configuration variables},\\quad \\tau = \\text{applied nonconservative forces},\\quad -B\\dot q = \\text{damping forces}',
           symbolic: 'q = z,\\quad \\tau = F,\\quad -B\\dot q = -b\\dot z', spoiler: true },
         { title: 'Equation of motion', page: 'p. 43',
-          theory: '\\frac{d}{dt}\\frac{\\partial L}{\\partial \\dot z} - \\frac{\\partial L}{\\partial z} = F - b\\dot z',
-          symbolic: 'L = \\tfrac12 m\\dot z^2 - \\tfrac12 k z^2 \\;\\Rightarrow\\; m\\ddot z + k z = F - b\\dot z',
+          theory: '\\text{substitute } K, P, q, \\tau, B \\text{ into } \\frac{d}{dt}\\frac{\\partial L}{\\partial \\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q',
+          symbolic: 'L = \\tfrac12 m\\dot z^2 - \\tfrac12 k z^2,\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial \\dot z} - \\frac{\\partial L}{\\partial z} = F - b\\dot z \\;\\Rightarrow\\; m\\ddot z + k z = F - b\\dot z',
           numbers: `\\ddot z = ${tex(1 / p.m)}\\,F - ${tex(p.b / p.m)}\\,\\dot z - ${tex(p.k / p.m)}\\,z`, spoiler: true },
         { title: 'Energy balance (a check on the EOM)', page: 'follows from the EOM',
-          theory: '\\frac{d}{dt}(K + P) = (F - b\\dot z)\\,\\dot z' },
+          theory: '\\frac{d}{dt}(K + P) = \\text{power delivered by the nonconservative forces}',
+          symbolic: '\\frac{d}{dt}(K + P) = (F - b\\dot z)\\,\\dot z', spoiler: true },
       ];
     },
 
@@ -213,7 +218,7 @@
   // ------------------------------------------------------------------ D.4 --
   CH.ch4 = Object.assign({}, common, {
     id: 'ch4', num: 4, tab: 'D.4', title: 'Equilibria & linearization', pages: 'pp. 59–68, p. 378',
-    defaults() { return { zE: 0.5, dz0: 0.3, method: 'jacobian', comp: 'eq', inp: { shape: 'zero', amp: 0.5, freq: 0.05, width: 2 } }; },
+    defaults() { return { zE: 0.5, dz0: 0.3, method: 'jacobian', comp: 'eq', FeW: 0, cW: 0, inp: { shape: 'zero', amp: 0.5, freq: 0.05, width: 2 } }; },
     simDefaults(sys) { return sys.problems.ch4.sim; },
     controller(ctx, o) { ctx.st.comp = ctx.st.method === 'fl' ? 'fl' : 'eq'; return openLoop(ctx, o); },
 
@@ -245,7 +250,13 @@
         options: [{ value: 'jacobian', label: 'Jacobian: F = F<sub>e</sub> + F̃' }, { value: 'fl', label: 'feedback: F = F<sub>fl</sub>(z) + F̃' }],
         get: () => ctx.st.method, set: (v) => { ctx.st.method = v; ctx.update(); },
       });
-      lib.note(sec, 'In Work mode the simulation still applies the right F_e or F_fl, so you can test an answer by watching whether the mass stays put.');
+      if (ctx.S.mode === 'work') {
+        slider(sec, { label: 'your F<sub>e</sub>', unit: 'N', min: -10, max: 10, step: 0.01, sig: 3, get: () => ctx.st.FeW, set: (v) => { ctx.st.FeW = v; ctx.update(); }, disabled: () => ctx.st.method !== 'jacobian' });
+        slider(sec, { label: 'your c (F = cz + F̃)', unit: 'N/m', min: -10, max: 10, step: 0.01, sig: 3, get: () => ctx.st.cW, set: (v) => { ctx.st.cW = v; ctx.update(); }, disabled: () => ctx.st.method !== 'fl' });
+        lib.note(sec, 'Work mode applies your F_e (Jacobian) or your c (feedback). Test an answer: with the right F_e the mass settles at zₑ. Explore applies the correct values.');
+      } else {
+        lib.note(sec, 'Explore applies the correct equilibrium or feedback-linearizing force.');
+      }
       const inp = section(parent, 'Input F̃(t)', 'p. 60');
       inputControls(inp, ctx, { label: 'Input F̃(t)' });
       revealPolesButton(sec, ctx);
@@ -275,12 +286,12 @@
           theory: '\\dot{\\tilde x} = \\frac{\\partial f}{\\partial x}\\Big|_e\\tilde x + \\frac{\\partial f}{\\partial u}\\Big|_e\\tilde u,\\quad \\tilde x = x - x_e,\\; \\tilde u = u - u_e',
           symbolic: 'm\\ddot{\\tilde z} + b\\dot{\\tilde z} + k\\tilde z = \\tilde F \\quad(\\text{identical for every } z_e)',
           numbers: `A = ${texMat(ans.ss(p).A)},\\quad B = ${texMat(ans.ss(p).B)},\\quad \\text{eig}(A) = ${L.eig(ans.ss(p).A).map((q) => texPole(q)).join(',\\;')}`, spoiler: true,
-          note: 'The plant is already linear, so the linearization is exact: the dashed trace lies on the simulated one.' },
+          note: ctx.S.mode === 'explore' ? 'The plant is already linear, so the linearization is exact: the dashed trace lies on the simulated one.' : undefined },
         { title: 'Feedback linearization', page: 'p. 62 · §4.1.2',
           theory: 'u = u_{fl}(x) + \\tilde u',
           symbolic: 'F = kz + \\tilde F \\;\\Rightarrow\\; m\\ddot z + b\\dot z = \\tilde F',
           numbers: `A_{fl} = ${texMat(Afl)},\\quad \\text{eig} = 0,\\; ${tex(-t.a1)}`, spoiler: true,
-          note: 'u_fl cancels the unwanted terms exactly. Cancelling the spring leaves a free integrator: the mass then drifts after any force pulse.' },
+          note: ctx.S.mode === 'explore' ? 'Cancelling the spring leaves a free integrator: the mass then drifts after any force pulse.' : undefined },
       ];
     },
 
@@ -385,7 +396,7 @@
           theory: 'x = \\begin{bmatrix} z \\\\ \\dot z\\end{bmatrix},\\quad u = F,\\quad y = z',
           symbolic: 'A = \\begin{bmatrix}0 & 1\\\\ -\\frac km & -\\frac bm\\end{bmatrix},\\quad B = \\begin{bmatrix}0\\\\ \\frac1m\\end{bmatrix},\\quad C = \\begin{bmatrix}1 & 0\\end{bmatrix},\\quad D = 0',
           numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)},\\quad C = ${texMat(C)}`, spoiler: true },
-        { title: 'Back to the transfer function', page: 'p. 85 · Eq. 6.14–6.15',
+        { title: 'Back to the transfer function', page: 'p. 85 · Eq. 6.14, p. 86 · Eq. 6.15',
           theory: 'P(s) = C(sI - A)^{-1}B + D,\\quad \\text{poles: } \\det(sI - A) = 0',
           numbers: `\\det(sI - A) = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },
       ];

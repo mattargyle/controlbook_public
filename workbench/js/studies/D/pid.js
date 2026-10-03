@@ -283,7 +283,7 @@
               ? { ok: true, msg: 'The simulated loop has the target poles.' }
               : { ok: false, msg: `Current closed-loop poles: ${lib.polesOf(cl)}.` };
           },
-          solution: () => [{ html: 'Two real poles: no overshoot, and the slower pole at −1 gives a settling time of roughly 4 s.' }],
+          solution: () => [{ html: 'Two real poles: no overshoot, and the slower pole at −1 gives a 2% settling time of about 5 s (the 4/σ rule of thumb with σ = 1 gives 4 s; the second pole stretches it).' }],
         },
       ]);
     },
@@ -324,7 +324,7 @@
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kD: ctx.st.kD, kI: 0 } : { ...designed(ctx), kI: 0 }; },
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'PD controller', 'p. 111 · Fig. 8-12');
+      const sec = section(parent, 'PD controller', 'p. 119 · Fig. 8-12');
       archControl(sec, ctx);
       compControl(sec, ctx);
       if (ctx.S.mode === 'work') gainSliders(sec, ctx, ['kP', 'kD']);
@@ -361,7 +361,7 @@
         { title: 'Gains from the spec', page: 'p. 100',
           theory: 'k_P = \\frac{\\omega_n^2 - a_0}{b_0},\\quad k_D = \\frac{2\\zeta\\omega_n - a_1}{b_0}',
           numbers: `k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)}`, spoiler: true },
-        { title: 'Saturation limits the rise time', page: 'p. 119 · Eq. 8.8, p. 120 · Fig. 8-13',
+        { title: 'Saturation limits the rise time', page: 'p. 119 · Eq. 8.8, p. 121 · Fig. 8-13',
           theory: 'u = F_e + k_P e - k_D\\dot z \\text{ peaks at } t = 0^+ \\;(\\dot z = 0):\\quad k_P \\le \\frac{F_{max} - |F_e|}{e_{max}},\\quad \\omega_n \\le \\sqrt{a_0 + b_0 k_{P,max}},\\quad t_r \\ge \\frac{2.2}{\\omega_{n,max}}',
           numbers: `F_e = ${tex(sb.Fe)},\\; e_{max} = ${tex(step)}\\,\\text{m}\\Rightarrow k_{P,max} = ${tex(sb.kP)},\\; \\omega_{n,max} = ${tex(sb.wn)},\\; t_{r,min} = ${tex(sb.tr)}\\,\\text{s}`, spoiler: true,
           note: 'F_e depends on the spring-compensation setting (k z_r or none), which changes the D.8(b) answer.' },
@@ -475,7 +475,13 @@
     renderType(box, ctx) {
       const a = ans.typeAnalysis(ctx.pModel, ctx.gains);
       const st = ctx.st, S = ctx.S, A = S.sim.amplitude;
-      const pred = st.input === 'step' ? A * a.step : st.input === 'ramp' ? A * a.ramp : 2 * A * a.parab;
+      // With F = k z_r + F̃ (exact k) the spring feedforward cancels a0 in 1 − T, so the
+      // tracking type goes up by one: PD gives e_ramp = (a1 + b0 kD)/(a0 + b0 kP), PID gives
+      // e_parab = (a1 + b0 kD)/(b0 kI) per unit of R = 1/s^3.
+      const eq = st.comp === 'eq', t = ctx.model, g = ctx.gains;
+      const c1 = t.a1 + t.b0 * g.kD;
+      const e = eq ? (g.kI > 0 ? { step: 0, ramp: 0, parab: c1 / (t.b0 * g.kI), type: 2 } : { step: 0, ramp: c1 / (t.a0 + t.b0 * g.kP), parab: Infinity, type: 1 }) : a;
+      const pred = st.input === 'step' ? A * e.step : st.input === 'ramp' ? A * e.ramp : 2 * A * e.parab;
       const res = ctx.app.result();
       const n = res ? res.r.length - 1 : 0;
       const iD = res ? Math.min(n, Math.max(0, Math.round(S.sim.tDist / S.sim.Ts) - 1)) : 0;
@@ -484,8 +490,8 @@
       const show = S.mode === 'explore' || ctx.app.isRevealed('D:ch9:type');
       const rows = [];
       if (show) {
-        rows.push(row('reference tracking type', `type ${a.type}`));
-        rows.push(row(`predicted e_ss (${st.input}, Fig. 7-2 loop)`, isFinite(pred) ? `${fmt(pred, 3)} m` : '∞'));
+        rows.push(row('reference tracking type', eq ? `type ${a.type} loop; type ${e.type} with F = k z_r + F̃` : `type ${a.type}`));
+        rows.push(row(`predicted e_ss (${st.input}, ${eq ? 'with F = k z_r + F̃' : 'Fig. 7-2 loop'})`, isFinite(pred) ? `${fmt(pred, 3)} m` : '∞'));
         rows.push(row('input-disturbance type', `type ${a.distType}`));
         rows.push(row(`predicted extra e from d = ${fmt(S.sim.dist, 3)} N`, `${fmt(Math.abs(S.sim.dist) * a.dist, 3)} m`));
       } else {
@@ -510,10 +516,11 @@
           numbers: g.kI > 0 ? `M_v = ${tex(a.Mv)},\\quad e_{ramp} = \\frac{k}{k_I} = ${tex(a.ramp)}` : `M_p = ${tex(a.Mp)},\\quad e_{step} = \\frac{k}{k + k_P} = ${tex(a.step)}`,
           spoiler: true,
           note: 'For this plant the Fig. 7-1 and Fig. 7-2 loops give the same limits, because P(0) is finite.' },
-        { title: 'Input disturbance', page: 'p. 143 · §9.1.3',
-          theory: 'E(s) = -\\frac{P}{1+PC}D_{in}(s),\\quad \\lim_{s\\to0}\\frac{P}{1+PC}',
+        { title: 'Input disturbance', page: 'p. 143 · §9.1.3, Fig. 9-5',
+          theory: 'E(s) = \\cdots + \\frac{P}{1+PC}D_{in}(s),\\quad \\lim_{s\\to0}\\frac{P}{1+PC}',
           numbers: g.kI > 0 ? '\\lim_{s\\to0}\\frac{P}{1+PC} = 0 \\;(\\text{integrator in } C)' : `\\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1}{k + k_P} = ${tex(a.dist)}\\;\\text{m/N}`,
-          spoiler: true },
+          spoiler: true,
+          note: 'Fig. 9-5 subtracts d_in at the plant input, hence the + sign. The workbench adds d (the plant sees u + d), so here E = −P/(1+PC)·D: same magnitude, opposite sign.' },
         compCard(ctx),
       ];
     },
@@ -552,7 +559,11 @@
           id: 'b', title: '(b) Constant input disturbance',
           html: 'Steady-state error per newton of d (m/N), without and with the integrator, at the current k<sub>P</sub>.',
           inputs: { pd: 'PD', pid: 'PID' },
-          check: (v) => lib.check(v, { pd: 1 / (ctx.pModel.k + g().kP), pid: 0 }, { pd: 'PD', pid: 'PID' }),
+          html: undefined,
+          check: (v) => {
+            const pd = lib.num(v.pd);  // sign depends on the convention (Fig. 9-5 subtracts d_in; the sim adds d)
+            return lib.check({ pd: pd === null ? v.pd : Math.abs(pd), pid: v.pid }, { pd: 1 / (ctx.pModel.k + g().kP), pid: 0 }, { pd: 'PD', pid: 'PID' });
+          },
           solution: () => [
             { tex: `\\text{PD}: \\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1/k}{1 + k_P/k} = \\frac{1}{k + k_P} = ${tex(1 / (ctx.pModel.k + g().kP))},\\quad \\text{PID}: 0` },
             { html: 'An error in k is such a disturbance: F<sub>e</sub> = k̂z<sub>r</sub> misses k z<sub>r</sub> by (k − k̂)z<sub>r</sub>. Try it: d = 0.5 N starts at t = 20 s.' },
@@ -587,23 +598,25 @@
 
   CH.p6 = {
     id: 'p6', num: 10.5, tab: 'D.P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474, p. 380',
-    defaults(sys) { const pr = sys.problems.p6; return { comp: 'none', deriv: 'state', antiwindup: 'none', tr: pr.tr, zeta: pr.zeta, kIx: 0.1, kMaxFactor: 1 }; },
+    defaults(sys) { const pr = sys.problems.p6; return { comp: 'none', deriv: 'state', antiwindup: 'none', kP: 1, kD: 1, tr: pr.tr, zeta: pr.zeta, kIx: 0.1, kMaxFactor: 1 }; },
     simDefaults(sys) { return sys.problems.p6.sim; },
-    gains(ctx) { return designed(ctx); },
+    // Work mode: your own PD gains (placeholders until you enter your D.8 gains); Explore: from t_r, ζ.
+    gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kD: ctx.st.kD, kI: ctx.st.kIx } : designed(ctx); },
+    toWork(ctx) { const g = ctx.gains; Object.assign(ctx.st, { kP: g.kP, kD: g.kD }); },
     controller: (ctx, o) => makePID(ctx, o),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePID),
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'PD from the D.8 specs, then add k_I', 'p. 466');
+      const sec = section(parent, 'PD from D.8, then add k_I', 'p. 466');
       compControl(sec, ctx);
-      specSliders(sec, ctx, { kI: true });
+      if (ctx.S.mode === 'work') { gainSliders(sec, ctx, ['kP', 'kD']); lib.gainSlider(sec, ctx, 'kIx', 'k<sub>I</sub>', R.kI); } else specSliders(sec, ctx, { kI: true });
       slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.1, max: 3, step: 0.05, sig: 2, get: () => ctx.st.kMaxFactor, set: (v) => { ctx.st.kMaxFactor = v; ctx.update(); } });
-      lib.note(sec, 'Drag a closed-loop pole along the locus to set k_I. In Work mode the numbers stay hidden; the locus itself is the plot the problem asks for.');
+      lib.note(sec, ctx.S.mode === 'work' ? 'Enter your D.8 gains (problem panel: Use my gains), then drag a closed-loop pole along the locus to set k_I.' : 'Drag a closed-loop pole along the locus to set k_I.');
       if (ctx.S.mode === 'explore') readout(sec, ctx);
     },
 
     splane(ctx) {
-      const g = designed(ctx), ev = ans.evans(ctx.pModel, g);
+      const g = ctx.gains, ev = ans.evans(ctx.pModel, g);
       const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, g.kI * 1.2, 1e-3);
       const mk = L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
       L.roots(pidCharPoly(ctx.model, g)).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole at kI = ${fmt(g.kI, 3)}`, dragId: i }));
@@ -611,7 +624,7 @@
       return { markers: mk, loci: rootLocus(ev.den, ev.num, kMax), fitR };
     },
     onPoleDrag(ctx, id, re, im) {
-      const ev = ans.evans(ctx.pModel, designed(ctx));
+      const ev = ans.evans(ctx.pModel, ctx.gains);
       const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, 1e-3);
       let best = ctx.st.kIx, bd = Infinity;
       for (let i = 0; i <= 400; i++) {
@@ -626,7 +639,7 @@
     },
 
     math(ctx) {
-      const g = designed(ctx), ev = ans.evans(ctx.pModel, g);
+      const g = ctx.gains, ev = ans.evans(ctx.pModel, g);
       return [
         { title: 'Closed loop with PID (derivative on output)', page: 'p. 470 (A.P.6 pattern)',
           theory: '\\Delta_{cl}(s) = s^3 + (a_1 + b_0k_D)s^2 + (a_0 + b_0k_P)s + b_0k_I',
@@ -645,11 +658,20 @@
 
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.p6;
-      const ev = () => ans.evans(ctx.pModel, designed(ctx));
+      const ev = () => ans.evans(ctx.pModel, ctx.gains);
       lib.panel(parent, ctx, prob, [
         {
+          id: 'g', title: 'Start from your D.8 PD gains',
+          inputs: { kP: 'k<sub>P</sub>', kD: 'k<sub>D</sub>' },
+          actions: [{ label: 'Use my gains', run: (v) => {
+            const kP = lib.num(v.kP), kD = lib.num(v.kD);
+            if (kP === null || kD === null) return { ok: false, msg: 'Enter kP and kD first.' };
+            ctx.app.setMode('work'); Object.assign(ctx.st, { kP, kD }); ctx.update(); return null;
+          } }],
+        },
+        {
           id: 'a', title: 'Evans form: L(s) = c / (s³ + d<sub>2</sub>s² + d<sub>1</sub>s)',
-          html: 'Uses the PD gains from the current t<sub>r</sub>, ζ (D.8(a): 2 s, 0.7).',
+          html: 'Uses the current k<sub>P</sub>, k<sub>D</sub> (Work: your gains; Explore: from t<sub>r</sub>, ζ).',
           inputs: { c: 'c', d2: 'd<sub>2</sub>', d1: 'd<sub>1</sub>' },
           check: (v) => lib.check(v, { c: ctx.model.b0, d2: ev().den[1], d1: ev().den[2] }, {}),
           solution: () => [{ tex: `1 + k_I\\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev().den)}} = 0` }, { html: 'd<sub>2</sub> = (b + k<sub>D</sub>)/m and d<sub>1</sub> = (k + k<sub>P</sub>)/m are the coefficients of the PD design polynomial: α<sub>1</sub> = 2ζω<sub>n</sub>, α<sub>0</sub> = ω<sub>n</sub>².' }],
@@ -664,7 +686,7 @@
           id: 'c', title: 'Pick k<sub>I</sub> that barely moves the PD poles',
           html: 'Checks the current k<sub>I</sub>: the complex pair must stay within 10% (in |p|) of the PD-only poles, and the new real pole must be slower than them.',
           check: () => {
-            const g = designed(ctx);
+            const g = ctx.gains;
             if (!(g.kI > 0)) return { ok: false, msg: 'Set kI > 0.' };
             const pd = M.roots2(ctx.model.a1 + ctx.model.b0 * g.kD, ctx.model.a0 + ctx.model.b0 * g.kP);
             const cl = L.roots(pidCharPoly(ctx.model, g));
@@ -674,7 +696,7 @@
             const slow = real.length === 1 && Math.abs(real[0].re) < Math.abs(pd[0].re);
             return { ok: Math.abs(ratio - 1) < 0.1 && slow, msg: `|p| ratio ${fmt(ratio, 3)}, real pole ${real.length ? fmtPole(real[0]) : '—'}.` };
           },
-          solution: () => [{ html: 'With the D.8(a) gains (k<sub>P</sub> = 3.05, k<sub>D</sub> = 7.2), any k<sub>I</sub> up to about 0.8 keeps |p| within 10%: k<sub>I</sub> = 0.5 gives −0.724 ± 0.743j and −0.093. The price is a slow integrator pole, partly cancelled by the zero at −k<sub>I</sub>/k<sub>P</sub>.' }],
+          solution: () => [{ html: 'With the D.8(a) gains (k<sub>P</sub> = 3.05, k<sub>D</sub> = 7.2), any k<sub>I</sub> up to about 0.8 keeps |p| within 10%: k<sub>I</sub> = 0.5 gives −0.724 ± 0.743j and −0.093, and k<sub>I</sub> = 0.75 gives −0.695 ± 0.720j and −0.150. The price is a slow integrator pole, partly cancelled by the zero at −k<sub>I</sub>/k<sub>P</sub>. Values in 0.5–0.8 also pass the D.10 tracking check (the 10% |p| criterion here is a workbench choice).' }],
         },
       ]);
     },
@@ -695,7 +717,7 @@
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.tr } : {}; },
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'Digital PID', 'p. 155 · Listing 10.2 p. 161');
+      const sec = section(parent, 'Digital PID', 'p. 155, p. 162 · Listing 10.2');
       compControl(sec, ctx);
       if (ctx.S.mode === 'work') gainSliders(sec, ctx, ['kP', 'kI', 'kD']);
       else { specSliders(sec, ctx, { kI: true }); readout(sec, ctx); }
@@ -784,14 +806,15 @@
         },
         {
           id: 'c3', title: '(c) Tune k<sub>I</sub> for the uncertain plant',
-          html: 'Checks the current simulation (plant mismatch in the left panel): |z<sub>r</sub> − z| just before the first reference switch must be under 1% of the step.',
+          html: `Checks the current simulation (plant mismatch in the left panel): |z<sub>r</sub> − z| just before the first reference switch must be under ${prob.tolPct}% of the step. The ${prob.tolPct}% threshold is a workbench choice; the book gives none.`,
           check: () => {
             const { e, amp } = lib.errorBeforeSwitch(ctx);
-            const msg = `Error before the switch: ${fmt(e * 1000, 3)} mm (limit ${fmt(10 * amp, 3)} mm).`;
+            const lim = prob.tolPct / 100 * amp;
+            const msg = `Error before the switch: ${fmt(e * 1000, 3)} mm (limit ${fmt(1000 * lim, 3)} mm).`;
             if (!(ctx.gains.kI > 0)) return { ok: false, msg: `kI = 0. ${msg}` };
-            return { ok: e < 0.01 * amp, msg };
+            return { ok: e < lim, msg };
           },
-          solution: () => [{ html: `With the D.8(a) PD gains, k<sub>I</sub> ≈ ${prob.kiRef} works well here (closed-loop poles about −0.66 ± 0.70j and −0.22). Smaller k<sub>I</sub> leaves a slow tail (the integrator pole approaches 0); much larger k<sub>I</sub> erodes the damping (k<sub>I,crit</sub> ≈ 9.3, see D.P.6).` }],
+          solution: () => [{ html: `With the D.8(a) PD gains, k<sub>I</sub> ≈ ${prob.kiRef} works well here (closed-loop poles about −0.70 ± 0.72j and −0.15; error before the switch ≈ 1.5 mm). Any k<sub>I</sub> from about 0.5 to 0.8, the D.P.6 range, passes the ${prob.tolPct}% check. Smaller k<sub>I</sub> leaves a slow tail (the integrator pole approaches 0); much larger k<sub>I</sub> erodes the damping (k<sub>I,crit</sub> ≈ 9.3, see D.P.6).` }],
         },
       ]);
     },
