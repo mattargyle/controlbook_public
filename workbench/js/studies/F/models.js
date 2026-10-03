@@ -122,12 +122,12 @@
         { title: 'Kinetic energy of a rigid body', page: 'p. 25 · Eq. 2.3',
           theory: 'K = \\tfrac12 m\\,\\mathbf v_{cm}^\\top\\mathbf v_{cm} + \\tfrac12\\boldsymbol\\omega^\\top J_{cm}\\boldsymbol\\omega' },
         { title: 'Rotor positions (point masses at ±d)', page: 'Fig. 21-1 p. 393',
-          theory: '\\mathbf p_{r} = \\begin{bmatrix} z + d\\cos\\theta \\\\ h + d\\sin\\theta\\end{bmatrix},\\quad \\mathbf p_{\\ell} = \\begin{bmatrix} z - d\\cos\\theta \\\\ h - d\\sin\\theta\\end{bmatrix},\\quad \\|\\dot{\\mathbf p}_{r,\\ell}\\|^2 = \\dot z^2 + \\dot h^2 + d^2\\dot\\theta^2 \\mp 2d\\dot\\theta(\\dot z\\sin\\theta - \\dot h\\cos\\theta)' },
+          theory: '\\text{position of each rotor (a point mass at } \\pm d \\text{ along the body axis)}', symbolic: '\\mathbf p_{r} = \\begin{bmatrix} z + d\\cos\\theta \\\\ h + d\\sin\\theta\\end{bmatrix},\\quad \\mathbf p_{\\ell} = \\begin{bmatrix} z - d\\cos\\theta \\\\ h - d\\sin\\theta\\end{bmatrix},\\quad \\|\\dot{\\mathbf p}_{r,\\ell}\\|^2 = \\dot z^2 + \\dot h^2 + d^2\\dot\\theta^2 \\mp 2d\\dot\\theta(\\dot z\\sin\\theta - \\dot h\\cos\\theta)', spoiler: true },
         { title: 'Kinetic energy', page: 'F.2(a) p. 395',
           theory: 'K = \\tfrac12 m_c(\\dot z^2 + \\dot h^2) + \\tfrac12 J_c\\dot\\theta^2 + \\tfrac12 m_r\\|\\dot{\\mathbf p}_r\\|^2 + \\tfrac12 m_\\ell\\|\\dot{\\mathbf p}_\\ell\\|^2',
           symbolic: 'K = \\tfrac12(m_c + 2m_r)(\\dot z^2 + \\dot h^2) + \\tfrac12(J_c + 2m_r d^2)\\dot\\theta^2',
           numbers: `K = ${tex(m.M / 2)}(\\dot z^2 + \\dot h^2) + ${tex(m.J / 2)}\\,\\dot\\theta^2`, spoiler: true,
-          note: 'The cross terms cancel because the rotors sit symmetrically at ±d (and m_ℓ = m_r).' },
+          note: 'Add the pod (translation + rotation) and the two rotors (point masses).' },
       ];
     },
     buildProblem(parent, ctx) {
@@ -270,8 +270,8 @@
       const p = ctx.pModel, m = ctx.sys.models(p);
       return [
         { title: 'Equilibria', page: 'F.4(a) p. 396 · p. 59',
-          theory: '\\dot q = 0,\\; \\ddot q = 0:\\quad F\\sin\\theta_e = 0,\\; F\\cos\\theta_e = (m_c + 2m_r)g,\\; \\tau_e = 0',
-          symbolic: 'z_e, h_e \\text{ arbitrary},\\quad \\theta_e = 0,\\quad F_e = (m_c+2m_r)g,\\quad f_{r,e} = f_{\\ell,e} = \\tfrac12 F_e',
+          theory: '\\dot x = f(x_e, u_e) = 0',
+          symbolic: 'F\\sin\\theta_e = 0,\\; F\\cos\\theta_e = (m_c + 2m_r)g,\\; \\tau_e = 0 \\;\\Rightarrow\\quad z_e, h_e \\text{ arbitrary},\\quad \\theta_e = 0,\\quad F_e = (m_c+2m_r)g,\\quad f_{r,e} = f_{\\ell,e} = \\tfrac12 F_e',
           numbers: `F_e = ${tex(m.Fe)}\\,\\text{N},\\quad f_{r,e} = f_{\\ell,e} = ${tex(m.Fe / 2)}\\,\\text{N}`, spoiler: true },
         { title: 'Jacobian linearization', page: 'p. 59–61 · Eq. 4.1',
           theory: '\\dot{\\tilde x} = \\frac{\\partial f}{\\partial x}\\Big|_e\\tilde x + \\frac{\\partial f}{\\partial u}\\Big|_e\\tilde u,\\quad \\tilde x = x - x_e,\\; \\tilde u = u - u_e',
@@ -396,8 +396,14 @@
     simDefaults(sys) { return sys.problems.ch6.sim; },
     linearSim(ctx, common) { ctx.chapter = this; return F.linearSim(ctx, common); },
     linearLabel: 'ẋ = Ax + Bu',
-    buildControls(parent, ctx) { tfInputSection(parent, ctx, 'F.6 p. 396'); },
-    splane: tfSplane,
+    buildControls(parent, ctx) {
+      tfInputSection(parent, ctx, 'F.6 p. 396');
+      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch6poles')) {
+        const sec = section(parent, 's-plane', 'p. 85');
+        sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the eigenvalues in the s-plane', onclick: () => { ctx.app.reveal('F:ch6poles'); ctx.update(); } }));
+      }
+    },
+    splane(ctx) { return F.shown(ctx, 'F:ch6poles') ? tfSplane(ctx) : null; },   // eig(A) answers F.6
     extraPlot(ctx, res) {
       return { opts: { title: 'velocities ż, ḣ', yLabel: 'velocity [m/s]', unit: 'm/s' }, data: { series: [
         { label: 'ḣ', y: res.x.map((x) => x[4]), color: '--series-3', width: 1.5 },

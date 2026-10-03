@@ -323,7 +323,6 @@
       id: `ch${num}`, num, tab: `Ch ${num}`, title, pages, level,
       controller(ctx, o) { return makeSS(ctx, o); },
       gains(ctx) { return ctx.S.mode === 'explore' ? design(ctx.pModel, ctx.st.k, level) : fromW(ctx.st.w, level); },
-      toWork(ctx) { Object.assign(ctx.st.w, toW(ctx.gains)); },
       splane,
       targets(ctx) { return { tr: ctx.st.k.trh }; },
     }, extra));
@@ -438,10 +437,18 @@
   });
 
   // ------------------------------------------------------------ Chapter 12 --
+  // Tracking errors at t_end, or just before the last z_r switch for a square wave.
   function trackCheck(ctx, tol = 0.02) {
-    const res = ctx.app.result(), n = res.t.length - 1;
-    const eh = Math.abs(res.rAll[0][n] - res.yAll[1][n]), ez = Math.abs(res.rAll[1][n] - res.yAll[0][n]);
-    return { eh, ez, ok: eh < tol && ez < tol };
+    const res = ctx.app.result(), S = ctx.S, zc = S.sim.refs[0];
+    let t = S.sim.tEnd;
+    if (zc.type === 'square') {
+      const half = 0.5 / zc.frequency;
+      const k = Math.floor((S.sim.tEnd - zc.tStep) / half - 1e-9);
+      if (k >= 1) t = zc.tStep + k * half - 0.05;
+    }
+    const i = Math.max(0, Math.min(res.t.length - 1, Math.round(t / S.sim.Ts)));
+    const eh = Math.abs(res.rAll[0][i] - res.yAll[1][i]), ez = Math.abs(res.rAll[1][i] - res.yAll[0][i]);
+    return { eh, ez, t: res.t[i], ok: eh < tol && ez < tol };
   }
   base('sfi', 12, 'Integrators with state feedback', 'pp. 197–214, F.12 p. 400', {
     defaults(sys) { return { view: 'lat', zOff: 3, hOff: 0, antiwindup: 'clamp', extra: 'int', k: knobs(sys), w: slowW(sys, 'sfi') }; },
@@ -506,8 +513,9 @@
       { title: 'Observability', page: 'p. 221, F.13(b)',
         theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix}C\\\\ CA\\\\ \\vdots\\\\ CA^{n-1}\\end{bmatrix}',
         numbers: `\\operatorname{rank}\\mathcal{O}_{lon} = ${L.rank(Ol)},\\quad \\operatorname{rank}\\mathcal{O}_{lat} = ${L.rank(Oz)}\\;(C_{lat} \\text{ is } 2\\times4)`, spoiler: true },
-      { title: 'Lateral observer gain (block structure)', page: 'p. 221 · Eq. 13.16',
-        theory: 'L_{lat} = \\begin{bmatrix}L_{z1} & 0\\\\ 0 & L_{\\theta1}\\\\ L_{z2} & 0\\\\ 0 & L_{\\theta2}\\end{bmatrix}:\\; \\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
+      { title: 'Lateral observer gain (block structure)', page: 'p. 222 · Eq. 13.16',
+        theory: 'L_{lat} = \\begin{bmatrix}L_{z1} & 0\\\\ 0 & L_{\\theta1}\\\\ L_{z2} & 0\\\\ 0 & L_{\\theta2}\\end{bmatrix}',
+        symbolic: '\\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
         numbers: d.Lz ? `L_h = ${texMat(d.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(d.Lz[0])}, ${tex(d.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(d.Lt[0])}, ${tex(d.Lt[1])})` : '', spoiler: true,
         note: 'With two outputs L is not unique; place() on the full (A, C) would return a different L with the same eigenvalues.' },
       { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224',
@@ -630,7 +638,7 @@
             const res = ctx.app.result(), n = res.t.length - 1;
             const bh = Math.abs(res.yAll[1][n] - res.extras.hhat[n]), bz = Math.abs(res.yAll[0][n] - res.extras.zhat[n]);
             const t = trackCheck(ctx, 0.05);
-            return { ok: bh < 0.01 && bz < 0.01, msg: `|h − ĥ| = ${fmt(bh, 3)} m, |z − ẑ| = ${fmt(bz, 3)} m; tracking |e_h| = ${fmt(t.eh, 3)}, |e_z| = ${fmt(t.ez, 3)} m.` };
+            return { ok: bh < 0.01 && bz < 0.01, msg: `|h − ĥ| = ${fmt(bh, 3)} m, |z − ẑ| = ${fmt(bz, 3)} m; tracking |e_h| = ${fmt(t.eh, 3)}, |e_z| = ${fmt(t.ez, 3)} m at t = ${fmt(t.t, 3)} s.` };
           },
           solution: () => [{ html: 'd̂<sub>F</sub> settles at the altitude disturbance (M·1.0 N) plus the weight error from the mass mismatch; d̂<sub>z</sub> settles near μ·w for the wind speed w.' }],
         },

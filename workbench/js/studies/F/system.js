@@ -130,19 +130,17 @@ WB.systems = WB.systems || {};
       const hr = s.rAll && s.rAll.length > 0 ? s.rAll[0] : NaN;
       const zr = s.rAll && s.rAll.length > 1 && isFinite(s.rAll[1]) ? s.rAll[1] : 0;
       const ghost = isFinite(hr);
-      // world window: 14 m wide (like the Python axis), shifted to keep the VTOL in view
-      const span = 14;
-      const sc = w / span;
-      const visH = h / sc;
-      let x0 = -2, y0 = -1.1;
-      const margin = 1;
+      // world window: 8 m wide (wider if the VTOL and z_r are far apart), centered
+      // between the vehicle and the target so the vehicle stays large and in view
       const xs = [z, zr], ys = ghost ? [alt, hr] : [alt];
       const maxX = Math.max(...xs), minX = Math.min(...xs);
-      if (maxX > x0 + span - margin) x0 = maxX - span + margin;
-      if (minX < x0 + margin) x0 = minX - margin;
+      const span = Math.max(8, maxX - minX + 3);
+      const sc = w / span;
+      const visH = h / sc;
+      const x0 = (maxX + minX) / 2 - span / 2;
       const maxY = Math.max(...ys), minY = Math.min(...ys);
-      if (maxY > y0 + visH - margin) y0 = maxY - visH + margin;
-      if (minY < y0 + 1.1) y0 = minY - 1.1;
+      let y0 = Math.min(0, minY) - 1.1;                       // ground in view when possible
+      if (maxY > y0 + visH - 0.8) y0 = maxY - visH + 0.8;
       const P = (wx, wy) => [(wx - x0) * sc, h - (wy - y0) * sc];
 
       // ground and 1 m ticks
@@ -154,7 +152,7 @@ WB.systems = WB.systems || {};
       for (let k = Math.ceil(x0); k <= x0 + span; k++) {
         const [tx] = P(k, 0);
         ctx.beginPath(); ctx.moveTo(tx, gy); ctx.lineTo(tx, gy + 4); ctx.stroke();
-        if (k % 2 === 0 && gy + 16 < h) ctx.fillText(`${k}`, tx, gy + 5);
+        if (gy + 16 < h && tx > 12 && tx < w - 12) ctx.fillText(`${k}`, tx, gy + 5);   // skip edge labels
       }
 
       // target on the ground at z_r
@@ -174,8 +172,8 @@ WB.systems = WB.systems || {};
         ctx.fillText('(z_r, h_r)', cx + 9, cy);
       }
 
-      // vehicle (Fig. 21-1): pod, arm to ±d, rotor discs; drawn 2x for visibility
-      const k = 2;
+      // vehicle (Fig. 21-1): pod, arm to ±d, rotor discs; drawn 2.5x for visibility
+      const k = 2.5;
       const c = Math.cos(th), sn = Math.sin(th);
       const body = (bx, by) => P(z + k * (c * bx - sn * by), alt + k * (sn * bx + c * by));
       const dd = p ? p.d : 0.3;
@@ -194,7 +192,7 @@ WB.systems = WB.systems || {};
 
       // rotor force arrows along the body normal, length ∝ f / f_max
       const fmax = p ? p.f_max : 10;
-      const Lmax = 0.7 * k;
+      const Lmax = 0.4 * k;
       [[dd, 0], [-dd, 1]].forEach(([bx, idx]) => {
         const f = s.uAll ? s.uAll[idx] : 0;
         const frac = Math.max(0, Math.min(1.2, f / fmax));
@@ -388,7 +386,7 @@ WB.systems = WB.systems || {};
         id: 'F.17', page: 402,
         sim: { tEnd: 60 },
         statement: [
-          'Use the F.10 gains (p. 403).',
+          'Use the F.10 gains (p. 402).',
           '(a) Altitude loop under PID: PM, GM, open- and closed-loop Bode, closed-loop bandwidth vs. crossover.',
           '(b) Inner lateral loop under PD: the same.',
           '(c) Outer lateral loop under PD: the same, on the same plot as the inner loop.',

@@ -30,7 +30,7 @@
   // ------------------------------------------------------- controls --
   function workSections(parent, ctx, { lon = true, lat = true, kI = false } = {}) {
     if (lon) {
-      const s1 = section(parent, 'Altitude loop gains', 'p. 99 · Fig. 7-2');
+      const s1 = section(parent, 'Altitude loop gains', 'p. 101 · Fig. 7-2');
       F.gainSliders(s1, ctx, kI ? ['kPh', 'kDh', 'kIh'] : ['kPh', 'kDh']);
     }
     if (lat) {
@@ -38,7 +38,7 @@
       F.gainSliders(s2, ctx, ['kPth', 'kDth']);
       const s3 = section(parent, 'Lateral: outer z loop', 'p. 118 · Fig. 8-11');
       F.gainSliders(s3, ctx, kI ? ['kPz', 'kDz', 'kIz'] : ['kPz', 'kDz']);
-      s3.append(el('p', { class: 'muted small', text: 'The outer gains are negative: a positive roll tilts the thrust toward −z (Z/Θ = −g/(s(s+μ/M))).' }));
+      s3.append(el('p', { class: 'muted small', text: 'Mind the sign of Z/Θ (F.5) when you pick the outer gains.' }));
     }
   }
   function knobSections(parent, ctx, { lon = true, lat = true, title = 'Design knobs' } = {}) {
@@ -130,7 +130,6 @@
       const g = F.pdFromPoles(m.lon, this.designPoles(ctx));
       return { ...z, kPh: g.kP, kDh: g.kD };
     },
-    toWork(ctx) { ctx.st.w.kPh = ctx.gains.kPh; ctx.st.w.kDh = ctx.gains.kDh; },
     buildControls(parent, ctx) {
       const sec = section(parent, 'PD altitude controller', 'p. 99 · F.7 p. 397');
       segmented(sec, {
@@ -154,7 +153,10 @@
     },
     splane(ctx) {
       const tg = ctx.S.mode === 'work' ? { lon: ctx.sys.problems.ch7.desiredPoles } : null;
-      return F.pidSplane(ctx, ctx.gains, { draggable: ctx.S.mode === 'explore', targets: tg });
+      const sp = F.pidSplane(ctx, ctx.gains, { draggable: ctx.S.mode === 'explore', targets: tg });
+      // the open-loop poles answer F.7(a), so Work mode does not draw them
+      if (ctx.S.mode === 'work') sp.markers = sp.markers.filter((q) => q.kind !== 'ol');
+      return sp;
     },
     onPoleDrag(ctx, id, re, im) {
       const st = ctx.st;
@@ -267,7 +269,6 @@
       if (ctx.S.mode === 'work') return { ...pick(ctx.st.w, ALL), kIh: 0, kIz: 0 };
       return { ...F.designSLC(ctx.pModel, ctx.st.k), kIh: 0, kIz: 0 };
     },
-    toWork(ctx) { Object.assign(ctx.st.w, pick(ctx.gains, ALL)); },
     targets(ctx) { return { tr: ctx.st.k.trh, zeta: ctx.st.k.zetah }; },
     buildControls(parent, ctx) {
       const sec = section(parent, 'Controller', 'F.8 p. 397');
@@ -339,7 +340,7 @@
             const r = ref(), w = ctx.st.w;
             const ok = ['kPth', 'kDth', 'kPz', 'kDz'].every((k) => M.close(w[k], r[k]));
             const zm = F.zMetrics(ctx);
-            return ok ? { ok: true, msg: `z rise time ${fmt(zm.tr, 3)} s, overshoot ${fmt(zm.os, 3)}%. Note the 6.25 s half period is shorter than the z settling time.` } : { ok: false, msg: 'Your lateral gains do not match (b) and (d) yet.' };
+            return ok ? { ok: true, msg: `${isFinite(zm.tr) ? `z rise time ${fmt(zm.tr, 3)} s, overshoot ${fmt(zm.os, 3)}%.` : 'z does not reach 90% of the step before the reference switches.'} The 6.25 s half period is shorter than the z response.` } : { ok: false, msg: 'Your lateral gains do not match (b) and (d) yet.' };
           },
         },
         {
@@ -440,7 +441,6 @@
     simDefaults(sys) { return { ...sys.problems.ch9.sim, refs: [{ type: 'step', amplitude: 2 }] }; },
     reference: shapedRef,
     gains(ctx) { return ctx.S.mode === 'work' ? pick(ctx.st.w, ALL) : F.designSLC(ctx.pModel, ctx.st.k); },
-    toWork(ctx) { Object.assign(ctx.st.w, pick(ctx.gains, ALL)); },
     analysis(ctx, g = ctx.gains) {
       const m = ctx.sys.models(ctx.pModel);
       const outer = { b0: m.outer.b0 * F.kDCof(m, g), a1: m.outer.a1, a0: 0 };
@@ -465,7 +465,7 @@
         slider(ki, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, get: () => ctx.st.k.kIh, set: (v) => { ctx.st.k.kIh = v; ctx.update(); } });
         slider(ki, { label: 'k<sub>I<sub>z</sub></sub>', min: -0.003, max: 0, step: 0.00001, sig: 3, get: () => ctx.st.k.kIz, set: (v) => { ctx.st.k.kIz = v; ctx.update(); } });
       }
-      const ty = section(parent, 'System type (current gains)', 'p. 133 · Table 9-1');
+      const ty = section(parent, 'System type (current gains)', 'p. 141 · Table 9-1');
       const box = el('div', { class: 'metrics' });
       ty.append(box);
       WB.ui.addRefresher(() => {
@@ -494,7 +494,7 @@
     math(ctx) {
       const A = this.analysis(ctx), g = ctx.gains;
       return [
-        { title: 'System type (unity feedback)', page: 'p. 133 · Table 9-1',
+        { title: 'System type (unity feedback)', page: 'p. 141 · Table 9-1',
           theory: 'E = \\frac{1}{1 + PC}R,\\quad M_p = \\lim_{s\\to0}PC,\\; M_v = \\lim_{s\\to0}sPC,\\; M_a = \\lim_{s\\to0}s^2PC' },
         { title: 'Altitude loop', page: 'F.9(a) p. 398',
           theory: 'PC = P_{lon}(s)\\,C(s)', symbolic: 'PC = \\frac{k_{D_h}s^2 + k_{P_h}s + k_{I_h}}{(m_c+2m_r)\\,s^3}\\;(\\text{PID}),\\quad \\frac{k_{D_h}s + k_{P_h}}{(m_c+2m_r)s^2}\\;(\\text{PD})',
@@ -524,7 +524,7 @@
             { tex: `PC_{PD} = \\frac{k_{D_h}s + k_{P_h}}{(m_c+2m_r)s^2}: \\text{type 2},\\; M_a = \\frac{k_{P_h}}{m_c+2m_r},\\; e_{parab} = ${tex(m().M / g().kPh)}` },
             { tex: '\\text{PID adds } 1/s: \\text{type 3 (step, ramp, parabola errors all } 0)' },
             { tex: `\\frac{P}{1+PC}\\Big|_{s\\to0} = \\frac{1}{k_{P_h}} = ${tex(1 / g().kPh)}\\;(\\text{type 0}),\\quad \\text{PID: } \\frac{s}{k_{I_h}} \\to 0\\;(\\text{type 1})` },
-            { html: 'pp. 133–137. With the derivative on h (as implemented), tracking drops one type: PD gives e<sub>ramp</sub> = k<sub>D</sub>/k<sub>P</sub>; the readout on the right shows both.' },
+            { html: 'pp. 141–145. With the derivative on h (as implemented), tracking drops one type: PD gives e<sub>ramp</sub> = k<sub>D</sub>/k<sub>P</sub>; the readout on the right shows both.' },
           ],
         },
         {
@@ -606,7 +606,7 @@
   F.register({
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474, F.P.6 p. 398',
     controller: (ctx, o) => F.makePID(ctx, o),
-    defaults(sys) { return { comp: 'eq', lat: 'on', view: 'lon', zOff: 3, hOff: 0, src: 'mine', kIh: 0.005, kIz: -0.0002, kMaxFactor: 1.5, k: f8Knobs(sys) }; },
+    defaults(sys) { return { comp: 'eq', lat: 'on', view: 'lon', zOff: 3, hOff: 0, src: 'mine', kIh: 0.003, kIz: -0.0002, kMaxFactor: 1.5, k: f8Knobs(sys) }; },
     simDefaults(sys) { return sys.problems.p6.sim; },
     // PD gains: in Work mode your own F.8 gains (Ch 8 tab), else the F.8 design.
     pdGains(ctx) {
@@ -658,7 +658,7 @@
           numbers: `L_z(s) = \\frac{${tex(ez.num[0])}}{${T.polyTex(ez.den)}},\\quad k_{I_z,crit} = ${tex(-ez.kCrit)}`, spoiler: true },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
           theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ is stable iff } c_2, c_1, c_0 > 0,\\; c_2c_1 > c_0',
-          note: 'The book stops at rlocus (p. 471). The outer loop has a pole at −μ/M ≈ −0.067 close to the integrator, so k_I,z must be tiny.' },
+          note: 'The book stops at rlocus (p. 471).' },
       ];
     },
     buildProblem(parent, ctx) {
@@ -699,7 +699,6 @@
     },
     simDefaults(sys) { return { ...sys.problems.ch10.sim, refs: [{ type: 'step', amplitude: 2.5 }], mismatch: sys.problems.ch10.mismatch }; },
     gains(ctx) { return ctx.S.mode === 'work' ? pick(ctx.st.w, ALL) : F.designSLC(ctx.pModel, ctx.st.k); },
-    toWork(ctx) { Object.assign(ctx.st.w, pick(ctx.gains, ALL)); },
     buildControls(parent, ctx) {
       const sec = section(parent, 'Implementation', 'p. 157 · Eq. 10.4, p. 163');
       segmented(sec, { label: 'Rates for the D terms', options: [{ value: 'dirty', label: 'dirty derivative of y' }, { value: 'state', label: 'true rates (cheating)' }], get: () => ctx.st.deriv, set: (v) => { ctx.st.deriv = v; ctx.update(); } });
@@ -742,9 +741,9 @@
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}(y[n] - y[n-1])',
           numbers: `\\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}`, spoiler: true },
-        { title: 'Why the altitude loop needs k_I', page: 'F.10(b), p. 136',
+        { title: 'Why the altitude loop needs k_I', page: 'F.10(b), p. 143–145',
           theory: '\\text{true weight } (m_c + 2m_r)_{true}\\,g \\ne F_e \\;\\Rightarrow\\; \\text{constant input disturbance},\\quad e_{ss} = \\frac{\\Delta W}{k_{P_h}}\\;(\\text{PD})',
-          numbers: `F_e = ${tex(m.Fe)}\\,\\text{N (nominal)}`,
+          numbers: `F_e = ${tex(m.Fe)}\\,\\text{N (nominal)}`, spoiler: true,
           note: 'The z loop has no gravity term, so mass errors do not bias it; k_I,z handles wind and the F.12 disturbance.' },
         { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
           theory: '\\text{integrate only while } |\\dot{\\hat y}| < \\bar v' },
@@ -769,7 +768,7 @@
             return { ok: eh < 0.01 && ez < 0.01, msg: `|e_h| = ${fmt(eh, 3)} m, |e_z| = ${fmt(ez, 3)} m at t_end.` };
           },
           solution: () => [
-            { html: `The F.8 gains plus k<sub>I<sub>h</sub></sub> = ${prob.kIh} and k<sub>I<sub>z</sub></sub> = ${prob.kIz} (both well inside the P.6 limits), σ = 0.05, and anti-windup gates at v̄ = 0.5 m/s (a tighter gate, e.g. 0.1 m/s, keeps the integrator off while the soft altitude loop sags, and the error lingers). k<sub>I<sub>h</sub></sub> removes the altitude error from the wrong F<sub>e</sub>; the z loop is type 1, so its step error is zero even without k<sub>I<sub>z</sub></sub>.` },
+            { html: `The F.8 gains plus k<sub>I<sub>h</sub></sub> = ${prob.kIh} and k<sub>I<sub>z</sub></sub> = ${prob.kIz}, σ = 0.05, and anti-windup gates at v̄ = 0.5 m/s. Both integrator gains are inside the critical gains from P.6 (0.044 and −0.0030), but they move the PD poles more than P.6's 10% guideline (which allows only about k<sub>I<sub>h</sub></sub> ≤ 0.0037, |k<sub>I<sub>z</sub></sub>| ≤ 0.00026). That is needed here: the soft F.8 altitude loop sags meters under a 20% mass error, and with k<sub>I<sub>h</sub></sub> = 0.003 the altitude error is still about 1.6 m at 80 s. A tighter gate (e.g. 0.1 m/s) keeps the integrator off during the sag. The z loop is type 1, so its step error is zero even without k<sub>I<sub>z</sub></sub>; a small k<sub>I<sub>z</sub></sub> adds a slow closed-loop pole, and with |k<sub>I<sub>z</sub></sub>| = 0.0002 z is still 3 cm short at 80 s.` },
           ],
         },
       ]);

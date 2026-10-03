@@ -271,7 +271,7 @@
         { title: 'C_PID with dirty derivative', page: 'p. 313',
           theory: 'C(s) = k_P + \\frac{k_I}{s} + \\frac{k_Ds}{\\sigma s + 1}',
           numbers: `C_{lon} = ${T.texTf(s.lp.Cl)},\\quad C_{in} = ${T.texTf(s.lp.Ci)}`, spoiler: true },
-        { title: 'Parabola tracking (a)', page: 'p. 293 · Eq. 16.12, F.16(a)',
+        { title: 'Parabola tracking (a)', page: 'p. 295 · Eq. 16.12, F.16(a)',
           theory: 'e_{ss} = \\frac{1}{M_a}\\text{ for } R = \\tfrac{1}{s^3},\\quad M_a = \\lim_{\\omega\\to0}|(j\\omega)^2PC|',
           symbolic: 'PC_{lon} \\sim \\frac{k_I}{M s^3} \\;(\\text{type 3}) \\Rightarrow e_{ss} = 0 \\text{ for } R = \\frac{5}{s^3}',
           numbers: `e_{ss} = ${tex(s.ePar)}\\;(\\text{book}),\\quad \\text{with } D \\text{ on } h:\\; e_{ss} = \\frac{5k_{D_h}}{k_{I_h}} = ${isFinite(s.eParImpl) ? tex(s.eParImpl) : '\\infty'}`, spoiler: true,
@@ -479,16 +479,22 @@
   F.register({
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping', pages: 'pp. 323–374, F.18 pp. 403–404',
     linearLabel: 'linear loops (no saturation, d, noise)',
-    defaults() { return { view: 'lat', loop: 'lon', zOff: 3, hOff: 0, showT: true, lon: START.lon(), inner: START.inner(), outer: START.outer(), init: false }; },
+    defaults() { return { view: 'lat', loop: 'lon', zOff: 3, hOff: 0, showT: true, lon: START.lon(), inner: START.inner(), outer: START.outer(), W: null, X: null }; },
     simDefaults(sys) { return { ...sys.problems.ch18.sim, refs: [{ type: 'square', amplitude: 2.5, frequency: 0.04 }] }; },
     gains(ctx) {
       const st = ctx.st;
-      // Explore mode starts from the reference design; Work mode from START (k set once).
-      if (!st.init) {
-        if (ctx.S.mode === 'explore') Object.assign(st, refState(ctx));
-        else for (const w of ['inner', 'lon', 'outer']) st[w].k = autoK(ctx, w);
-        st.init = true;
+      // Separate compensator sets per mode: Explore starts from the reference design,
+      // Work from START (k set once). Nothing is copied between them on a mode switch.
+      const key = ctx.S.mode === 'explore' ? 'X' : 'W';
+      if (!st[key]) {
+        if (key === 'X') { const r = refState(ctx); st.X = { lon: r.lon, inner: r.inner, outer: r.outer }; }
+        else {
+          st.W = { lon: START.lon(), inner: START.inner(), outer: START.outer() };
+          Object.assign(st, st.W);
+          for (const w of ['inner', 'lon', 'outer']) st.W[w].k = autoK(ctx, w);
+        }
       }
+      Object.assign(st, st[key]);   // st.lon/inner/outer alias the active set
       return {};
     },
     controller(ctx, { linear = false } = {}) {
@@ -509,8 +515,8 @@
       const top = section(parent, 'Loop being shaped', 'F.18 p. 403');
       segmented(top, { options: Object.entries(LOOPS).map(([v, l]) => ({ value: v, label: l })), get: () => st.loop, set: (v) => { st.loop = v; ctx.update(); } });
       top.append(el('div', { class: 'btn-row' },
-        el('button', { type: 'button', class: 'btn', text: 'Start over (lead only)', onclick: () => { st[st.loop] = START[st.loop](); st[st.loop].k = autoK(ctx, st.loop); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference design (reveals answer)', onclick: () => { Object.assign(st, refState(ctx)); ctx.update(); } })));
+        el('button', { type: 'button', class: 'btn', text: 'Start over (lead only)', onclick: () => { const A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; A[st.loop] = st[st.loop] = START[st.loop](); A[st.loop].k = autoK(ctx, st.loop); ctx.update(); } }),
+        el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference design (reveals answer)', onclick: () => { const r = refState(ctx), A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; for (const w of ['lon', 'inner', 'outer']) A[w] = st[w] = r[w]; ctx.update(); } })));
       top.append(el('p', { class: 'muted small', text: 'C = k·PI·lead·lag·LPF·LPF (outer loop: −k·…). The outer plant includes the current inner closed loop, so shape the inner loop first.' }));
       const c = () => st[st.loop];
       const set = (path, key) => (v) => { c()[path][key] = v; ctx.update(); };
@@ -622,7 +628,7 @@
           solution: () => { const { r, dd } = refTxt(); return [{ html: `Lead at 10 rad/s with M = 20 (≈ 65° max phase), LPF at 100 rad/s, k = ${fmt(r.inner.k, 4)}: PM ${fmt(dd.mgi.pm, 3)}° at ${fmt(dd.mgi.wc, 3)} rad/s. The closed-loop bandwidth is then about 1.7 ω<sub>co</sub>; read "bandwidth ≈ ω<sub>co</sub> = 10" as a crossover spec.` }]; } },
         { id: 'c', title: '(c) Outer loop meets every spec',
           check: () => { const x = s().outer; const ok = x.wco && x.integ && x.noise && x.pm && x.pf; return { ok, msg: `crossover ${x.wco ? '✓' : '✗'}, integrator ${x.integ ? '✓' : '✗'}, noise ${x.noise ? '✓' : '✗'}, PM ${x.pm ? '✓' : '✗'}, prefilter ${x.pf ? '✓' : '✗'}` }; },
-          solution: () => { const { r, dd } = refTxt(); return [{ html: `On P<sub>out</sub>·T<sub>in</sub> with the reference inner loop: −k·(s+0.1)/s · lead at 1 rad/s with M = 20 · LPF at 30 rad/s, k = ${fmt(r.outer.k, 4)}: PM ${fmt(dd.mgo.pm, 3)}° at ${fmt(dd.mgo.wc, 3)} rad/s. The inner loop's roll-off already meets the −100 dB noise spec. Prefilter p = 0.3 rad/s.` }]; } },
+          solution: () => { const { r, dd } = refTxt(); return [{ html: `On P<sub>out</sub>·T<sub>in</sub> with the reference inner loop: −k·(s+0.1)/s · lead at 1 rad/s with M = 20 · LPF at 30 rad/s, k = ${fmt(r.outer.k, 4)}: PM ${fmt(dd.mgo.pm, 3)}° at ${fmt(dd.mgo.wc, 3)} rad/s. The inner loop's roll-off already meets the −100 dB noise spec. Prefilter p = 0.3 rad/s. Like the altitude loop it is conditionally stable (gain margins ${dd.mgo.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)} rad/s`).join(', ')}).` }]; } },
         { id: 'd', title: '(d) Simulation tracks both references',
           html: 'Passes when |h<sub>r</sub> − h| and |z<sub>r</sub> − z| are under 5 cm just before the first z<sub>r</sub> switch, with no runaway.',
           check: () => {

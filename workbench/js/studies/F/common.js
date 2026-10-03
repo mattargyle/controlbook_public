@@ -171,7 +171,7 @@ WB.F = (function () {
     const names = {};
     const push = (poles, kind, label, dragId) => poles.forEach((q) => mk.push({ ...q, kind, label, dragId: draggable ? dragId : undefined }));
     if (view === 'lon') {
-      push([{ re: 0, im: 0 }, { re: 0, im: 0 }], 'ol', 'open-loop pole of (1/M)/s²');
+      push([{ re: 0, im: 0 }, { re: 0, im: 0 }], 'ol', 'open-loop pole');
       push(rootsOf(lonPoly(m, g)), 'cl', 'altitude closed-loop pole', 0);
       if (targets && targets.lon) push(targets.lon, 'target', 'target pole (spec)');
       names.cl = 'altitude loop pole';
@@ -179,8 +179,8 @@ WB.F = (function () {
       if (view === 'inner' || view === 'lat') push(rootsOf(innerPoly(m, g)), view === 'lat' ? 'obs' : 'cl', 'inner (θ) loop pole', 10);
       if (view === 'outer' || view === 'lat') push(rootsOf(outerPoly(m, g)), 'cl', 'outer (z) loop pole, k_DC model', 20);
       if (view === 'lat') push(rootsOf(exactLatPoly(m, g)), 'olzero', 'exact pole of the coupled lateral loop');
-      if (view === 'inner') push([{ re: 0, im: 0 }, { re: 0, im: 0 }], 'ol', 'open-loop pole of (1/J)/s²');
-      if (view === 'outer') push([{ re: 0, im: 0 }, { re: -m.a, im: 0 }], 'ol', 'open-loop pole of −g/(s(s+μ/M))');
+      if (view === 'inner') push([{ re: 0, im: 0 }, { re: 0, im: 0 }], 'ol', 'open-loop pole');
+      if (view === 'outer') push([{ re: 0, im: 0 }, { re: -m.a, im: 0 }], 'ol', 'open-loop pole');
       if (targets) {
         if ((view === 'inner' || view === 'lat') && targets.inner) push(targets.inner, 'target', 'target pole (spec)');
         if ((view === 'outer' || view === 'lat') && targets.outer) push(targets.outer, 'target', 'target pole (spec)');
