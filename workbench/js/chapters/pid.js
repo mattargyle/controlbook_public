@@ -22,6 +22,7 @@ WB.chapters = WB.chapters || {};
     const Ts = S.sim.Ts, sigma = st.sigma ?? 0.05;
     const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     const uLim = sys.uLimit(pModel);
+    const comp = PD().compApplied(ctx) ? st.comp : 'none';  // Work mode: once A.4 is solved
     let I = 0, ePrev = null, yPrev = null, ydot = 0, rPrev = null;
     return {
       update(r, x, yMeas) {
@@ -41,8 +42,8 @@ WB.chapters = WB.chapters || {};
         const uTilde = kP * e + kI * I + dTerm;
         let ff = 0;
         if (!linear) {
-          if (st.comp === 'fl') ff = sys.feedbackLinearization([y, ydot], pModel);
-          else if (st.comp === 'eq') ff = sys.equilibriumInput(0, pModel);
+          if (comp === 'fl') ff = sys.feedbackLinearization([y, ydot], pModel);
+          else if (comp === 'eq') ff = sys.equilibriumInput(0, pModel);
         }
         let u = uTilde + ff;
         if (!linear && st.antiwindup === 'backcalc' && kI !== 0) {
@@ -64,7 +65,9 @@ WB.chapters = WB.chapters || {};
   function pidMarkers(ctx) {
     const { model } = ctx;
     const g = ctx.gains;
-    const markers = M.roots2(model.a1, model.a0).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` }));
+    // In Work mode the open-loop poles answer A.7(a) until it is solved.
+    const showOl = PD().shows(ctx, PD().partKey(ctx, 'ch7', 'a'));
+    const markers = showOl ? M.roots2(model.a1, model.a0).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` })) : [];
     const cl = g.kI ? L.roots(pidCharPoly(model, g)) : PD().clPoles(model, g.kP, g.kD);
     cl.forEach((p, i) => markers.push({ ...p, kind: 'cl', label: `closed-loop pole p${i + 1}` }));
     if (g.kI && g.kP) markers.push({ re: -g.kI / g.kP, im: 0, kind: 'zero', label: 'closed-loop zero −kI/kP' });
@@ -114,7 +117,8 @@ WB.chapters = WB.chapters || {};
     id: 'ch9', num: 9, tab: 'Ch 9', title: 'System type & integrators', pages: 'pp. 137–154',
 
     defaults(sys) {
-      return { arch: 'output', comp: 'fl', deriv: 'state', antiwindup: 'none', kP: 0.1134, kD: 0.0483, kI: 0, tr: 0.8, zeta: 0.707, kIx: 0.05, rule: '2.2', input: 'step' };
+      // Work-mode starting gains: deliberately not A.8(a)'s (kP = 0.1134, kD = 0.0483).
+      return { arch: 'output', comp: 'fl', deriv: 'state', antiwindup: 'none', kP: 0.1, kD: 0.04, kI: 0, tr: 0.8, zeta: 0.707, kIx: 0.05, rule: '2.2', input: 'step' };
     },
     simDefaults(sys) { return sys.problems.ch9.sim; },
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD } : designedGains(ctx); },
@@ -159,7 +163,8 @@ WB.chapters = WB.chapters || {};
       const res = ctx.app.result();
       const eEnd = res ? res.r[res.r.length - 1] - res.y[res.y.length - 1] : NaN;
       const row = WB.ui.metric;
-      const show = WB.ui.shown(ctx, 'ch9:type');
+      const id = ctx.sys.problems.ch9.id;
+      const show = WB.ui.shown(ctx, 'ch9:type') || ['a1', 'a2', 'b'].every((k) => ctx.app.isSolved(`${id}/${k}`));
       const rows = [];
       if (show) {
         rows.push(row('reference tracking type', `type ${a.type}`));
@@ -188,15 +193,16 @@ WB.chapters = WB.chapters || {};
           numbers: g.kI > 0
             ? `M_a = \\frac{b_0 k_I}{a_1} = ${tex(a.Ma)} \\;(\\text{type 2}),\\quad e_{parab} = \\frac{a_1}{b_0 k_I} = \\frac{b}{k_I} = ${tex(1 / a.Ma)}`
             : `M_v = \\frac{b_0 k_P}{a_1} = \\frac{k_P}{b} = ${tex(a.Mv)} \\;(\\text{type 1}),\\quad e_{ramp} = ${tex(1 / a.Mv)}`,
-          spoiler: true },
-        { title: 'PID controller', page: 'p. 142',
+          spoiler: true, answers: [`${ctx.sys.problems.ch9.id}/a1`, `${ctx.sys.problems.ch9.id}/a2`] },
+        // Δ_cl with the student's gains still shows b0 and a1 (A.7(b)).
+        { title: 'PID controller', page: 'p. 142', answers: PD().partKey(ctx, 'ch7', 'b'),
           theory: 'C(s) = k_P + \\frac{k_I}{s} + k_D s = \\frac{k_D s^2 + k_P s + k_I}{s}',
           numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(pidCharPoly(model, g))}` },
         { title: 'Input disturbance', page: 'p. 143 · Fig. 9-5, p. 144',
           theory: 'E(s) = \\frac{P}{1+PC}D_{in}(s),\\quad \\lim_{t\\to\\infty} e = \\lim_{s\\to 0}\\frac{P}{1+PC}\\frac{1}{s^q}',
           numbers: g.kI > 0 ? '\\text{with } k_I > 0:\\; \\lim_{s\\to0}\\frac{P}{1+PC} = 0 \\Rightarrow \\text{type 1 (step } d \\to e_{ss} = 0)'
             : `\\text{PD}:\\; \\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1}{k_P} = ${tex(1 / g.kP)}\\;\\text{rad}/(\\text{N}\\cdot\\text{m})`,
-          spoiler: true,
+          spoiler: true, answers: `${ctx.sys.problems.ch9.id}/b`,
           note: 'Disturbance type depends on the integrators in C(s) only (p. 145). With gravity compensation off, gravity is exactly such an input disturbance.' },
         PD().compensationCard(ctx),
       ];
@@ -321,10 +327,10 @@ WB.chapters = WB.chapters || {};
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: 'U_D(s) = \\frac{s}{\\sigma s + 1}Y(s),\\quad \\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)',
           numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad \\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}`,
-          spoiler: true },
+          spoiler: true, answers: `${ctx.sys.problems.ch10.id}/c2` },
         { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
           theory: '\\text{(1) integrate only when } |\\dot y| < \\bar v,\\quad \\text{(2) } u_I^+ = u_I + \\frac{1}{k_I}\\big(u_{sat} - u_{unsat}\\big)' },
-        { title: 'Gains from t_r, ζ (Listing 10.2)', page: 'p. 161', answers: `${ctx.sys.problems.ch8.id}/a`,
+        { title: 'Gains from t_r, ζ (Listing 10.2)', page: 'p. 161', answers: [`${ctx.sys.problems.ch8.id}/a`, `${ctx.sys.problems.ch10.id}/c1`],
           theory: (st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2 t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}') + ',\\quad k_P = \\frac{\\omega_n^2 - a_0}{b_0},\\quad k_D = \\frac{2\\zeta\\omega_n - a_1}{b_0}',
           numbers: `\\omega_n = ${tex(dg.wn)},\\quad k_P = ${tex(dg.kP)},\\quad k_D = ${tex(dg.kD)},\\quad k_I = ${tex(dg.kI)}`,
           spoiler: true,
@@ -395,14 +401,17 @@ WB.chapters = WB.chapters || {};
   WB.chapters.p6 = {
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474',
 
-    defaults() { return { arch: 'output', comp: 'fl', deriv: 'state', antiwindup: 'none', tr: 0.8, zeta: 0.707, rule: '2.2', kIx: 0.05, kMaxFactor: 2 }; },
+    // kP, kI, kD: Work-mode gains (not A.8's); Explore designs them from t_r, ζ.
+    defaults() { return { arch: 'output', comp: 'fl', deriv: 'state', antiwindup: 'none', tr: 0.8, zeta: 0.707, rule: '2.2', kIx: 0.05, kMaxFactor: 2, kP: 0.1, kI: 0, kD: 0.04 }; },
     simDefaults(sys) { return sys.problems.p6.sim; },
-    gains(ctx) { return designedGains(ctx); },
+    gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD } : designedGains(ctx); },
     controller: (ctx, o) => makePID(ctx, o),
+    // The locus and the poles of L(s) answer A.P.6(a), so Work mode draws them once it is solved.
+    locusShown: (ctx) => PD().shows(ctx, `${ctx.sys.problems.p6.id}/a`),
 
     evans(ctx) {
       const { model } = ctx;
-      const g = designedGains(ctx);
+      const g = this.gains(ctx);
       const den = [1, model.a1 + model.b0 * g.kD, model.a0 + model.b0 * g.kP, 0];
       const kCrit = den[1] * den[2] / model.b0;  // Routh: c2 c1 > c0
       return { den, num: [model.b0], kCrit, g };
@@ -411,6 +420,13 @@ WB.chapters = WB.chapters || {};
     buildControls(parent, ctx) {
       const sec = section(parent, 'PD from A.8, then add k_I', 'p. 470');
       PD().sharedControls(sec, ctx);
+      if (ctx.S.mode === 'work') {
+        // Your A.8 gains: the workbench's would give A.8(a) away.
+        gainSliders(sec, ctx);
+        slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.2, max: 5, step: 0.1, sig: 2, ...bind(ctx, 'kMaxFactor') });
+        sec.append(el('p', { class: 'muted small', text: 'Set k_P, k_D to your A.8 gains. The root locus appears once (a) is solved; then drag a closed-loop pole along it to set k_I.' }));
+        return;
+      }
       slider(sec, { label: 't<sub>r</sub>', unit: 's', min: 0.2, max: 3, step: 0.005, ...bind(ctx, 'tr') });
       slider(sec, { label: 'ζ', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zeta') });
       slider(sec, { label: 'k<sub>I</sub>', min: 0, max: 2, step: 0.001, ...bind(ctx, 'kIx') });
@@ -421,19 +437,20 @@ WB.chapters = WB.chapters || {};
 
     splane(ctx) {
       const ev = this.evans(ctx);
-      const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, ctx.st.kIx * 1.2, 1e-3);
-      const loci = WB.tf.rootLocus(ev.den, ev.num, kMax);
-      const markers = L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
-      L.roots(pidCharPoly(ctx.model, ev.g)).forEach((p, i) => markers.push({ ...p, kind: 'cl', label: `closed-loop pole at kI = ${fmt(ev.g.kI, 3)}`, dragId: i }));
+      const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, ev.g.kI * 1.2, 1e-3);
       const fitR = Math.max(...L.roots(ev.den).map((p) => Math.hypot(p.re, p.im))) * 1.6;
-      return { markers, loci, fitR };
+      const shown = this.locusShown(ctx);
+      const markers = shown ? L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` })) : [];
+      L.roots(pidCharPoly(ctx.model, ev.g)).forEach((p, i) => markers.push({ ...p, kind: 'cl', label: `closed-loop pole at kI = ${fmt(ev.g.kI, 3)}`, dragId: shown ? i : undefined }));
+      if (!shown) return { markers, fitR };
+      return { markers, loci: WB.tf.rootLocus(ev.den, ev.num, kMax), fitR };
     },
 
     // Dragging: pick the k_I whose root is closest to the pointer.
     onPoleDrag(ctx, id, re, im) {
       const ev = this.evans(ctx);
       const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, 1e-3);
-      let bestK = ctx.st.kIx, bd = Infinity;
+      let bestK = ev.g.kI, bd = Infinity;
       for (let i = 0; i <= 400; i++) {
         const k = kMax * i / 400;
         for (const q of L.roots(L.polyAdd(ev.den, L.polyScale(ev.num, k)))) {
@@ -441,7 +458,7 @@ WB.chapters = WB.chapters || {};
           if (d < bd) { bd = d; bestK = k; }
         }
       }
-      ctx.st.kIx = bestK;
+      ctx.st[ctx.S.mode === 'work' ? 'kI' : 'kIx'] = bestK;
       ctx.update();
     },
 
@@ -458,7 +475,7 @@ WB.chapters = WB.chapters || {};
           numbers: `L(s) = \\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev.den)}},\\quad k_P = ${tex(ev.g.kP)},\\; k_D = ${tex(ev.g.kD)}`, spoiler: true },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
           theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ is stable iff } c_2, c_1, c_0 > 0 \\text{ and } c_2 c_1 > c_0',
-          numbers: `k_{I,crit} = \\frac{c_2 c_1}{b_0} = ${tex(ev.kCrit)}`, spoiler: true,
+          numbers: `k_{I,crit} = \\frac{c_2 c_1}{b_0} = ${tex(ev.kCrit)}`, spoiler: true, answers: `${ctx.sys.problems.p6.id}/b`,
           note: 'The book only uses rlocus (p. 471). Larger k_I always pushes this second-order-plus-integrator loop unstable (p. 160).' },
       ];
     },
@@ -487,6 +504,7 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'b', title: '(b) Largest stable k<sub>I</sub>',
+          html: 'For the current k<sub>P</sub>, k<sub>D</sub> (your A.8 gains on the right).',
           inputs: { k: 'k<sub>I,crit</sub>' },
           check: (v) => PD().checkNumbers(v, { k: this.evans(ctx).kCrit }, { k: 'kI,crit' }),
           solution: () => [{ tex: `k_{I,crit} = ${tex(this.evans(ctx).kCrit)}` }],

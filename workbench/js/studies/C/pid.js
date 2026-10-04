@@ -85,7 +85,7 @@
   }
 
   // ------------------------------------------------------------- s-plane --
-  const LEGEND = { obs: 'inner loop (design)', cl: 'outer loop (design, k_DCθ = 1)', zero: 'full 4-state closed loop', target: 'target (spec)', ol: 'open-loop pole' };
+  const LEGEND = { obs: 'inner loop (design)', cl: 'outer loop (design, inner loop → k_DCθ)', zero: 'full 4-state closed loop', target: 'target (spec)', ol: 'open-loop pole' };
 
   function cascadeMarkers(ctx, { targets = null, sigma = null, drag = true } = {}) {
     const p = ctx.pModel, g = ctx.gains;
@@ -96,7 +96,8 @@
     const outerR = Math.max(...outer.map((q) => Math.hypot(q.re, q.im)), 0.05);
     const zoomOuter = ctx.st.zoom === 'outer';
     const nf = (q) => zoomOuter && Math.hypot(q.re, q.im) > 3 * outerR;
-    const mk = L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}`, noFit: nf(q) }));
+    // The open-loop poles answer C.5(b) / C.6: hidden in Work mode until one is solved.
+    const mk = lib().showsOl(ctx) ? L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}`, noFit: nf(q) })) : [];
     inner.forEach((q, i) => mk.push({ ...q, kind: 'obs', label: `inner loop pole ${i + 1} (design)`, dragId: explore ? 'in' : undefined, noFit: nf(q) }));
     outer.forEach((q, i) => mk.push({ ...q, kind: 'cl', label: `outer loop pole ${i + 1} (design)`, dragId: explore ? 'out' : undefined }));
     full.forEach((q, i) => mk.push({ ...q, kind: 'zero', label: `full-model closed-loop pole ${i + 1}`, noFit: nf(q) || Math.hypot(q.re, q.im) > 60 }));
@@ -173,27 +174,39 @@
     });
   }
 
-  // Loads the C.8 design (t_rθ = 1 s, M = 10, ζ = 0.9) into the Work-mode sliders,
-  // keeping the current k_Iφ. Used where C.8's gains are given data (C.9, C.P.6).
+  // Loads C.8's loops into the Work-mode sliders, keeping the current k_Iφ. Used where
+  // C.8's gains are the starting point (C.9, C.P.6). "Load my C.8 gains" copies the
+  // Work-mode gains of the Ch 8 tab; the C.8 design itself (t_rθ = 1 s, M = 10,
+  // ζ = 0.9) answers C.8(b) and (d), so that button appears once both are solved.
   function loadC8Button(parent, ctx) {
-    parent.append(el('div', { class: 'btn-row' }, el('button', {
-      type: 'button', class: 'btn btn-quiet', text: 'Load the C.8 gains',
-      onclick: () => {
-        const pr = ctx.sys.problems.ch8;
-        const g = designOf(ctx, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaPhi: pr.zetaPhi, rule: pr.rule });
-        Object.assign(ctx.st.w, { kPth: g.kPth, kDth: g.kDth, kPphi: g.kPphi, kDphi: g.kDphi });
-        ctx.update();
-      },
-    })));
+    const set = (g) => { Object.assign(ctx.st.w, { kPth: g.kPth, kDth: g.kDth, kPphi: g.kPphi, kDphi: g.kDphi }); ctx.update(); };
+    const row = el('div', { class: 'btn-row' }, el('button', {
+      type: 'button', class: 'btn btn-quiet', text: 'Load my C.8 gains', title: 'Copy the Work-mode gains from the Ch 8 tab',
+      onclick: () => { const c8 = ctx.S.ch.ch8; if (c8 && c8.w) set(c8.w); },
+    }));
+    if (lib().shows(ctx, 'C.8/b', 'C.8/d')) {
+      row.append(el('button', {
+        type: 'button', class: 'btn btn-quiet', text: 'Load the C.8 gains',
+        onclick: () => {
+          const pr = ctx.sys.problems.ch8;
+          set(designOf(ctx, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaPhi: pr.zetaPhi, rule: pr.rule }));
+        },
+      }));
+    }
+    parent.append(row);
   }
 
-  // Work mode: the spec's target poles are an answer, so they stay hidden until asked for.
-  function targetToggle(parent, ctx) {
-    segmented(parent, {
+  // Work mode: the spec's target poles give away ω_n (and with it the gains), so the
+  // toggle appears only once part `key` (the inner-loop gains) is solved.
+  function targetToggle(parent, ctx, key) {
+    const seg = segmented(parent, {
       label: 'Target poles from the spec (s-plane rings)',
       options: [{ value: false, label: 'hidden' }, { value: true, label: 'shown' }],
       get: () => !!ctx.st.showTargets, set: (v) => { ctx.st.showTargets = v; ctx.update(); },
     });
+    const note = el('p', { class: 'muted small', text: `The spec's target poles can be shown here once ${key.replace('/', '(')}) is solved.` });
+    parent.append(note);
+    WB.ui.addRefresher(() => { const ok = lib().shows(ctx, key); seg.row.hidden = !ok; note.hidden = ok; });
   }
 
   // Bandwidth-separation readout (shown in both modes; it is not an answer).
@@ -303,7 +316,7 @@
     simDefaults(sys) { return sys.problems.ch8.sim; },
     gains: gainsFor,
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.M * ctx.st.trTh } : {}; },
-    linearLabel: 'outer design model (inner loop → 1)',
+    linearLabel: 'outer design model (inner loop → its DC gain)',   // k_DCθ = 1 answers C.8(c)
     linearSim: designOverlay,
     outputSeries(ctx, res, sc, oi) {
       if (oi !== 0 || !res.extras.thetaR) return [];
@@ -318,7 +331,7 @@
       commonControls(sec, ctx, { ff: true });
       if (ctx.S.mode === 'work') {
         workSliders(sec, ctx, false);
-        targetToggle(sec, ctx);
+        targetToggle(sec, ctx, 'C.8/b');
       } else {
         const des = section(parent, 'Design knobs', 'p. 131–132');
         designSliders(des, ctx);
@@ -331,8 +344,9 @@
     },
 
     splane(ctx) {
-      const s = this.spec(ctx);
-      const tg = ctx.S.mode === 'work' && ctx.st.showTargets ? [...lib().innerPoles(ctx.pModel, s), ...lib().outerPoles(ctx.pModel, s)] : null;
+      // Inner targets once C.8(b) is solved, outer targets once C.8(d) is.
+      const s = this.spec(ctx), on = ctx.S.mode === 'work' && ctx.st.showTargets;
+      const tg = on ? [...(lib().shows(ctx, 'C.8/b') ? lib().innerPoles(ctx.pModel, s) : []), ...(lib().shows(ctx, 'C.8/d') ? lib().outerPoles(ctx.pModel, s) : [])] : null;
       return cascadeMarkers(ctx, { targets: tg });
     },
     onPoleDrag: onCascadeDrag,
@@ -365,7 +379,9 @@
         for (const u of out.uDemand) peak = Math.max(peak, Math.abs(u));
         return peak / TAU_MAX;
       };
-      const useGains = WB.design.useGains(ctx, ['kPth', 'kDth', 'kPphi', 'kDphi'], { extra: { kIphi: 0 }, msg: 'Enter all four gains in (b) and (d) first.' });
+      // Each part's "Use my gains" sets the gains it asks for (a part's action sees only its own inputs).
+      const useInner = WB.design.useGains(ctx, ['kPth', 'kDth'], { msg: 'Enter kPθ and kDθ first.' });
+      const useOuter = WB.design.useGains(ctx, ['kPphi', 'kDphi'], { extra: { kIphi: 0 }, msg: 'Enter kPφ and kDφ first.' });
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Block diagram',
@@ -397,6 +413,7 @@
           html: 'Use ω<sub>n</sub> = π/(2 t<sub>r</sub>√(1−ζ²)) as the C.8 solution does (p. 131).',
           inputs: { wn: 'ω<sub>n<sub>θ</sub></sub>', kPth: 'k<sub>P<sub>θ</sub></sub>', kDth: 'k<sub>D<sub>θ</sub></sub>' },
           check: (v) => PD().checkNumbers(v, { wn: s().wnTh, kPth: s().kPth, kDth: s().kDth }, { wn: 'ωnθ', kPth: 'kPθ', kDth: 'kDθ' }),
+          actions: [useInner],
           solution: () => [
             { tex: `\\omega_{n_\\theta} = \\frac{\\pi}{2(${prob.trTh})\\sqrt{1 - ${prob.zetaTh}^2}} = ${tex(s().wnTh)},\\quad k_{P_\\theta} = \\omega_{n_\\theta}^2(J_s+J_p) = ${tex(s().kPth)},\\quad k_{D_\\theta} = ${tex(s().kDth)}` },
             { html: 'Book: 77.9 and 38.9 (p. 131).' },
@@ -432,7 +449,7 @@
           id: 'd', title: `(d) Outer loop: t<sub>r<sub>φ</sub></sub> = ${prob.M} t<sub>r<sub>θ</sub></sub>, ζ<sub>φ</sub> = ${prob.zetaPhi}`,
           inputs: { kPphi: 'k<sub>P<sub>φ</sub></sub>', kDphi: 'k<sub>D<sub>φ</sub></sub>', kdc: 'k<sub>DC<sub>φ</sub></sub>' },
           check: (v) => PD().checkNumbers(v, { kPphi: s().kPphi, kDphi: s().kDphi, kdc: s().kDCphi }, { kPphi: 'kPφ', kDphi: 'kDφ', kdc: 'kDCφ' }),
-          actions: [useGains],
+          actions: [useOuter],
           solution: () => [
             { tex: `\\omega_{n_\\phi} = ${tex(s().wnPhi)},\\quad \\begin{bmatrix}k_{P_\\phi}\\\\ k_{D_\\phi}\\end{bmatrix} = ${M.texMat(s().AA)}^{-1}${M.texMat(s().bb)} = \\begin{bmatrix}${tex(s().kPphi)}\\\\ ${tex(s().kDphi)}\\end{bmatrix}` },
             { tex: `k_{DC_\\phi} = \\frac{k\\,k_{P_\\phi}}{k + k\\,k_{P_\\phi}} = ${tex(s().kDCphi)}` },
@@ -441,7 +458,7 @@
         },
         {
           id: 'e', title: '(e) Simulate the 15° square wave',
-          html: 'Click <em>Use my gains</em> in (d) (it also uses your (b) gains). Saturation only enters in part (f): with t<sub>r<sub>θ</sub></sub> = 1 s the first sample demands about 37 N·m, so raise τ<sub>max</sub> in the left panel (up to 100) to run (e) unsaturated. Passes when the simulated design poles match the C.8 targets.',
+          html: 'Click <em>Use my gains</em> in (b) and in (d). Saturation only enters in part (f): with t<sub>r<sub>θ</sub></sub> = 1 s the first sample of the square wave demands several times τ<sub>max</sub>, so raise τ<sub>max</sub> in the left panel (up to 100) to run (e) unsaturated. Passes when the simulated design poles match the C.8 targets.',
           check: () => {
             if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
             const p = ctx.pModel, g = ctx.gains, sp = s();
@@ -545,7 +562,7 @@
       if (ctx.S.mode === 'work') {
         workSliders(sec, ctx, true);
         loadC8Button(sec, ctx);
-        sec.append(el('p', { class: 'muted small', text: 'C.9 analyzes the C.8 loops; load them or use your own. The |θ_r| limit is opened up so ramps are not clipped.' }));
+        sec.append(el('p', { class: 'muted small', text: 'C.9 analyzes the C.8 loops: load your Ch 8 gains or set any others. The |θ_r| limit is opened up so ramps are not clipped.' }));
       } else { designSliders(sec, ctx, { withI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi']); }
       const ty = section(parent, 'System type analysis', 'p. 141 · Table 9-1');
       const box = el('div', { class: 'metrics' });
@@ -661,7 +678,7 @@
     },
     simDefaults(sys) { return sys.problems.p6.sim; },
     gains: gainsFor,
-    linearLabel: 'outer design model (inner loop → 1)',
+    linearLabel: 'outer design model (inner loop → its DC gain)',   // k_DCθ = 1 answers C.8(c)
     linearSim: designOverlay,
 
     // C.8's PD gains, which the problem tells you to start from.
@@ -765,7 +782,7 @@
         },
         {
           id: 'b', title: '(b) Root locus versus k<sub>I</sub>', after: 'a',
-          html: 'Use <code>rlocus</code> (or <code>control.root_locus</code>) on your L(s) with the C.8 PD gains. The s-plane here now draws the locus for the gains in the controls; <em>Load the C.8 gains</em> sets them. Compare with your plot.',
+          html: 'Use <code>rlocus</code> (or <code>control.root_locus</code>) on your L(s) with the C.8 PD gains. The s-plane here now draws the locus for the gains in the controls; <em>Load my C.8 gains</em> copies yours from the Ch 8 tab. Compare with your plot.',
         },
         {
           id: 'c', title: '(c) Select a k<sub>I</sub> that does not significantly change the other closed-loop poles',
@@ -810,7 +827,7 @@
     simDefaults(sys) { return { ...sys.problems.ch10.sim, mismatch: sys.problems.ch10.mismatch }; },
     gains: gainsFor,
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.M * ctx.st.trTh } : {}; },
-    linearLabel: 'outer design model (inner loop → 1)',
+    linearLabel: 'outer design model (inner loop → its DC gain)',   // k_DCθ = 1 answers C.8(c)
     linearSim: designOverlay,
     outputSeries(ctx, res, sc, oi) {
       if (oi !== 0 || !res.extras.thetaR) return [];
@@ -820,7 +837,7 @@
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Digital PID, measured angles only', 'p. 166 · Listing 10.4');
-      if (ctx.S.mode === 'work') { workSliders(sec, ctx, true); targetToggle(sec, ctx); }
+      if (ctx.S.mode === 'work') { workSliders(sec, ctx, true); targetToggle(sec, ctx, 'C.10/c1'); }
       else { designSliders(sec, ctx, { withI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi']); }
       const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.3–10.4');
       commonControls(imp, ctx, { ff: true, deriv: true, aw: true });
@@ -846,7 +863,7 @@
 
     splane(ctx) {
       const s = this.spec(ctx);
-      const tg = ctx.S.mode === 'work' && ctx.st.showTargets ? [...lib().innerPoles(ctx.pModel, s), ...lib().outerPoles(ctx.pModel, { ...s, kIphi: 0 })] : null;
+      const tg = ctx.S.mode === 'work' && ctx.st.showTargets && lib().shows(ctx, 'C.10/c1') ? [...lib().innerPoles(ctx.pModel, s), ...lib().outerPoles(ctx.pModel, { ...s, kIphi: 0 })] : null;
       return cascadeMarkers(ctx, { targets: tg, sigma: ctx.st.deriv === 'dirty' ? ctx.st.sigma : null });
     },
     onPoleDrag: onCascadeDrag,

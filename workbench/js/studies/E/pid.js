@@ -37,6 +37,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       ],
       ...bind(ctx, 'comp'),
     });
+    E.ffWorkControls(parent, ctx);  // Work mode: F_fl, F_e wait for E.4(c), E.4(a)
   }
 
   function workGainSliders(parent, ctx, { kI = false, kIth = false } = {}) {
@@ -200,7 +201,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     const z0 = s.ze(p);
     const out = WB.sim.simulate({
       plant: { f: (x, u) => s.f(x, u, p), h: s.h, uLimit: Infinity },
-      controller: E.nestedPID(ctx, d, { comp: 'fl', meas: 'state' }),
+      controller: E.nestedPID(ctx, d, { comp: 'fl', meas: 'state', ffAlways: true }),  // only the peak is reported
       reference: () => z0 + k.step, disturbance: null, noise: null,
       x0: [z0, 0, 0, 0], Ts: ctx.S.sim.Ts, tEnd: Math.max(5, 5 * trZ),
     });
@@ -223,6 +224,14 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     ctx.app.setMode('work');
     Object.assign(ctx.st, vals);
     ctx.update();
+  }
+
+  // Name of the applied feedforward on the force-split plot (Work mode: what ffOf applies).
+  function ffLabel(ctx) {
+    const c = ctx.st.comp;
+    if (c === 'none') return 'no feedforward';
+    if (E.ffApplied(ctx, c)) return c === 'fl' ? 'F_fl(z)' : 'F_e';
+    return c === 'fl' ? 'no feedforward (F_fl waits for E.4(c))' : 'your F_e';
   }
 
   // ------------------------------------------------------------- Chapter 8 --
@@ -265,7 +274,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       return {
         opts: { title: 'force split F = F_ff + F̃', yLabel: 'F [N]', unit: 'N' },
         data: { series: [
-          { label: ctx.st.comp === 'fl' ? 'F_fl(z)' : ctx.st.comp === 'eq' ? 'F_e' : 'no feedforward', y: Array.from(res.extras.ff || []), color: '--text-muted', width: 1.5 },
+          { label: ffLabel(ctx), y: Array.from(res.extras.ff || []), color: '--text-muted', width: 1.5 },
           { label: 'F̃ (PD)', y: Array.from(res.extras.Ft || []), color: '--series-2', width: 1.5 },
         ] },
       };
@@ -278,7 +287,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         cascadeCard(), pdTheoryCard(), designModelCard(ctx), equilibriumCard(ctx), innerCard(ctx, d), outerCard(ctx, d), separationCard(ctx), holdCard(ctx),
         { title: 'Saturation and the rise time', page: 'p. 119–121 · Eq. 8.8, Fig. 8-13',
           theory: '|u_{ff} + \\tilde u| \\le u_{max} \\;\\Rightarrow\\; \\tilde u_{max} = u_{max} - |u_{ff}|' },
-        { title: 'Saturation of the block and beam', page: 'p. 388 · E.8(f)', answers: `${ids(ctx).e8}/f`,
+        { title: 'Saturation of the block and beam', page: 'p. 388 · E.8(f)', answers: [`${ids(ctx).e8}/f`, `${ids(ctx).e4}/c`],
           theory: '\\tilde F(0^+) = k_{P_\\theta}k_{P_z}\\,\\tilde z_r \\;(\\text{negative for } \\tilde z_r > 0\\text{: plenty of room}),\\quad \\text{the binding limit is braking near the tip, where } F_{fl}(z) \\text{ has grown}',
           numbers: `F_{max} = ${tex(Fmax)}\\,\\text{N},\\quad F_{fl}(z_e + 0.25) = ${tex(ctx.sys.Ffl(ctx.sys.ze(ctx.pModel) + 0.25, ctx.pModel))}\\,\\text{N}` },
       ];
@@ -345,6 +354,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           check: () => {
             const res = ctx.app.result();
             if (ctx.st.comp !== 'fl') return { ok: false, msg: 'Select F_fl(z): the problem asks for the actual block position in the equilibrium force.' };
+            if (!E.ffApplied(ctx, 'fl')) return { ok: false, msg: 'F_fl(z) is applied once E.4(c) is solved (Ch 4 tab).' };
             const i = E.beforeSwitch(ctx, res);
             const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]);
             let peak = 0; for (const u of res.uDemand) peak = Math.max(peak, Math.abs(u));
@@ -625,10 +635,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           theory: '\\Delta_{cl}(s) = 0 \\iff 1 + k\\,L(s) = 0 \\quad(k \\text{ is the gain that varies along the locus})' },
         { title: 'PID with the derivative on the output', page: 'p. 470',
           theory: '\\Delta_{cl}(s) = \\text{numerator of } 1 + P\\,C,\\quad C = \\frac{k_D s^2 + k_P s + k_I}{s}' },
-        { title: 'Closed outer loop of the block and beam with PID', page: 'p. 388 · E.P.6', answers: `${p6}/a`,
+        { title: 'Closed outer loop of the block and beam with PID', page: 'p. 388 · E.P.6', answers: [`${p6}/a`, `${ids(ctx).e8}/d`],
           theory: '\\Delta_{cl}(s) = s^3 - gk_{D_z}s^2 - gk_{P_z}s - gk_{I_z}\\quad(\\text{inner loop as } k_{DC_\\theta} = 1)',
           numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(this.clPoly(ev, ctx.st.kI))}` },
-        { title: 'Evans form of the outer loop (negated, since k_I < 0)', page: 'p. 388 · E.P.6', answers: `${p6}/a`,
+        { title: 'Evans form of the outer loop (negated, since k_I < 0)', page: 'p. 388 · E.P.6', answers: [`${p6}/a`, `${ids(ctx).e8}/d`],
           theory: '1 + (-k_{I_z})\\,L(s) = 0,\\quad L(s) = \\frac{g}{s^3 - gk_{D_z}s^2 - gk_{P_z}s}',
           numbers: `L(s) = \\frac{${tex(ev.num[0])}}{${WB.tf.polyTex(ev.den)}},\\quad k_{P_z} = ${tex(ev.d.kPz)},\\; k_{D_z} = ${tex(ev.d.kDz)}` },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',

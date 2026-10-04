@@ -241,7 +241,8 @@
   function satRun(ctx, k) {
     const g = F.designSLC(ctx.pModel, k);
     const fake = { ...ctx, gains: g, st: { ...ctx.st, deriv: 'state', lat: 'on', comp: 'eq' } };
-    const res = F.simulate(fake, satCommon(ctx), null, F.makePID(fake));
+    // the reference answer, so always with the workbench's F_e (never shown in Work mode)
+    const res = F.simulate(fake, satCommon(ctx), null, F.makePID(fake, { fe: ctx.sys.models(ctx.pModel).Fe }));
     const [lo, hi] = ctx.sys.uLimit(ctx.pModel)[0];
     let sat = false;
     for (const ud of res.uDemandAll) for (let i = 0; i < ud.length; i++) if (ud[i] > hi + 1e-9 || ud[i] < lo - 1e-9) { sat = true; break; }

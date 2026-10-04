@@ -39,6 +39,7 @@ js/core/ui.js          sliders/toggles bound to state, KaTeX helper, PDF page li
 js/core/plot.js        TimePlot, SPlane (draggable poles, root-locus branches), BodePlot (spec regions)
 js/core/sim.js         closed-loop loop matching hwNN_*Sim.py (controller sat → +d → plant sat → RK4), noise
 js/core/py.js          Pyodide worker for Python answers: sandbox, pinned downloads, timeouts, random-point checking
+js/core/yours.js       "Plot my answer" overlays: the student's own model drawn beside the workbench's (Ch 2-6)
 js/systems/arm.js      Design Study A: dynamics, linear models, energies, drawing, problem data for every chapter
 js/chapters/models.js  Ch 2–6   kinetic energy, Euler-Lagrange (energy check), linearization, TF, state space
 js/chapters/pd.js      Ch 7–8   PD pole placement, t_r/ζ design, saturation limit

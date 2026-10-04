@@ -85,6 +85,7 @@
   function makeSS(ctx, { linear = false } = {}) {
     const s = ctx.sys, p = ctx.pModel, st = ctx.st, g = ctx.gains, level = ctx.chapter.level, Ts = ctx.S.sim.Ts;
     const S = sub(p), m = S.m;
+    const Fe = F.feOf(ctx);   // the student's F_e in Work mode until F.4(a) is solved
     const [lo, hi] = s.uLimit(p)[0];
     const useObs = level === 'obs' || level === 'dobs';
     const useDO = level === 'dobs' && st.dobs !== false;
@@ -100,7 +101,7 @@
       let Ft = 0, tau = 0;
       if (uPrev) {
         const u = linear ? uPrev : uPrev.map((v) => Math.max(lo, Math.min(hi, v)));
-        Ft = u[0] + u[1] - (linear ? 0 : m.Fe);
+        Ft = u[0] + u[1] - (linear ? 0 : Fe);
         tau = p.d * (u[0] - u[1]);
       }
       const fh = (x) => {
@@ -141,7 +142,7 @@
             tau = -dot(g.Kz, xlat) + g.krz * r[1];
           }
           if (useDO) { Ft -= xh[2]; tau -= xl[5]; }
-          const Fc = linear ? Ft : m.Fe + Ft;
+          const Fc = linear ? Ft : Fe + Ft;
           return { u: s.mix(Fc, tau, p), Ft, tau };
         };
         let out;
@@ -223,11 +224,12 @@
     return w;
   }
   // Work-mode starting gains: a deliberately slow design (t_r,h = 16 s, M = 20,
-  // t_r,θ = 1.2 s, ζ = 0.9, observers 3× faster): stable, but not the answer.
+  // t_r,θ = 1.2 s, ζ = 0.9, observers 3× faster): stable, but not the answer. The
+  // reference gains start at 0: the designed k_r would show its form (k_r = K_1 here).
   function slowW(sys, level) {
     const p = { ...Object.fromEntries(sys.params.map((q) => [q.key, q.value])), ...sys.constants };
     const k = { trh: 16, zetah: 0.9, trth: 1.2, zetath: 0.9, Msep: 20, zetaz: 0.9, pIh: -0.05, pIz: -0.03, obsFactor: 3, zetaObs: 0.9, pDh: -0.5, pDz: -0.5, pDth: -3 };
-    return { ...toW(design(p, k, level)), ...(level === 'sf' ? {} : { krh: 0, krz: 0 }) };
+    return { ...toW(design(p, k, level)), krh: 0, krz: 0 };
   }
   function knobs(sys, extra = {}) {
     const pr = sys.problems.ch8;
@@ -563,8 +565,11 @@
         { label: 'd̂_F [N]', y: Array.from(res.extras.dFhat || []), color: '--series-1' },
         { label: 'd̂_z [N]', y: Array.from(res.extras.dzhat || []), color: '--series-3' },
         { label: 'd̂_τ [N·m]', y: Array.from(res.extras.dthat || []), color: '--series-2' },
-        // what d̂_F should converge to: d_F + M_true d_h plus the weight error (M − M_true) g of F_e
-        { label: 'equivalent altitude d (incl. weight error)', y: Array.from(res.t, (t) => (on(t) ? (dv.dF || 0) + WB.systems.F.mass(ctx.pTrue) * (dv.ah || 0) : 0) + (WB.systems.F.mass(ctx.pModel) - WB.systems.F.mass(ctx.pTrue)) * ctx.pModel.g), color: '--text-muted', dash: [5, 4], width: 1.5 },
+        // what d̂_F should converge to: d_F + M_true d_h plus the weight error (M − M_true) g of F_e.
+        // The weight error would show F_e (F.4(a)), so Work mode adds it once that is solved.
+        F.feShown(ctx)
+          ? { label: 'equivalent altitude d (incl. weight error)', y: Array.from(res.t, (t) => (on(t) ? (dv.dF || 0) + WB.systems.F.mass(ctx.pTrue) * (dv.ah || 0) : 0) + (WB.systems.F.mass(ctx.pModel) - WB.systems.F.mass(ctx.pTrue)) * ctx.pModel.g), color: '--text-muted', dash: [5, 4], width: 1.5 }
+          : { label: 'external altitude d (d_F + M d_h)', y: Array.from(res.t, (t) => (on(t) ? (dv.dF || 0) + WB.systems.F.mass(ctx.pTrue) * (dv.ah || 0) : 0)), color: '--text-muted', dash: [5, 4], width: 1.5 },
       ] } };
     }
     return { opts: { title: 'velocities and estimates', yLabel: 'velocity [m/s]', unit: 'm/s' }, data: { series: [

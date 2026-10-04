@@ -130,9 +130,10 @@ WB.F = (function () {
   // (f_r, f_ℓ) = mix(F, τ). With st.deriv === 'dirty' the loops see only the
   // (noisy) measured outputs and use dirty derivatives (Eq. 10.4); otherwise the
   // true rates, as in the F.7–F.9 code. Uses the repo's PID conventions.
-  function makePID(ctx, { linear = false } = {}) {
+  function makePID(ctx, { linear = false, fe } = {}) {
     const s = ctx.sys, p = ctx.pModel, st = ctx.st, g = ctx.gains, Ts = ctx.S.sim.Ts;
     const m = s.models(p);
+    const Fe = fe ?? feOf(ctx);
     const dirty = st.deriv === 'dirty';
     const sigma = st.sigma ?? 0.05;
     const aw = st.antiwindup || 'none';
@@ -147,7 +148,7 @@ WB.F = (function () {
         const meas = dirty ? y : [x[0], x[1], x[2]];
         const Ft = hB.update(r[0], meas[1], dirty ? {} : { ydot: x[4] });
         let F = Ft;
-        if (!linear) F = fl ? (m.Fe + Ft) / Math.cos(meas[2]) : m.Fe + Ft;
+        if (!linear) F = fl ? (Fe + Ft) / Math.cos(meas[2]) : Fe + Ft;
         let tau = 0, thD = 0;
         if (latOn) {
           thD = zB.update(r[1], meas[0], dirty ? {} : { ydot: x[3] });
@@ -279,6 +280,20 @@ WB.F = (function () {
   // hidden until that part is solved (a passing Check, or a "done" button).
   const showsAnswer = (ctx, key) => ctx.S.mode === 'explore' || [].concat(key).every((k) => ctx.app.isSolved(k));
 
+  // The hover force F_e = (m_c + 2m_r)g answers F.4(a). Until it is solved, Work
+  // mode applies the student's own value instead (st.FeW, a slider that starts at
+  // 0), so neither the rotor-force plot nor the animation readout shows it.
+  const feShown = (ctx) => showsAnswer(ctx, 'F.4/a');
+  const feOf = (ctx) => (feShown(ctx) ? WB.systems.F.models(ctx.pModel).Fe : (ctx.st.FeW || 0));
+  function feSection(parent, ctx, { disabled } = {}) {
+    if (feShown(ctx)) return;
+    if (ctx.st.FeW === undefined) ctx.st.FeW = 0;
+    const sec = section(parent, 'Hover force', 'F.4(a) p. 396');
+    slider(sec, { label: 'your F<sub>e</sub>', unit: 'N', min: 0, max: 30, step: 0.01, sig: 4, ...bind(ctx, 'FeW'), disabled,
+      hint: 'The simulation adds this F_e to F̃. It uses the workbench\'s value once you solve F.4(a) (Ch 4 tab).' });
+    WB.ui.addRefresher(() => { sec.parentElement.hidden = feShown(ctx); });   // solved while this tab is open
+  }
+
   // Force law F = F_e + F̃ or the feedback-linearized F = (F_e + F̃)/cos θ. The
   // second one is the answer to F.4(c), so Work mode offers it only once solved.
   const compOf = (ctx) => (ctx.st.comp === 'fl' && showsAnswer(ctx, 'F.4/c') ? 'fl' : 'eq');
@@ -349,6 +364,7 @@ WB.F = (function () {
     const userBuild = def.buildControls;
     ch.buildControls = function (parent, ctx) {
       ctx.chapter = this;
+      if (def.usesFe !== false) feSection(parent, ctx, { disabled: def.feDisabled ? () => def.feDisabled(ctx) : undefined });
       userBuild.call(this, parent, ctx);
       if (def.lateralMetrics !== false && !def.openLoop) zMetricsSection(parent, ctx);
       if (!def.openLoop) offsetControls(parent, ctx);
@@ -388,7 +404,7 @@ WB.F = (function () {
     makePID, pidSplane, pidDrag, W0, gainSliders, readout, metricRow,
     offsetControls, zMetrics, zMetricsSection, separationRows, viewControl,
     useGains, errorBefore, chapter, register, refF8, refF10,
-    showsAnswer, compOf, forceLawControl, VARY, ARGS, pyPart, pyError, negated,
+    showsAnswer, feShown, feOf, compOf, forceLawControl, VARY, ARGS, pyPart, pyError, negated,
     tex, texPole, fmt, fmtPole,
   };
 })();

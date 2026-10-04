@@ -379,8 +379,15 @@ WB.studies.C = WB.studies.C || { chapters: {} };
   // Series helpers for result arrays.
   const deg = (arr) => Array.from(arr || [], (v) => v * R2D);
 
+  // Work-mode answer gating. Anything that answers part `key` ('C.8/b') is shown
+  // in Explore mode, or in Work mode once that part is solved. Explore is tested
+  // first, so contexts without app.isSolved (tools/regress_C.py) work in Explore.
+  const shows = (ctx, ...keys) => ctx.S.mode === 'explore' || keys.every((k) => ctx.app.isSolved(k));
+  // The satellite's open-loop poles (eig A) answer C.5(b) (poles of Θ/τ) and C.6.
+  const showsOl = (ctx) => shows(ctx, 'C.5/b') || shows(ctx, 'C.6/a');
+
   WB.studies.C.lib = {
     R2D, ss, wnRule, pairPoles, slcDesign, innerPoles, outerPoles, outerCharPoly, fullLoopPoles,
-    deg,
+    deg, shows, showsOl,
   };
 })();

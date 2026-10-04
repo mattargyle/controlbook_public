@@ -31,7 +31,7 @@
         const rdot = (r - rPrev) / Ts;
         rPrev = r;
         const dTerm = st.arch === 'error' ? kD * (rdot - ydot) : -kD * ydot;
-        const ff = st.comp === 'eq' ? p.k * r : 0;
+        const ff = lib.comp(ctx) === 'eq' ? p.k * r : 0;
         return ff + kP * (r - y) + dTerm;
       },
     };
@@ -46,6 +46,7 @@
     const sigma = st.sigma ?? 0.05;
     const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     const lim = p.Fmax;
+    const ff = lib.comp(ctx) === 'eq';
     let I = 0, ePrev = 0, yPrev = null, ydot = 0;
     return {
       update(r, x, yMeas) {
@@ -56,7 +57,7 @@
         ydot = dirty ? beta * ydot + gamma * (y - yPrev) : x[1];
         const integrate = st.antiwindup !== 'gate' || Math.abs(ydot) < (st.vbar ?? 0.05);
         if (kI !== 0 && integrate) I += (Ts / 2) * (e + ePrev);
-        let u = (st.comp === 'eq' ? p.k * r : 0) + kP * e + kI * I - kD * ydot;
+        let u = (ff ? p.k * r : 0) + kP * e + kI * I - kD * ydot;
         if (!linear && st.antiwindup === 'backcalc' && kI !== 0) {
           const us = M.saturate(u, lim);
           if (us !== u) { I += (us - u) / kI; u = us; }  // unwind so u_unsat sits at the limit
@@ -78,6 +79,11 @@
 
   // ------------------------------------------------------------- controls --
   function compControl(parent, ctx) {
+    // F_e answers D.4(a): Work mode offers the compensation only once it is solved.
+    if (!lib.shows(ctx, 'D.4/a')) {
+      lib.note(parent, 'Spring compensation (adding the equilibrium force F_e outside the loop) unlocks once you solve D.4(a). Until then the loop runs as in Fig. 7-2.');
+      return;
+    }
     segmented(parent, {
       label: 'Spring compensation',
       options: [
@@ -150,10 +156,11 @@
     };
   }
   function compCard(ctx) {
+    const eq = lib.comp(ctx) === 'eq';
     return {
-      title: 'Spring compensation', page: 'p. 59–60 (equilibrium input)', answers: ctx.st.comp === 'eq' ? 'D.4/a' : undefined,
-      theory: ctx.st.comp === 'eq' ? 'F = F_e + \\tilde F,\\quad F_e = k z_e,\\; z_e = z_r' : 'F = \\tilde F \\quad(\\text{Fig. 7-2 exactly})',
-      note: ctx.st.comp === 'eq' ? 'Feedforward outside the loop: the poles do not move, but the DC gain from z_r to z becomes 1 when k is known exactly.' : 'Without F_e the spring holds the mass short of z_r: D.9 asks how far.',
+      title: 'Spring compensation', page: 'p. 59–60 (equilibrium input)', answers: eq ? 'D.4/a' : undefined,
+      theory: eq ? 'F = F_e + \\tilde F,\\quad F_e = k z_e,\\; z_e = z_r' : 'F = \\tilde F \\quad(\\text{Fig. 7-2 exactly})',
+      note: eq ? 'Feedforward outside the loop: the poles do not move, but the DC gain from z_r to z becomes 1 when k is known exactly.' : 'Without F_e the spring holds the mass short of z_r: D.9 asks how far.',
     };
   }
 
@@ -232,7 +239,7 @@
         { title: ctx.S.mode === 'work' ? 'Pole placement (problem targets)' : 'Pole placement (your design)', page: 'p. 100',
           theory: '\\Delta^d_{cl}(s) = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad \\text{set } \\Delta_{cl}(s) = \\Delta^d_{cl}(s) \\text{ and match coefficients}',
           symbolic: 'k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
-          numbers: `\\Delta^d_{cl} = s^2 + ${tex(g.alpha1)}\\,s + ${tex(g.alpha0)} \\Rightarrow k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}`, spoiler: true },
+          numbers: `\\Delta^d_{cl} = s^2 + ${tex(g.alpha1)}\\,s + ${tex(g.alpha0)} \\Rightarrow k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}`, answers: 'D.7/c' },
         compCard(ctx),
       ];
     },
@@ -355,7 +362,7 @@
       const out = { markers: markers(ctx, { draggable: explore }), zetaRay: ctx.st.zeta < 1 ? ctx.st.zeta : null };
       if (explore) {
         out.wnCircle = 2.2 / ctx.st.tr;
-        const sb = satBound(ctx, Math.abs(ctx.S.sim.amplitude - ctx.S.sim.y0) || 1, ctx.st.zeta, ctx.st.comp);
+        const sb = satBound(ctx, Math.abs(ctx.S.sim.amplitude - ctx.S.sim.y0) || 1, ctx.st.zeta, lib.comp(ctx));
         if (isFinite(sb.wn)) out.wnMax = sb.wn;
       }
       return out;
@@ -366,12 +373,12 @@
       const st = ctx.st;
       const d = ans.spec(ctx.pModel, st.tr, st.zeta);
       const step = Math.abs(ctx.S.sim.amplitude - ctx.S.sim.y0) || 1;
-      const sb = satBound(ctx, step, st.zeta, st.comp);
+      const sb = satBound(ctx, step, st.zeta, lib.comp(ctx));
       return [
         plantCard(ctx), pdLoopCard(ctx),
         { title: 'Spec → desired characteristic polynomial', page: 'p. 110 · Eq. 8.2, p. 113 · Eq. 8.5',
           theory: '\\omega_n = \\frac{2.2}{t_r},\\quad \\Delta^d_{cl} = s^2 + 2\\zeta\\omega_n s + \\omega_n^2,\\quad p = -\\zeta\\omega_n \\pm j\\omega_n\\sqrt{1-\\zeta^2}',
-          numbers: `\\omega_n = ${tex(d.wn)},\\quad \\Delta^d_{cl} = s^2 + ${tex(d.alpha1)}\\,s + ${tex(d.alpha0)},\\quad p = ${texPole(d.poles[0], 4)},\\; ${texPole(d.poles[1], 4)}`, spoiler: true },
+          numbers: `\\omega_n = ${tex(d.wn)},\\quad \\Delta^d_{cl} = s^2 + ${tex(d.alpha1)}\\,s + ${tex(d.alpha0)},\\quad p = ${texPole(d.poles[0], 4)},\\; ${texPole(d.poles[1], 4)}`, answers: 'D.8/a' },
         { title: 'Gains from the spec', page: 'p. 100',
           theory: '\\text{set } \\Delta_{cl}(s) = \\Delta^d_{cl}(s) \\text{ and match coefficients}' },
         { title: 'Gains from the spec (this plant)', page: 'p. 100', answers: 'D.8/a',
@@ -379,7 +386,7 @@
           numbers: `k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)}` },
         { title: 'Saturation limits the rise time', page: 'p. 119 · Eq. 8.8, p. 121 · Fig. 8-13',
           theory: 'k_P \\le \\frac{\\tilde{u}_{max}}{e_{max}},\\quad \\omega_n \\le \\sqrt{a_0 + b_0\\frac{\\tilde{u}_{max}}{e_{max}}},\\quad t_r \\ge \\frac{2.2}{\\omega_{n,max}},\\quad \\tilde{u}_{max} = u_{max} - |u_e|',
-          numbers: `F_e = ${tex(sb.Fe)},\\; e_{max} = ${tex(step)}\\,\\text{m}\\Rightarrow k_{P,max} = ${tex(sb.kP)},\\; \\omega_{n,max} = ${tex(sb.wn)},\\; t_{r,min} = ${tex(sb.tr)}\\,\\text{s}`, spoiler: true,
+          numbers: `F_e = ${tex(sb.Fe)},\\; e_{max} = ${tex(step)}\\,\\text{m}\\Rightarrow k_{P,max} = ${tex(sb.kP)},\\; \\omega_{n,max} = ${tex(sb.wn)},\\; t_{r,min} = ${tex(sb.tr)}\\,\\text{s}`, answers: 'D.8/b',
           note: 'u_e is the equilibrium force the controller adds (it depends on the spring-compensation setting), which changes the D.8(b) answer.' },
         compCard(ctx),
       ];
@@ -427,11 +434,12 @@
           check: (v) => {
             const tr = lib.num(v.tr);
             if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-            const pk = peakForTr(ctx, tr, prob.zeta, prob.step, ctx.st.comp);
+            const comp = lib.comp(ctx);
+            const pk = peakForTr(ctx, tr, prob.zeta, prob.step, comp);
             const pct = (100 * pk).toFixed(1);
             if (pk > 1.0005) return { ok: false, msg: `Peak demand is ${pct}% of Fmax, so it saturates. Slow it down.` };
             if (pk < 0.95) return { ok: false, msg: `Peak demand is ${pct}% of Fmax. You can go faster.` };
-            return { ok: true, msg: `Peak demand is ${pct}% of Fmax (spring compensation: ${ctx.st.comp === 'eq' ? 'F = F_e + F̃' : 'none'}).` };
+            return { ok: true, msg: `Peak demand is ${pct}% of Fmax (spring compensation: ${comp === 'eq' ? 'F = F_e + F̃' : 'none'}).` };
           },
           actions: [{ label: 'Try it', run: (v) => {
             const tr = lib.num(v.tr);
@@ -487,7 +495,7 @@
       // With F = k z_r + F̃ (exact k) the spring feedforward cancels a0 in 1 − T, so the
       // tracking type goes up by one: PD gives e_ramp = (a1 + b0 kD)/(a0 + b0 kP), PID gives
       // e_parab = (a1 + b0 kD)/(b0 kI) per unit of R = 1/s^3.
-      const eq = st.comp === 'eq', t = ctx.model, g = ctx.gains;
+      const eq = lib.comp(ctx) === 'eq', t = ctx.model, g = ctx.gains;
       const c1 = t.a1 + t.b0 * g.kD;
       const e = eq ? (g.kI > 0 ? { step: 0, ramp: 0, parab: c1 / (t.b0 * g.kI), type: 2 } : { step: 0, ramp: c1 / (t.a0 + t.b0 * g.kP), parab: Infinity, type: 1 }) : a;
       const pred = st.input === 'step' ? A * e.step : st.input === 'ramp' ? A * e.ramp : 2 * A * e.parab;
@@ -547,7 +555,7 @@
           check: (v) => {
             if (g().kI > 0) return { ok: false, msg: 'Set kI = 0 first.' };
             const inf = (s) => /^\s*(inf|∞|infinity)\s*$/i.test(String(s));
-            if (!inf(v.ramp) || !inf(v.parab)) return { ok: false, msg: 'Ramp and parabola errors: think about type 0.' };
+            if (!inf(v.ramp) || !inf(v.parab)) return { ok: false, msg: 'Check the ramp and parabola errors against the system type.' };
             return lib.check({ type: v.type, step: v.step }, { type: 0, step: a().step }, { step: 'e_step' });
           },
           solution: () => [
@@ -585,7 +593,7 @@
   // ------------------------------------------------------------- D.P.6 --
   CH.p6 = {
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474, p. 380',
-    defaults(sys) { const pr = sys.problems.p6; return { comp: 'none', deriv: 'state', antiwindup: 'none', kP: 1, kD: 1, tr: pr.tr, zeta: pr.zeta, kIx: 0.1, kMaxFactor: 1 }; },
+    defaults(sys) { const pr = sys.problems.p6; return { comp: 'none', deriv: 'state', antiwindup: 'none', kP: 1, kD: 1, tr: pr.tr, zeta: pr.zeta, kIx: 0.1, kMaxFactor: 1, kIMax: 20 }; },
     simDefaults(sys) { return sys.problems.p6.sim; },
     // Work mode: your own PD gains (placeholders until you enter your D.8 gains); Explore: from t_r, ζ.
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kD: ctx.st.kD, kI: ctx.st.kIx } : designed(ctx); },
@@ -596,22 +604,28 @@
       const sec = section(parent, 'PD from D.8, then add k_I', 'p. 466');
       compControl(sec, ctx);
       if (ctx.S.mode === 'work') { gainSliders(sec, ctx, ['kP', 'kD']); lib.gainSlider(sec, ctx, 'kIx', 'k<sub>I</sub>', R.kI); } else specSliders(sec, ctx, { kI: true });
-      slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.1, max: 3, step: 0.05, sig: 2, ...bind(ctx, 'kMaxFactor') });
-      lib.note(sec, ctx.S.mode === 'work' ? 'Enter your D.8 gains (problem panel: Use my gains), then drag a closed-loop pole along the locus to set k_I.' : 'Drag a closed-loop pole along the locus to set k_I.');
+      // k_I,crit answers (b), so Work mode sets the locus range in absolute k_I.
+      if (ctx.S.mode === 'work') slider(sec, { label: 'locus k<sub>I,max</sub>', min: 0.5, max: 100, log: true, sig: 3, ...bind(ctx, 'kIMax') });
+      else slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.1, max: 3, step: 0.05, sig: 2, ...bind(ctx, 'kMaxFactor') });
+      lib.note(sec, ctx.S.mode === 'work' ? 'Enter your D.8 gains (problem panel: Use my gains), then set k_I with the slider or by dragging a closed-loop pole. The root locus appears once you solve (a).' : 'Drag a closed-loop pole along the locus to set k_I.');
       if (ctx.S.mode === 'explore') readout(sec, ctx);
     },
 
+    // Locus range: Explore scales k_I,crit; Work uses an absolute k_I (k_I,crit answers (b)).
+    kMax(ctx, ev) { return Math.max(ctx.S.mode === 'work' ? ctx.st.kIMax ?? 20 : ev.kCrit * ctx.st.kMaxFactor, 1e-3); },
+    // The poles of L(s) and the locus show the Evans form, which answers (a).
     splane(ctx) {
       const g = ctx.gains, ev = ans.evans(ctx.pModel, g);
-      const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, g.kI * 1.2, 1e-3);
-      const mk = L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
+      const locus = lib.shows(ctx, 'D.P.6/a');
+      const kMax = Math.max(this.kMax(ctx, ev), g.kI * 1.2);
+      const mk = locus ? L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` })) : [];
       L.roots(pidCharPoly(ctx.model, g)).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole at kI = ${fmt(g.kI, 3)}`, dragId: i }));
       const fitR = Math.max(...L.roots(ev.den).map((p) => Math.hypot(p.re, p.im))) * 1.6;
-      return { markers: mk, loci: T.rootLocus(ev.den, ev.num, kMax), fitR };
+      return { markers: mk, loci: locus ? T.rootLocus(ev.den, ev.num, kMax) : undefined, fitR };
     },
     onPoleDrag(ctx, id, re, im) {
       const ev = ans.evans(ctx.pModel, ctx.gains);
-      const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, 1e-3);
+      const kMax = this.kMax(ctx, ev);
       let best = ctx.st.kIx, bd = Infinity;
       for (let i = 0; i <= 400; i++) {
         const k = kMax * i / 400;
@@ -637,7 +651,7 @@
           numbers: `L(s) = \\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev.den)}},\\quad k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}` },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
           theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ is stable iff } c_2, c_1, c_0 > 0 \\text{ and } c_2 c_1 > c_0',
-          numbers: `k_{I,crit} = \\frac{c_2 c_1}{b_0} = ${tex(ev.kCrit)}`, spoiler: true },
+          numbers: `k_{I,crit} = \\frac{c_2 c_1}{b_0} = ${tex(ev.kCrit)}`, answers: 'D.P.6/b' },
         compCard(ctx),
       ];
     },
@@ -765,14 +779,14 @@
           theory: 'u_I[n] = u_I[n-1] + \\frac{T_s}{2}\\big(e[n] + e[n-1]\\big)' },
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat z}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat z}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(z[n] - z[n-1]\\big)',
-          numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad ${tex(beta)},\\quad ${tex(gamma)}`, spoiler: true },
+          numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad ${tex(beta)},\\quad ${tex(gamma)}`, answers: 'D.10/c2' },
         { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
           theory: '\\text{(1) integrate only when } |\\dot z| < \\bar v,\\quad \\text{(2) } u_I^+ = u_I + \\frac{1}{k_I}\\big(u_{sat} - u_{unsat}\\big)' },
         { title: 'Gain-selection guidance', page: 'p. 160 · §10.1.3',
           theory: '\\text{pick } k_P, k_D \\text{ (Ch. 8)},\\; \\text{then raise } k_I \\text{ from 0 until the steady-state error is gone}' },
-        { title: 'Gains from t_r, ζ (D.8)', page: 'p. 113 · Eq. 8.5, p. 160 · §10.1.3', answers: 'D.8/a',
+        { title: 'Gains from t_r, ζ (D.8)', page: 'p. 113 · Eq. 8.5, p. 160 · §10.1.3', answers: ['D.8/a', 'D.10/c1', 'D.10/c3'],
           theory: '\\omega_n = \\frac{2.2}{t_r},\\quad k_P = m\\omega_n^2 - k,\\quad k_D = 2m\\zeta\\omega_n - b',
-          numbers: `\\omega_n = ${tex(d.wn)},\\quad k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)},\\quad k_I = ${tex(d.kI)}`, spoiler: true },
+          numbers: `\\omega_n = ${tex(d.wn)},\\quad k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)},\\quad k_I = ${tex(d.kI)}` },
         compCard(ctx),
       ];
     },

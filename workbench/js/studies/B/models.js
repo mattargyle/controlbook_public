@@ -46,8 +46,9 @@
       x0: [0, x0[1] - thetaE, x0[2], x0[3]],
       plant: {
         f: (x, u) => A.map((row, i) => row.reduce((s, a, j) => s + a * x[j], 0) + B[i][0] * u),
-        // hide the model once it has left any physically meaningful range
-        h: (x) => [ze + x[0], Math.abs(x[1]) > Math.PI ? NaN : thetaE + x[1]],
+        // not hidden once it runs away: the trace doesn't join the autoscale, so it
+        // just leaves the plot (and "your" overlays can be compared with it)
+        h: (x) => [ze + x[0], thetaE + x[1]],
         uLimit: Infinity,
       },
       controller: { update: (r, x, y, t) => inputForce(ctx.st.inp, t) },
@@ -112,7 +113,35 @@
   // [Z̃/F̃, Θ̃/F̃] at s, from Eq. 6.17 (b0: with b = 0, as B.5(b) simplifies them).
   const tfs = (ctx, p, s, b0 = false) => tfAt(ctx.sys.stateSpace(b0 ? { ...p, b: 0 } : p), s);
 
+  // ------------------------------------------------- "Plot my answer" overlays --
+  // js/core/yours.js. Linear models are drawn next to the linear-model trace (same
+  // initial deviation, input F̃ and equilibrium offset), not the nonlinear pendulum.
+  const Y = WB.yours;
+  const fin = (ctx) => (t) => inputForce(ctx.st.inp, t);
+  const finArr = (ctx) => Array.from(ctx.app.result().t, fin(ctx));
+  // A linear model that runs away joins the autoscale only below these |z| [m], |θ| [°].
+  const LIN_LIM = [5, 200];
+  const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+  const isVec = (v, n) => Array.isArray(v) && v.length === n && v.every(isNum);
+  // Student's accelerations as a 4-state f for WB.py.simulate.
+  const accelF = (fn, call) => `\n\ndef _wb_f(state, F):\n    _a = np.asarray(${call}, dtype=float).flatten()\n    if _a.size != 2:\n        raise ValueError(f'${fn} returned {_a.size} values; expected 2')\n    return np.array([[state[2][0]], [state[3][0]], [_a[0]], [_a[1]]])\n`;
+  // Y.fitTf on a helper function, with the student's name in the messages.
+  async function fitMine(ctx, code, fn, name, opts) {
+    const r = await Y.fitTf(ctx, code, fn, opts);
+    return r.ok === false && !r.detail ? { ...r, msg: r.msg.split(fn).join(name) } : r;
+  }
+
   // ------------------------------------------------------------- Chapter 2 --
+  // B.2(a): the student's kinetic(z, θ, ż, θ̇) along the prescribed motion.
+  async function runKinetic(ctx, code) {
+    const res = ctx.app.result();
+    const out = await WB.py.evaluate(code, [{ params: ctx.pModel, calls: res.x.map((x) => ({ name: 'kinetic', args: x })) }]);
+    if (out.error) return pyError(out);
+    const K = out.rows[0].calls;
+    if (!K.every(isNum)) return { ok: false, msg: 'kinetic should return one number.' };
+    return { n: K.length, K };
+  }
+
   // Prescribed motion as in hw02_pendulumSim.py; energy is computed, not simulated.
   S.chapters.ch2 = Object.assign({}, common, {
     id: 'ch2', num: 2, tab: 'Ch 2', title: 'Kinetic energy', pages: 'pp. 19–40',
@@ -147,17 +176,24 @@
       slider(sec, { label: 'z frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'fz') });
       slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 90, step: 1, sig: 3, ...bind(ctx, 'Ath') });
       slider(sec, { label: 'θ frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'fth') });
-      sec.append(el('p', { class: 'muted small', text: 'z(t) = A_z sin(2πf_z t) and θ(t) = A_θ sin(2πf_θ t). No dynamics here: the motion is imposed, as in hw02_pendulumSim.py (which uses a square wave for θ). The plot below splits K into the cart, the rod\'s translation, and the rod\'s rotation.' }));
+      const plot = ctx.S.mode === 'explore' ? 'The plot below splits K into the cart, the rod\'s translation, and the rod\'s rotation.' : 'Once (a) is solved, or you click Plot my K, the plot below shows the kinetic energy along that motion.';
+      sec.append(el('p', { class: 'muted small', text: `z(t) = A_z sin(2πf_z t) and θ(t) = A_θ sin(2πf_θ t). No dynamics here: the motion is imposed, as in hw02_pendulumSim.py (which uses a square wave for θ). ${plot}` }));
     },
 
+    // K(t) and its split answer B.2(a), so in Work mode the plot is empty until (a) is
+    // solved, apart from the student's own K once they plot it.
     extraPlot(ctx, res) {
+      const show = showsAnswer(ctx, 'B.2/a'), y = Y.data(ctx, 'ch2.a');
       return {
         opts: { title: 'kinetic energy', yLabel: 'K [J]', unit: 'J' },
         data: { series: [
-          { label: 'cart', y: Array.from(res.extras.Kc), color: '--series-2', width: 1.5 },
-          { label: 'rod translation ½m₁‖v₁‖²', y: Array.from(res.extras.Kt), color: '--series-3', width: 1.5 },
-          { label: 'rod rotation ½ωᵀJω', y: Array.from(res.extras.Kr), color: '--text-muted', width: 1.5 },
-          { label: 'total K', y: Array.from(res.extras.K), color: '--series-1' },
+          ...(show ? [
+            { label: 'cart', y: Array.from(res.extras.Kc), color: '--series-2', width: 1.5 },
+            { label: 'rod translation ½m₁‖v₁‖²', y: Array.from(res.extras.Kt), color: '--series-3', width: 1.5 },
+            { label: 'rod rotation ½ωᵀJω', y: Array.from(res.extras.Kr), color: '--text-muted', width: 1.5 },
+            { label: 'total K', y: Array.from(res.extras.K), color: '--series-1' },
+          ] : []),
+          ...(y ? [Y.series('your K (Python)', y.K)] : []),
         ] },
       };
     },
@@ -183,9 +219,11 @@
         {
           id: 'a', title: '(a) Kinetic energy',
           html: 'Using the configuration variables z and θ, write K as a function of z, θ, ż and θ̇.',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'kinetic', args: ['z', 'theta', 'zdot', 'thetadot'], truth: (p, a) => ctx.sys.kinetic([a.z, a.theta, a.zdot, a.thetadot], p) }],
-          }, 'def kinetic(z, theta, zdot, thetadot):\n    # kinetic energy K of the system\n    K = ...\n    return K\n'),
+          }, 'def kinetic(z, theta, zdot, thetadot):\n    # kinetic energy K of the system\n    K = ...\n    return K\n'), {
+            actions: [{ label: 'Plot my K', run: (code) => Y.plot(ctx, 'ch2.a', code, runKinetic, () => 'Your K(t) along the motion set on the right is the dotted trace on the kinetic-energy plot.') }],
+          }),
           solution: () => [
             { tex: 'K = \\tfrac12 m_1\\Big[(\\dot z + \\tfrac{\\ell}{2}\\dot\\theta\\cos\\theta)^2 + (\\tfrac{\\ell}{2}\\dot\\theta\\sin\\theta)^2\\Big] + \\tfrac12\\frac{m_1\\ell^2}{12}\\dot\\theta^2 + \\tfrac12 m_2\\dot z^2' },
             { tex: '= \\tfrac12(m_1 + m_2)\\dot z^2 + \\tfrac12 m_1\\frac{\\ell^2}{3}\\dot\\theta^2 + m_1\\frac{\\ell}{2}\\dot z\\dot\\theta\\cos\\theta' },
@@ -218,6 +256,48 @@
     return { ok, msg: ok ? msg : `${msg} They should overlap.` };
   }
 
+  // B.3(a): E(t) − E(0) along the simulated motion, with the student's P (and K as in B.2).
+  async function runPotential(ctx, code) {
+    const res = ctx.app.result(), p = ctx.pModel;
+    const out = await WB.py.evaluate(code, [{ params: p, calls: res.x.map((x) => ({ name: 'potential', args: [x[0], x[1]] })) }]);
+    if (out.error) return pyError(out);
+    const P = out.rows[0].calls;
+    if (!P.every(isNum)) return { ok: false, msg: 'potential should return one number.' };
+    const E = res.x.map((x, k) => ctx.sys.kinetic(x, p) + P[k]), E0 = E[0];
+    return { n: E.length, E: E.map((v) => v - E0) };
+  }
+
+  // B.3(c): work done by the student's τ and −Bq̇, ∫ q̇ᵀ(τ − Bq̇) dt, integrated like
+  // the workbench's trace (trapezoid rule, force held over each step).
+  async function runForces(ctx, code) {
+    const res = ctx.app.result(), n = res.t.length, Ts = ctx.S.sim.Ts;
+    const calls = [];
+    for (let k = 1; k < n; k++) {
+      for (const x of [res.x[k - 1], res.x[k]]) calls.push(...['tau', 'damping'].map((name) => ({ name, args: [...x, res.uApplied[k - 1]] })));
+    }
+    const out = await WB.py.evaluate(code, [{ params: ctx.pModel, calls }]);
+    if (out.error) return pyError(out);
+    const v = out.rows[0].calls.map((c) => [c].flat(Infinity));
+    const bad = v.findIndex((c) => !isVec(c, 2));
+    if (bad >= 0) return { ok: false, msg: `${bad % 2 ? 'damping' : 'tau'} should return two numbers, along (z, θ).` };
+    const pw = (x, t, d) => x[2] * (t[0] + d[0]) + x[3] * (t[1] + d[1]);
+    const W = new Float64Array(n);
+    for (let k = 1; k < n; k++) {
+      const i = 4 * (k - 1);
+      W[k] = W[k - 1] + 0.5 * Ts * (pw(res.x[k - 1], v[i], v[i + 1]) + pw(res.x[k], v[i + 2], v[i + 3]));
+    }
+    return { n, W };
+  }
+
+  // B.3(d): the student's accelerations simulated like "Simulate my f" (same input,
+  // initial state and true-plant parameters).
+  async function runAccel(ctx, code) {
+    const res = ctx.app.result();
+    const out = await WB.py.simulate(code + accelF('accel', 'accel(*state[:, 0].tolist(), F)'), { fn: '_wb_f', params: ctx.pTrue, x0: res.x[0], u: Array.from(res.uApplied), Ts: ctx.S.sim.Ts });
+    if (out.error) return pyError(out);
+    return { n: out.x.length, z: out.x.map((x) => x[0]), theta: out.x.map((x) => x[1]) };
+  }
+
   S.chapters.ch3 = Object.assign({}, common, {
     id: 'ch3', num: 3, tab: 'Ch 3', title: 'Euler-Lagrange equations', pages: 'pp. 41–56',
     linear: false,
@@ -232,11 +312,12 @@
         options: [{ value: 'energy', label: 'energy balance' }, { value: 'zd', label: 'ż' }, { value: 'thd', label: 'θ̇' }],
         ...bind(ctx, 'extra'),
       });
-      sec.append(el('p', { class: 'muted small', text: 'hw03_pendulumSim.py pushes the cart with F = sin(2πt) N. Nothing holds the pendulum up, so it falls and swings under the track. The energy plot checks the EOM: E(t) − E(0) must equal the work done by the force and the damping.' }));
+      sec.append(el('p', { class: 'muted small', text: `hw03_pendulumSim.py pushes the cart with F = sin(2πt) N. Nothing holds the pendulum up, so it falls and swings under the track. The energy plot checks the EOM: E(t) − E(0) must equal the net work done by the nonconservative forces.${ctx.S.mode === 'explore' ? '' : ' In Work mode it shows E(t) − E(0) once (a) is solved and the work once (c) is solved, and is empty until then; Plot my P and Plot my forces draw yours.'}` }));
     },
 
     extraPlot(ctx, res) {
       if (ctx.st.extra !== 'energy') return stateExtra(res, ctx.st.extra);
+      const yP = Y.data(ctx, 'ch3.a'), yF = Y.data(ctx, 'ch3.c');
       const { sys, pModel: p } = ctx;
       const n = res.t.length, Ts = ctx.S.sim.Ts;
       const E = new Float64Array(n), W = new Float64Array(n);
@@ -249,20 +330,29 @@
         if (k > 0) w += 0.5 * Ts * (pw(res.x[k - 1], res.uApplied[k - 1]) + pw(x, res.uApplied[k - 1]));
         W[k] = w;
       }
+      // E(t) − E(0) uses the workbench's P (B.3a) and the work curve its forces and
+      // damping (B.3c): Work mode shows each once its part is solved, the student's
+      // own overlays whenever plotted, and nothing until then.
+      const showE = showsAnswer(ctx, 'B.3/a'), showW = showsAnswer(ctx, 'B.3/c');
       return {
         opts: { title: 'energy balance', yLabel: 'energy [J]', unit: 'J' },
         data: { series: [
-          { label: 'work done by F and damping', y: W, color: '--series-2', dash: [5, 4], width: 2 },
-          { label: 'E(t) − E(0) = ΔK + ΔP', y: E, color: '--series-1' },
+          ...(showW ? [{ label: 'work done by F and damping', y: W, color: '--series-2', dash: [5, 4], width: 2 }] : []),
+          ...(showE ? [{ label: 'E(t) − E(0) = ΔK + ΔP', y: E, color: '--series-1' }] : []),
+          ...(yP ? [Y.series('E(t) − E(0) with your P', yP.E)] : []),
+          ...(yF ? [{ ...Y.series('work done by your τ and damping', yF.W), dash: [8, 3] }] : []),
         ] },
       };
     },
 
     // B.3(e): the student's f, simulated with the same input as the pendulum above.
+    // B.3(d): the student's accelerations, simulated the same way.
     outputSeries(ctx, res, sc, oi) {
-      const m = mine.ch3;
-      if (!m || m.sig !== simSig(ctx, res)) return [];
-      return [{ label: 'your f (Python)', y: sc(oi === 0 ? m.z : m.theta), color: '--series-2', dash: [5, 4], width: 2 }];
+      const m = mine.ch3, out = [];
+      if (m && m.sig === simSig(ctx, res)) out.push({ label: 'your f (Python)', y: sc(oi === 0 ? m.z : m.theta), color: '--series-2', dash: [5, 4], width: 2 });
+      const y = Y.data(ctx, 'ch3.d');
+      if (y) out.push(Y.series('your accel', sc(oi === 0 ? y.z : y.theta), { lim: oi === 0 ? 50 : 1e4 }));
+      return out;
     },
 
     math(ctx) {
@@ -299,9 +389,11 @@
         {
           id: 'a', title: '(a) Potential energy',
           html: 'Write P as a function of z and θ. Any constant P<sub>0</sub> is accepted.',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'potential', args: ['z', 'theta'], compare: 'offset', truth: (p, a) => ctx.sys.potential([a.z, a.theta, 0, 0], p) }],
-          }, 'def potential(z, theta):\n    # potential energy P of the system\n    return ...\n'),
+          }, 'def potential(z, theta):\n    # potential energy P of the system\n    return ...\n'), {
+            actions: [{ label: 'Plot my P', run: (code) => { ctx.st.extra = 'energy'; return Y.plot(ctx, 'ch3.a', code, runPotential, () => 'Dotted on the energy plot: E(t) − E(0) of the simulated pendulum with your P (and K from B.2). The energy balance says it should follow the work done by F and the damping.'); } }],
+          }),
           solution: () => [
             { tex: 'P = P_0 + m_1 g\\tfrac{\\ell}{2}(\\cos\\theta - 1) \\quad(\\text{height of the rod center: } \\tfrac{\\ell}{2}\\cos\\theta)' },
             { code: 'def potential(z, theta):\n    return P.m1 * P.g * P.ell / 2 * (np.cos(theta) - 1)' },
@@ -325,7 +417,7 @@
         {
           id: 'c', title: '(c) Generalized forces and damping forces',
           html: 'Return each as a 2-vector along your generalized coordinates, in the order of (b). Write the damping term the way the book does, as the force −Bq̇ (p. 43).',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [
               { fn: 'tau', args: ['z', 'theta', 'zdot', 'thetadot', 'F'], truth: (p, a) => [a.F, 0] },
               { fn: 'damping', args: ['z', 'theta', 'zdot', 'thetadot', 'F'], truth: (p, a) => [-p.b * a.zdot, 0] },
@@ -334,7 +426,9 @@
               const g = ff(it, f), w = [].concat(f.e.want).map(Number);
               return it.fn === 'damping' && g.length === 2 && Math.abs(g[0] + w[0]) < 1e-6 * Math.max(1, Math.abs(w[0])) ? 'Check the sign: the book writes the damping force as −Bq̇.' : '';
             },
-          }, 'def tau(z, theta, zdot, thetadot, F):\n    # generalized forces along q\n    return np.array([..., ...])\n\ndef damping(z, theta, zdot, thetadot, F):\n    # damping forces, -B @ qdot\n    return np.array([..., ...])\n'),
+          }, 'def tau(z, theta, zdot, thetadot, F):\n    # generalized forces along q\n    return np.array([..., ...])\n\ndef damping(z, theta, zdot, thetadot, F):\n    # damping forces, -B @ qdot\n    return np.array([..., ...])\n'), {
+            actions: [{ label: 'Plot my forces', run: (code) => { ctx.st.extra = 'energy'; return Y.plot(ctx, 'ch3.c', code, runForces, () => 'Dotted (long dashes) on the energy plot: the work your τ and damping forces do on the simulated pendulum, ∫ q̇ᵀ(τ − Bq̇) dt. The energy balance says it should follow E(t) − E(0).'); } }],
+          }),
           solution: () => [
             { tex: '\\tau = (F, 0)^\\top,\\quad -B\\dot q = (-b\\dot z, 0)^\\top' },
             { code: 'def tau(z, theta, zdot, thetadot, F):\n    return np.array([F, 0])\n\ndef damping(z, theta, zdot, thetadot, F):\n    return np.array([-P.b * zdot, 0])' },
@@ -344,7 +438,7 @@
         {
           id: 'd', title: '(d) Equations of motion',
           html: 'Apply the Euler-Lagrange equations, then solve for both accelerations.',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             cases: [
               { label: 'with ż = θ̇ = 0 and F = 0 (only gravity acts)', fix: { zdot: 0, thetadot: 0, F: 0 } },
               { label: 'with θ = 0, ż = θ̇ = 0 (only the force acts)', fix: { theta: 0, zdot: 0, thetadot: 0 } },
@@ -353,7 +447,9 @@
               { label: '' },
             ],
             items: [{ fn: 'accel', args: ['z', 'theta', 'zdot', 'thetadot', 'F'], truth: (p, a) => accelOf(ctx, p, a) }],
-          }, 'def accel(z, theta, zdot, thetadot, F):\n    # from the equations of motion\n    zddot = ...\n    thetaddot = ...\n    return np.array([zddot, thetaddot])\n'),
+          }, 'def accel(z, theta, zdot, thetadot, F):\n    # from the equations of motion\n    zddot = ...\n    thetaddot = ...\n    return np.array([zddot, thetaddot])\n'), {
+            actions: [{ label: 'Simulate my accel', run: (code) => Y.plot(ctx, 'ch3.d', code, runAccel, () => 'Dotted on the z and θ plots: your equations of motion simulated with RK4 from the same initial state and force as the pendulum above.') }],
+          }),
           solution: () => [
             { tex: '\\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} = \\begin{pmatrix}(m_1 + m_2)\\ddot z + m_1\\frac{\\ell}{2}\\ddot\\theta\\cos\\theta - m_1\\frac{\\ell}{2}\\dot\\theta^2\\sin\\theta\\\\ m_1\\frac{\\ell^2}{3}\\ddot\\theta + m_1\\frac{\\ell}{2}\\ddot z\\cos\\theta - m_1\\frac{\\ell}{2}\\dot z\\dot\\theta\\sin\\theta\\end{pmatrix},\\quad \\frac{\\partial L}{\\partial q} = \\begin{pmatrix}0\\\\ -m_1\\frac{\\ell}{2}\\dot z\\dot\\theta\\sin\\theta + m_1 g\\frac{\\ell}{2}\\sin\\theta\\end{pmatrix}' },
             { tex: '\\begin{pmatrix} m_1 + m_2 & m_1\\frac{\\ell}{2}\\cos\\theta\\\\ m_1\\frac{\\ell}{2}\\cos\\theta & m_1\\frac{\\ell^2}{3}\\end{pmatrix}\\begin{pmatrix}\\ddot z\\\\ \\ddot\\theta\\end{pmatrix} = \\begin{pmatrix} m_1\\frac{\\ell}{2}\\dot\\theta^2\\sin\\theta + F - b\\dot z\\\\ m_1 g\\frac{\\ell}{2}\\sin\\theta\\end{pmatrix}' },
@@ -381,43 +477,100 @@
   // ------------------------------------------------------------- Chapter 4 --
   const EQ_CASES = [0, 1, -1, 2].map((k) => ({ label: `with θₑ = ${k === 0 ? '0' : k === 1 ? 'π' : k === -1 ? '−π' : '2π'}`, fix: { k, th_e: k * Math.PI } }));
 
+  // Operating point θₑ [°]. The hanging equilibrium answers B.4(a), so Work mode
+  // stays upright (the study's premise, θ = 0) until (a) is solved.
+  const thetaE = (ctx) => (showsAnswer(ctx, 'B.4/a') ? ctx.st.thetaE : 0);
+  // Initial state of the B.4 runs: z(0) from the left panel, θ = θₑ + δθ(0).
+  const ch4X0 = (ctx) => [ctx.S.sim.y0, (thetaE(ctx) + ctx.st.dth0) * DEG, 0, 0];
+
+  // B.4(a): the pendulum released at rest at the student's θₑ(k) (k for the operating
+  // point on the right) and z(0), with the student's F_e held on the cart.
+  const EQ_PY = '\n\ndef _wb_eq(k, z_e):\n    th = theta_e(k)\n    return [th, F_e(z_e, th)]\n';
+  async function runEquilibrium(ctx, code) {
+    const res = ctx.app.result(), p = ctx.pTrue, k = Math.round(thetaE(ctx) / 180), z0 = ctx.S.sim.y0;
+    const out = await WB.py.evaluate(code + EQ_PY, [{ params: ctx.pModel, calls: [{ name: '_wb_eq', args: [k, z0] }] }]);
+    if (out.error) return pyError(out);
+    const [th, Fe] = out.rows[0].calls[0];
+    if (!isNum(th)) return { ok: false, msg: 'theta_e should return one number.' };
+    if (!isNum(Fe)) return { ok: false, msg: 'F_e should return one number.' };
+    const F = M.saturate(Fe, ctx.sys.uLimit(p)), Ts = ctx.S.sim.Ts;
+    let x = [z0, th, 0, 0];
+    const theta = [];
+    for (let i = 0; i < res.t.length; i++) {
+      theta.push(x[1]);
+      x = M.rk4Step((xx, u) => ctx.sys.f(xx, u, p), x, F, Ts);
+    }
+    return { n: theta.length, theta, th, Fe, k };
+  }
+
+  // B.4(b): the student's accel_lin about the operating point, simulated from the same
+  // δθ(0) and F̃ as the Jacobian-linearized model; A, B for the eigenvalues are read off
+  // accel_lin at unit deviations (exact when it is linear).
+  async function runLinear(ctx, code) {
+    const thE = thetaE(ctx) * DEG, x0 = ch4X0(ctx);
+    const sim = await WB.py.simulate(code + accelF('accel_lin', `accel_lin(state.copy(), F, ${thE})`), { fn: '_wb_f', params: ctx.pModel, x0: [0, x0[1] - thE, 0, 0], u: finArr(ctx), Ts: ctx.S.sim.Ts });
+    if (sim.error) return pyError(sim);
+    const unit = [-1, 0, 1, 2, 3].map((j) => ({ name: 'accel_lin', args: [{ col: [0, 1, 2, 3].map((i) => (i === j ? 1 : 0)) }, 0, thE] }));
+    const out = await WB.py.evaluate(code, [{ params: ctx.pModel, calls: [...unit, { name: 'accel_lin', args: [{ col: [0, 0, 0, 0] }, 1, thE] }] }]);
+    if (out.error) return pyError(out);
+    const a = out.rows[0].calls.map((c) => [c].flat(Infinity));
+    if (!a.every((c) => isVec(c, 2))) return { ok: false, msg: 'accel_lin should return two numbers, (z̃̈, θ̃̈).' };
+    const d = (c) => [c[0] - a[0][0], c[1] - a[0][1]];
+    const cols = [1, 2, 3, 4].map((j) => d(a[j])), b = d(a[5]);
+    const A = [[0, 0, 1, 0], [0, 0, 0, 1], cols.map((c) => c[0]), cols.map((c) => c[1])];
+    return { n: sim.x.length, x: sim.x, A, B: [[0], [0], [b[0]], [b[1]]], z0: x0[0], thE };
+  }
+
   S.chapters.ch4 = Object.assign({}, common, {
     id: 'ch4', num: 4, tab: 'Ch 4', title: 'Equilibria & linearization', pages: 'pp. 59–68',
     defaults() { return { thetaE: 0, dth0: 2, inp: { shape: 'zero', amp: 0.2, freq: 0.5, width: 0.2 } }; },
     simDefaults(sys) { return sys.problems.ch4.sim; },
     linearLabel: 'Jacobian-linearized model',
 
-    x0(ctx) { return [ctx.S.sim.y0, (ctx.st.thetaE + ctx.st.dth0) * DEG, 0, 0]; },
+    x0: ch4X0,
     simulate(ctx, c, plant) {
       return WB.sim.simulate({ ...c, x0: this.x0(ctx), plant, controller: this.controller(ctx) });
     },
-    linearSim(ctx, c) { return linearRun(ctx, c, { thetaE: ctx.st.thetaE * DEG, x0: this.x0(ctx) }); },
+    linearSim(ctx, c) { return linearRun(ctx, c, { thetaE: thetaE(ctx) * DEG, x0: this.x0(ctx) }); },
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Operating point', 'p. 65');
-      segmented(sec, {
+      const op = segmented(sec, {
         label: 'Operating point θ<sub>e</sub>',
         options: [{ value: 0, label: 'upright (0°)' }, { value: 180, label: 'hanging (180°)' }],
         ...bind(ctx, 'thetaE'),
       });
+      const up = el('p', { class: 'muted small', text: 'Operating point: upright, θ = 0 (the pendulum this study balances). Once (a) is solved you can also pick the other equilibria.' });
+      sec.append(up);
+      WB.ui.addRefresher(() => { const all = showsAnswer(ctx, 'B.4/a'); op.row.hidden = !all; up.hidden = all; });
       slider(sec, { label: 'δθ(0)', unit: '°', min: -30, max: 30, step: 0.5, sig: 3, hint: 'initial offset from θₑ (z(0) is in the left panel)', ...bind(ctx, 'dth0') });
       const inp = section(parent, 'Input F̃(t) = F − F_e', 'p. 66');
       inputControls(inp, ctx, { title: 'Input force F̃(t)', ampMax: 2 });
-      inp.append(el('p', { class: 'muted small', text: 'The dashed trace is the linearized model with the same input. Upright, a small tilt grows: the two agree for a fraction of a second, then part. Hanging, both oscillate and agree for small angles.' }));
+      const note = el('p', { class: 'muted small' });
+      inp.append(note);
+      WB.ui.addRefresher(() => { note.textContent = `The dashed trace is the linearized model with the same input. Upright, a small tilt grows: the two agree for a fraction of a second, then part.${showsAnswer(ctx, 'B.4/a') ? ' Hanging, both oscillate and agree for small angles.' : ''}`; });
     },
 
     outputSeries(ctx, res, sc, oi) {
-      return oi === 1 ? [{ label: 'θₑ', y: Array.from(res.t, () => ctx.st.thetaE), color: '--ref', dash: [6, 4], width: 1.5 }] : [];
+      const out = oi === 1 ? [{ label: 'θₑ', y: Array.from(res.t, () => thetaE(ctx)), color: '--ref', dash: [6, 4], width: 1.5 }] : [];
+      const e = Y.data(ctx, 'ch4.a'), y = Y.data(ctx, 'ch4.b');
+      if (e && oi === 1) out.push(Y.series('your equilibrium', sc(e.theta), { lim: 1e3 }));
+      if (y) out.push(Y.series('your accel_lin', oi === 0 ? y.x.map((x) => y.z0 + x[0]) : sc(y.x.map((x) => y.thE + x[1])), { lim: LIN_LIM[oi] }));
+      return out;
     },
 
     splane(ctx) {
-      if (!showsAnswer(ctx, 'B.4/b')) return { markers: [] };
-      const { A } = ctx.sys.linearize(ctx.pModel, ctx.st.thetaE * DEG);
-      return { markers: L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `eigenvalue of A ${i + 1}` })) };
+      const sp = { markers: [] };
+      if (showsAnswer(ctx, 'B.4/b')) {
+        const { A } = ctx.sys.linearize(ctx.pModel, thetaE(ctx) * DEG);
+        sp.markers = L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `eigenvalue of A ${i + 1}` }));
+      }
+      const y = Y.data(ctx, 'ch4.b');
+      return y ? Y.withMarkers(sp, Y.eig(y.A, 'eigenvalue of your accel_lin model'), { obs: 'your accel_lin' }) : sp;
     },
 
     math(ctx) {
-      const p = ctx.pModel, lin = ctx.sys.linearize(p, ctx.st.thetaE * DEG);
+      const p = ctx.pModel, lin = ctx.sys.linearize(p, thetaE(ctx) * DEG);
       return [
         { title: 'Equilibria', page: 'p. 60',
           theory: '\\dot x = f(x, u):\\quad (x_e, u_e) \\text{ is an equilibrium when } f(x_e, u_e) = 0',
@@ -434,7 +587,7 @@
           theory: '\\ddot\\theta\\cos\\theta \\approx \\ddot{\\tilde\\theta},\\quad \\dot\\theta^2\\sin\\theta \\approx 0,\\quad \\ddot z\\cos\\theta \\approx \\ddot{\\tilde z},\\quad \\sin\\theta \\approx \\tilde\\theta' },
         { title: 'Linearized equations of the pendulum', page: 'p. 66 · Eq. 4.12', answers: 'B.4/b',
           theory: '\\begin{pmatrix} m_1 + m_2 & m_1\\frac{\\ell}{2}\\cos\\theta_e\\\\ m_1\\frac{\\ell}{2}\\cos\\theta_e & m_1\\frac{\\ell^2}{3}\\end{pmatrix}\\begin{pmatrix}\\ddot{\\tilde z}\\\\ \\ddot{\\tilde\\theta}\\end{pmatrix} = \\begin{pmatrix} -b\\dot{\\tilde z} + \\tilde F\\\\ m_1 g\\frac{\\ell}{2}\\cos\\theta_e\\,\\tilde\\theta\\end{pmatrix}',
-          numbers: `A(\\theta_e = ${ctx.st.thetaE}^\\circ) = ${texMat(lin.A)},\\quad \\text{eig}(A) = ${L.eig(lin.A).map((q) => texPole(q)).join(',\\;')}`,
+          numbers: `A(\\theta_e = ${thetaE(ctx)}^\\circ) = ${texMat(lin.A)},\\quad \\text{eig}(A) = ${L.eig(lin.A).map((q) => texPole(q)).join(',\\;')}`,
           note: 'Eq. 4.12 is the k even case (cos θₑ = 1). For odd k, cos θₑ = −1 flips the sign of the coupling and gravity terms: the eigenvalues move from ±4.2 to ±4.2j (with ℓ = 1 m).' },
       ];
     },
@@ -448,14 +601,16 @@
         {
           id: 'a', title: '(a) Equilibria',
           html: 'Which (z<sub>e</sub>, θ<sub>e</sub>, F<sub>e</sub>) are equilibria? Return the equilibrium angles as θ<sub>e</sub>(k) for integer k (θ<sub>e</sub>(0) = 0, then counting up in the +θ direction), and the force that holds the system at rest there. The check calls F_e at equilibrium angles and random z<sub>e</sub>.',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             cases: [-1, 0, 1, 2, 3].map((k) => ({ label: `with k = ${k}`, fix: { k, th_e: k * Math.PI } })),
             perCase: 2,
             items: [
               { fn: 'theta_e', args: ['k'], truth: (p, a) => a.k * Math.PI },
               { fn: 'F_e', args: ['z_e', 'th_e'], truth: (p, a) => Fe(p, a) },
             ],
-          }, 'def theta_e(k):\n    # k-th equilibrium angle (k integer)\n    return ...\n\ndef F_e(z_e, theta_e):\n    # force that holds the equilibrium\n    return ...\n'),
+          }, 'def theta_e(k):\n    # k-th equilibrium angle (k integer)\n    return ...\n\ndef F_e(z_e, theta_e):\n    # force that holds the equilibrium\n    return ...\n'), {
+            actions: [{ label: 'Plot my equilibrium', run: (code) => Y.plot(ctx, 'ch4.a', code, runEquilibrium, (d) => `Your θₑ(${d.k}) = ${fmt(d.th / DEG, 4)}° and F_e = ${fmt(d.Fe, 4)} N (k from the operating point on the right). Dotted on the θ plot: the pendulum released at rest there, with your F_e held on the cart.`) }],
+          }),
           solution: () => [
             { tex: '\\dot z = \\ddot z = \\dot\\theta = \\ddot\\theta = 0 \\text{ in Eq. 4.9}:\\quad F_e = 0,\\quad m_1 g\\tfrac{\\ell}{2}\\sin\\theta_e = 0 \\Rightarrow \\theta_e = k\\pi,\\quad z_e \\text{ arbitrary}' },
             { code: 'def theta_e(k):\n    return k * np.pi\n\ndef F_e(z_e, theta_e):\n    return 0.0' },
@@ -465,13 +620,15 @@
         {
           id: 'b', title: '(b) Jacobian linearization about the equilibria',
           html: 'With x̃ = (z̃, θ̃, ż̃, θ̇̃)ᵀ and F̃ = F − F<sub>e</sub>, return the accelerations (z̃̈, θ̃̈) of the model linearized about the equilibrium at θ<sub>e</sub>. The check calls it at θ<sub>e</sub> = 0, π, −π and 2π.',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             cases: EQ_CASES,
             items: [{ fn: 'accel_lin', args: ['x_t', 'F_t', 'th_e'], truth: (p, a) => {
               const { A, B } = ctx.sys.linearize(p, a.th_e), x = [a.zt, a.tht, a.zdt, a.thdt];
               return [2, 3].map((i) => A[i].reduce((s, v, j) => s + v * x[j], 0) + B[i][0] * a.F_t);
             } }],
-          }, 'def accel_lin(x_t, F_t, theta_e):\n    # x_t: 4x1 column of deviations\n    zt, tht, zdt, thdt = x_t.flatten()\n    zddot_t = ...\n    thetaddot_t = ...\n    return np.array([zddot_t, thetaddot_t])\n'),
+          }, 'def accel_lin(x_t, F_t, theta_e):\n    # x_t: 4x1 column of deviations\n    zt, tht, zdt, thdt = x_t.flatten()\n    zddot_t = ...\n    thetaddot_t = ...\n    return np.array([zddot_t, thetaddot_t])\n'), {
+            actions: [{ label: 'Plot my linear model', run: (code) => Y.plot(ctx, 'ch4.b', code, runLinear, () => 'Your linear model about the operating point, from the same δθ(0) and F̃, is dotted on the z and θ plots; its eigenvalues are the × markers on the s-plane. They follow θₑ and the input.') }],
+          }),
           solution: () => [
             { tex: '\\ddot\\theta\\cos\\theta \\approx \\cos\\theta_e\\,\\ddot{\\tilde\\theta},\\quad \\dot\\theta^2\\sin\\theta \\approx 0,\\quad \\ddot z\\cos\\theta \\approx \\cos\\theta_e\\,\\ddot{\\tilde z},\\quad \\sin\\theta \\approx \\cos\\theta_e\\,\\tilde\\theta \\quad(\\sin\\theta_e = 0)' },
             { tex: '\\begin{pmatrix} m_1 + m_2 & m_1\\frac{\\ell}{2}\\cos\\theta_e\\\\ m_1\\frac{\\ell}{2}\\cos\\theta_e & m_1\\frac{\\ell^2}{3}\\end{pmatrix}\\begin{pmatrix}\\ddot{\\tilde z}\\\\ \\ddot{\\tilde\\theta}\\end{pmatrix} = \\begin{pmatrix} -b\\dot{\\tilde z} + \\tilde F\\\\ m_1 g\\frac{\\ell}{2}\\cos\\theta_e\\,\\tilde\\theta\\end{pmatrix}' },
@@ -497,18 +654,53 @@
     }
     return { markers: mk };
   }
+  // Initial state of the B.5/B.6 runs (left panel); the linear models start from its
+  // deviation about (z(0), θₑ = 0).
+  const olX0 = (ctx) => [ctx.S.sim.y0, (ctx.S.sim.init.theta0 || 0) * DEG, 0, 0];
   const olSim = (lin) => ({
     simulate(ctx, c, plant) { return WB.sim.simulate({ ...c, plant, controller: this.controller(ctx) }); },
     linearSim(ctx, c) {
-      const x0 = [ctx.S.sim.y0, (ctx.S.sim.init.theta0 || 0) * DEG, 0, 0];
       const p = lin === 'b0' && ctx.st.b0 ? { ...ctx.pModel, b: 0 } : ctx.pModel;
-      return linearRun(ctx, c, { x0, p });
+      return linearRun(ctx, c, { x0: olX0(ctx), p });
     },
   });
+
+  // B.5: the student's transfer functions, fitted with the lowest-order proper rational
+  // functions that match them (Y.fitTf), and driven from rest by the same F̃.
+  // (a) Z̃/F̃ and Θ̃/F̃ from the student's two transformed equations (with b).
+  const EQS_PY = '\n\ndef _wb_eqs(s, i):\n    _M = np.array([np.asarray(eq1(s), dtype=complex).flatten(), np.asarray(eq2(s), dtype=complex).flatten()])\n    if _M.shape != (2, 2):\n        raise ValueError("eq1 and eq2 should each return two coefficients")\n    return np.linalg.solve(_M, np.array([1, 0], dtype=complex))[i]\n';
+  async function runEqs(ctx, code) {
+    const G = [];
+    for (const i of [0, 1]) {
+      const r = await fitMine(ctx, code + EQS_PY, '_wb_eqs', i ? 'Θ̃/F̃ from eq1, eq2' : 'Z̃/F̃ from eq1, eq2', { extraArgs: [i] });
+      if (r.ok === false) return r;
+      G.push(r.G);
+    }
+    return { G };
+  }
+  // (b) the pair that matches the dashed model: Z_F0, Th_F0 with b = 0, else Z_F, Th_F.
+  async function runTfs(ctx, code) {
+    const b0 = !!ctx.st.b0, names = b0 ? ['Z_F0', 'Th_F0'] : ['Z_F', 'Th_F'], G = [];
+    for (const fn of names) {
+      const r = await Y.fitTf(ctx, code, fn);
+      if (r.ok === false) return r;
+      G.push(r.G);
+    }
+    return { G, b0, names };
+  }
+  // (c) Z̃/Θ̃ in cascade after the workbench's Θ̃/F̃ (b = 0), so it is driven by F̃ too.
+  async function runCascade(ctx, code) {
+    const r = await Y.fitTf(ctx, code, 'Z_Th');
+    if (r.ok === false) return r;
+    const pin = ctx.sys.inner(ctx.pModel);
+    return { G: r.G, Gz: WB.tf.mul(r.G, WB.tf.tf([pin.b0], [1, 0, pin.a0])) };
+  }
+  const pz = (G, name) => [...Y.poles(WB.tf.poles(G), `pole of your ${name}`), ...Y.zeros(WB.tf.zeros(G), `zero of your ${name}`)];
+
   const pulseSection = (parent, ctx, title, page) => {
     const inp = section(parent, title, page);
     inputControls(inp, ctx, { title: 'Input force F̃(t)', ampMax: 2 });
-    inp.append(el('p', { class: 'muted small', text: 'Open loop the upright pendulum is unstable, so even a small push tips it over within a second or two. The dashed trace is the linear model: it matches while θ is small, then the nonlinear pendulum swings down and the linear one runs away (it is hidden past ±180°).' }));
+    inp.append(el('p', { class: 'muted small', text: 'Open loop the upright pendulum is unstable, so even a small push tips it over within a second or two. The dashed trace is the linear model: it matches while θ is small, then the nonlinear pendulum swings down and the linear one runs away off the plot.' }));
   };
   const eq412 = { title: 'Linearized equations (B.4)', page: 'p. 66 · Eq. 4.12', answers: 'B.4/b',
     theory: '\\begin{pmatrix} m_1 + m_2 & m_1\\frac{\\ell}{2}\\\\ m_1\\frac{\\ell}{2} & m_1\\frac{\\ell^2}{3}\\end{pmatrix}\\begin{pmatrix}\\ddot{\\tilde z}\\\\ \\ddot{\\tilde\\theta}\\end{pmatrix} = \\begin{pmatrix} -b\\dot{\\tilde z} + \\tilde F\\\\ m_1 g\\frac{\\ell}{2}\\tilde\\theta\\end{pmatrix}' };
@@ -523,7 +715,30 @@
       const md = section(parent, 'Linear model', 'p. 76');
       segmented(md, { label: 'Damping in the dashed model', options: [{ value: true, label: 'b = 0 (B.5b)' }, { value: false, label: 'with b' }], ...bind(ctx, 'b0') });
     },
-    splane: tfMarkers,
+    // Each overlay is drawn only next to the dashed model it matches: (a) keeps b,
+    // (b) is the pair for the chosen damping, (c) is built on the b = 0 equations.
+    yours(ctx) {
+      const b0 = !!ctx.st.b0, a = Y.data(ctx, 'ch5.a'), b = Y.data(ctx, 'ch5.b'), c = Y.data(ctx, 'ch5.c');
+      return { a: !b0 && a, b: b && b.b0 === b0 && b, c: b0 && c };
+    },
+    splane(ctx) {
+      const { a, b, c } = this.yours(ctx);
+      const mk = [];
+      if (a) mk.push(...pz(a.G[0], 'Z̃/F̃ (eq1, eq2)'));
+      if (b) b.G.forEach((G, i) => mk.push(...pz(G, b.names[i])));
+      if (c) mk.push(...pz(c.G, 'Z_Th'));
+      return Y.withMarkers(tfMarkers(ctx), mk, { obs: 'your poles', zero: 'your zeros' });
+    },
+    // Your transfer functions from rest, driven by the same F̃, shifted to z(0).
+    outputSeries(ctx, res, sc, oi) {
+      const out = [], off = oi === 0 ? olX0(ctx)[0] : 0;
+      const resp = (label, G) => Y.series(label, sc(Y.tfResponse(ctx, G, fin(ctx)).map((v) => v + off)), { lim: LIN_LIM[oi] });
+      const { a, b, c } = this.yours(ctx);
+      if (a) out.push(resp(`your eq1, eq2 (${oi ? 'Θ̃' : 'Z̃'}/F̃)`, a.G[oi]));
+      if (b) out.push(resp(`your ${b.names[oi]}`, b.G[oi]));
+      if (c && oi === 0) out.push(resp('your Z_Th after Θ̃/F̃', c.Gz));
+      return out;
+    },
     math(ctx) {
       const p = ctx.pModel, pin = ctx.sys.inner(p);
       const q = Math.sqrt(3 * p.g / (2 * p.ell));
@@ -559,12 +774,14 @@
         {
           id: 'a', title: '(a) Laplace transform of the linearized equations',
           html: 'Start from your B.4 linearized equations (zero initial conditions). Return the coefficients of Z̃(s) and Θ̃(s) in each transformed equation: the first with F̃(s) on the right, the second with 0 (any constant multiple of the second is accepted).',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [
               { fn: 'eq1', args: ['s'], truth: (p, a) => { const e = eom(p); return [cx.add(cx.mul(e.M[0][0], sq(a.s)), cx.mul(e.b, a.s)), cx.mul(e.M[0][1], sq(a.s))]; } },
               { fn: 'eq2', args: ['s'], compare: 'scale', truth: (p, a) => { const e = eom(p); return [cx.mul(e.M[1][0], sq(a.s)), cx.add(cx.mul(e.M[1][1], sq(a.s)), -e.kTh)]; } },
             ],
-          }, 'def eq1(s):\n    # [a, b]: a Z(s) + b Theta(s) = F(s)\n    return np.array([..., ...])\n\ndef eq2(s):\n    # [c, d]: c Z(s) + d Theta(s) = 0\n    return np.array([..., ...])\n'),
+          }, 'def eq1(s):\n    # [a, b]: a Z(s) + b Theta(s) = F(s)\n    return np.array([..., ...])\n\ndef eq2(s):\n    # [c, d]: c Z(s) + d Theta(s) = 0\n    return np.array([..., ...])\n'), {
+            actions: [{ label: 'Plot my equations', run: (code) => { ctx.st.b0 = false; return Y.plot(ctx, 'ch5.a', code, runEqs, 'Your two equations solved for Z̃ and Θ̃ give transfer functions from F̃: their responses from rest are dotted on the z and θ plots (next to the dashed model with damping b), and their poles and zeros are on the s-plane.'); } }],
+          }),
           solution: () => [
             { tex: '\\big[(m_1+m_2)s^2 + bs\\big]\\tilde Z(s) + m_1\\frac{\\ell}{2}s^2\\tilde\\Theta(s) = \\tilde F(s),\\quad s^2\\tilde Z(s) + \\Big(\\frac{2\\ell}{3}s^2 - g\\Big)\\tilde\\Theta(s) = 0' },
             { code: 'def eq1(s):\n    return np.array([(P.m1 + P.m2) * s**2 + P.b * s,\n                     P.m1 * P.ell / 2 * s**2])\n\ndef eq2(s):\n    return np.array([s**2, 2 * P.ell / 3 * s**2 - P.g])' },
@@ -574,7 +791,7 @@
         {
           id: 'b', title: '(b) Transfer functions from F̃ to Z̃ and Θ̃',
           html: 'Return Z̃/F̃ and Θ̃/F̃ at a complex s, first with the damping b, then simplified with b = 0 (those two must not use P.b). How does b = 0 simplify them, and is it a reasonable assumption?',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [
               { fn: 'Z_F', args: ['s'], truth: (p, a) => tfs(ctx, p, a.s)[0] },
               { fn: 'Th_F', args: ['s'], truth: (p, a) => tfs(ctx, p, a.s)[1] },
@@ -588,7 +805,9 @@
               const got = typeof g === 'object' ? g : { re: g, im: 0 };
               return Math.hypot(got.re - damped.re, got.im - damped.im) <= 1e-6 * Math.hypot(damped.re, damped.im) ? `That is the transfer function with damping: ${it.fn} is the b = 0 simplification, without P.b.` : '';
             },
-          }, 'def Z_F(s):\n    # Z(s)/F(s)\n    return ...\n\ndef Th_F(s):\n    # Theta(s)/F(s)\n    return ...\n\ndef Z_F0(s):\n    # Z(s)/F(s) with b = 0\n    return ...\n\ndef Th_F0(s):\n    # Theta(s)/F(s) with b = 0\n    return ...\n'),
+          }, 'def Z_F(s):\n    # Z(s)/F(s)\n    return ...\n\ndef Th_F(s):\n    # Theta(s)/F(s)\n    return ...\n\ndef Z_F0(s):\n    # Z(s)/F(s) with b = 0\n    return ...\n\ndef Th_F0(s):\n    # Theta(s)/F(s) with b = 0\n    return ...\n'), {
+            actions: [{ label: 'Plot my transfer functions', run: (code) => Y.plot(ctx, 'ch5.b', code, runTfs, (d) => `Your ${d.names.join(' and ')} (the pair for the damping chosen on the right) driven from rest by the same F̃ are dotted on the z and θ plots; their poles and zeros are on the s-plane. Switch the damping to plot the other pair.`) }],
+          }),
           solution: () => [
             { tex: '\\tilde Z = \\frac{\\frac{2\\ell}{3}s^2 - g}{(m_1\\frac{\\ell}{6} + m_2\\frac{2\\ell}{3})s^4 + b\\frac{2\\ell}{3}s^3 - (m_1+m_2)gs^2 - bgs}\\tilde F,\\quad \\tilde\\Theta = \\frac{-s^2}{(\\cdots)}\\tilde F' },
             { tex: 'b = 0:\\quad \\frac{\\tilde Z}{\\tilde F} = \\frac{\\frac{2\\ell}{3}s^2 - g}{s^2\\big[(m_1\\frac{\\ell}{6} + m_2\\frac{2\\ell}{3})s^2 - (m_1+m_2)g\\big]},\\quad \\frac{\\tilde\\Theta}{\\tilde F} = \\frac{-1}{(m_1\\frac{\\ell}{6} + m_2\\frac{2\\ell}{3})s^2 - (m_1+m_2)g}' },
@@ -599,9 +818,11 @@
         {
           id: 'c', title: '(c) Z̃(s)/Θ̃(s) and the block diagram',
           html: 'From the simplified (b = 0) transfer functions, return Z̃/Θ̃ at a complex s. Then draw the block diagram as a cascade F̃ → Θ̃ → Z̃ on paper.',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'Z_Th', args: ['s'], truth: (p, a) => { const g = tfs(ctx, p, a.s, true); return cx.div(g[0], g[1]); } }],
-          }, 'def Z_Th(s):\n    # Z(s)/Theta(s)\n    return ...\n'),
+          }, 'def Z_Th(s):\n    # Z(s)/Theta(s)\n    return ...\n'), {
+            actions: [{ label: 'Plot my Z_Th', run: (code) => { ctx.st.b0 = true; return Y.plot(ctx, 'ch5.c', code, runCascade, 'Dotted on the z plot: your Z_Th in cascade after the b = 0 angle dynamics Θ̃/F̃, driven from rest by the same F̃. Its poles and zeros are on the s-plane.'); } }],
+          }),
           solution: () => [
             { tex: '\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{\\tilde Z/\\tilde F}{\\tilde\\Theta/\\tilde F} = \\frac{-\\frac{2\\ell}{3}s^2 + g}{s^2}' },
             { code: 'def Z_Th(s):\n    return (-2 * P.ell / 3 * s**2 + P.g) / s**2' },
@@ -617,6 +838,17 @@
     },
   });
 
+  // B.6: the student's A, B, C, D.
+  async function runSS(ctx, code) {
+    const out = await WB.py.evaluate(code, [{ params: ctx.pModel, vars: ['A', 'B', 'C', 'D'] }]);
+    if (out.error) return pyError(out);
+    const v = out.rows[0].vars;
+    const A = Y.asMat(v.A, 4, 4), B = Y.asMat(v.B, 4, 1), C = Y.asMat(v.C, 2, 4), D = Y.asMat(v.D, 2, 1);
+    const bad = [[A, 'A', '4×4'], [B, 'B', '4×1'], [C, 'C', '2×4'], [D, 'D', '2×1']].find(([m]) => !m);
+    if (bad) return { ok: false, msg: `${bad[1]} should be a ${bad[2]} array of numbers (x̃ = (z̃, θ̃, ż̃, θ̇̃), ũ = F̃, ỹ = (z̃, θ̃)).` };
+    return { A, B, C, D };
+  }
+
   S.chapters.ch6 = Object.assign({}, common, olSim('full'), {
     id: 'ch6', num: 6, tab: 'Ch 6', title: 'State-space models', pages: 'pp. 81–93',
     defaults() { return { extra: 'thd', inp: { shape: 'pulse', amp: 0.2, freq: 0.5, width: 0.1 } }; },
@@ -628,9 +860,20 @@
       segmented(ex, { options: [{ value: 'zd', label: 'x₃ = ż' }, { value: 'thd', label: 'x₄ = θ̇' }], ...bind(ctx, 'extra') });
     },
     splane(ctx) {
-      if (!showsAnswer(ctx, 'B.6/a')) return { markers: [] };
-      const { A } = ctx.sys.stateSpace(ctx.pModel);
-      return { markers: L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `eigenvalue of A ${i + 1}` })) };
+      const sp = { markers: [] };
+      if (showsAnswer(ctx, 'B.6/a')) {
+        const { A } = ctx.sys.stateSpace(ctx.pModel);
+        sp.markers = L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `eigenvalue of A ${i + 1}` }));
+      }
+      const y = Y.data(ctx, 'ch6.a');
+      return y ? Y.withMarkers(sp, Y.eig(y.A, 'eigenvalue of your A'), { obs: 'eigenvalue of your A' }) : sp;
+    },
+    // Your model from the same initial deviation and F̃; ỹ is shifted back by (z(0), θₑ = 0).
+    outputSeries(ctx, res, sc, oi) {
+      const y = Y.data(ctx, 'ch6.a');
+      if (!y) return [];
+      const x0 = olX0(ctx), r = Y.linResponse(ctx, y, [0, x0[1], 0, 0], fin(ctx));
+      return [Y.series('your A, B, C, D', sc(r.y[oi].map((v) => v + (oi === 0 ? x0[0] : 0))), { lim: LIN_LIM[oi] })];
     },
     extraPlot(ctx, res) { return stateExtra(res, ctx.st.extra); },
     math(ctx) {
@@ -657,9 +900,11 @@
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch6, [{
         id: 'a', title: 'A, B, C, D of the linear state-space model',
         html: 'Module-level numpy arrays, with x̃ = (z̃, θ̃, ż̃, θ̇̃)ᵀ, ũ = F̃ and ỹ = (z̃, θ̃)ᵀ.',
-        code: pyPart(ctx, {
+        code: Object.assign(pyPart(ctx, {
           items: ['A', 'B', 'C', 'D'].map((k) => ({ var: k, truth: (p) => ss(p)[k] })),
-        }, '# x = (z, theta, zdot, thetadot)\n# u = F, y = (z, theta)\nA = ...\nB = ...\nC = ...\nD = ...\n'),
+        }, '# x = (z, theta, zdot, thetadot)\n# u = F, y = (z, theta)\nA = ...\nB = ...\nC = ...\nD = ...\n'), {
+          actions: [{ label: 'Plot my model', run: (code) => Y.plot(ctx, 'ch6.a', code, runSS, 'Your eigenvalues of A are the × markers on the s-plane; your model\'s outputs, from the same initial state and F̃, are dotted on the z and θ plots.') }],
+        }),
         solution: () => { const { A, B } = ss(ctx.pModel); return [
           { tex: 'A = \\begin{pmatrix}0&0&1&0\\\\0&0&0&1\\\\0&-\\frac{\\frac34 m_1 g}{\\frac14 m_1 + m_2}&-\\frac{b}{\\frac14 m_1 + m_2}&0\\\\0&\\frac{3(m_1+m_2)g}{2(\\frac14 m_1 + m_2)\\ell}&\\frac{3b}{2(\\frac14 m_1 + m_2)\\ell}&0\\end{pmatrix},\\quad B = \\begin{pmatrix}0\\\\0\\\\ \\frac{1}{\\frac14 m_1 + m_2}\\\\ \\frac{-3}{2(\\frac14 m_1 + m_2)\\ell}\\end{pmatrix}' },
           { tex: `A = ${texMat(A)},\\quad B = ${texMat(B)},\\quad C = \\begin{pmatrix}1&0&0&0\\\\0&1&0&0\\end{pmatrix},\\quad D = \\begin{pmatrix}0\\\\0\\end{pmatrix}` },

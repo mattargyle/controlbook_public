@@ -435,6 +435,10 @@ WB.studies.D = WB.studies.D || { chapters: {} };
     sArg: { label: 's', complex: true, re: [-3, 2], im: [0.2, 6] },
     // Spring compensation label: F_e = k z_e answers D.4(a), so Work mode writes F_e.
     compLabel: (ctx) => (lib.shows(ctx, 'D.4/a') ? 'F = k z<sub>r</sub> + F̃' : 'F = F<sub>e</sub> + F̃ (z<sub>e</sub> = z<sub>r</sub>)'),
+    // The spring compensation actually applied. Adding F_e = k z_r applies the D.4(a)
+    // answer (it shows on the force plot), so Work mode runs without it until D.4(a)
+    // is solved, whatever the stored setting.
+    comp: (ctx) => (ctx.st.comp === 'eq' && lib.shows(ctx, 'D.4/a') ? 'eq' : 'none'),
   };
   WB.studies.D.lib = lib;
 })();

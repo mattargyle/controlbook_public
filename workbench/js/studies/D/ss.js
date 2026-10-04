@@ -194,13 +194,14 @@
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
     };
   }
-  const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page);
+  // The controllability matrix answers D.11(c) (and for (A₁, B₁) also shows A, B).
+  const ctrbCard = (A, B, title, page, answers) => ({ ...WB.ss.ctrbCard(A, B, title, page), spoiler: false, answers });
   function polesCard(ctx, d) {
     return {
       title: 'Desired closed-loop poles', page: 'p. 113 · Eq. 8.5, p. 184',
       theory: '\\omega_n = \\frac{2.2}{t_r},\\quad \\Delta^d_{cl} = (s^2 + 2\\zeta\\omega_n s + \\omega_n^2)' + (ctx.level === 'sf' ? '' : '(s - p_I)'),
       numbers: `\\omega_n = ${tex(2.2 / ctx.st.tr)},\\quad \\Delta^d_{cl} = ${WB.tf.polyTex(L.polyFromRoots(d.poles))},\\quad p = ${d.poles.map((p) => texPole(p)).join(',\\;')}`,
-      spoiler: true,
+      answers: 'D.11/a',
     };
   }
   const poleList = (v, keys) => keys.map((k) => M.parseComplex(v[k]));
@@ -248,13 +249,13 @@
     math(ctx) {
       const d = design(ctx), { A, B } = ctx.ss, g = ctx.gains;
       return [
-        ssCard(ctx), ctrbCard(A, B, 'Controllability', 'p. 180 · Eq. 11.29'), polesCard(ctx, d),
+        ssCard(ctx), ctrbCard(A, B, 'Controllability', 'p. 180 · Eq. 11.29', 'D.11/c'), polesCard(ctx, d),
         { title: 'Pole placement', page: 'p. 182 · Eq. 11.32',
           theory: 'K = (\\alpha - a_A)\\,\\mathcal{A}_A^{-1}\\,\\mathcal{C}_{A,B}^{-1}',
-          numbers: `K = ${texMat([d.K])}`, spoiler: true },
+          numbers: `K = ${texMat([d.K])}`, answers: 'D.11/d' },
         { title: 'Reference gain', page: 'p. 182 · Eq. 11.35',
           theory: 'k_r = \\frac{-1}{C(A - BK)^{-1}B}',
-          numbers: `k_r = ${tex(d.kr)}`, spoiler: true },
+          numbers: `k_r = ${tex(d.kr)}`, answers: 'D.11/d' },
         { title: 'Reference gain of the mass-spring-damper', page: 'p. 182 · Eq. 11.35', answers: 'D.11/d',
           theory: 'k_r = m\\omega_n^2 = K_1 + k',
           note: 'Unlike the arm, k_r ≠ K₁: the spring needs an extra k z_r to hold the mass at z_r.' },
@@ -336,11 +337,11 @@
         { title: 'Augmented system', page: 'p. 198 · Eq. 12.1',
           theory: '\\dot x_I = r - Cx,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix}',
           numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}`, answers: 'D.6/a' },
-        ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'),
+        ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198', ['D.6/a', 'D.11/c']),
         polesCard(ctx, d),
         { title: 'Gains', page: 'p. 199–201',
           theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I\\int_0^t (r - y)\\,d\\tau',
-          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
+          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, answers: 'D.12/a' },
         { title: 'Gains for the mass-spring-damper', page: 'p. 199–201', answers: 'D.12/a',
           theory: '\\det(sI - A_1 + B_1K_1) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\frac{b + K_2}{m},\\; c_1 = \\frac{k + K_1}{m},\\; c_0 = -\\frac{k_I}{m}' },
       ];
@@ -422,10 +423,10 @@
           theory: '\\dot{\\hat x} = A\\hat x + Bu + L(y - C\\hat x),\\quad \\dot e = (A - LC)e' },
         { title: 'Observability', page: 'p. 221',
           theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ \\vdots \\\\ CA^{n-1}\\end{bmatrix},\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = n',
-          numbers: `\\mathcal{O} = ${texMat(O)},\\quad \\operatorname{rank} = ${L.rank(O)}`, spoiler: true },
+          numbers: `\\mathcal{O} = ${texMat(O)},\\quad \\operatorname{rank} = ${L.rank(O)}`, answers: 'D.13/b' },
         { title: 'Observer gain', page: 'p. 222 · Eq. 13.16',
           theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top',
-          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, spoiler: true },
+          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, answers: 'D.13/c1' },
         { title: 'Observer gain for the mass-spring-damper', page: 'p. 222', answers: 'D.13/c1',
           theory: '\\det(sI - A + LC) = s^2 + \\beta_1 s + \\beta_0,\\quad \\beta_1 = \\tfrac bm + L_1,\\; \\beta_0 = \\tfrac km + \\tfrac bm L_1 + L_2' },
         { title: 'Separation principle', page: 'p. 222–223',
@@ -551,7 +552,7 @@
           theory: '\\dot{\\hat x} = A\\hat x + B(u + \\hat d) + L(y - C\\hat x),\\quad \\dot{\\hat d} = L_d(y - C\\hat x),\\quad u = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
         { title: 'Observer gains', page: 'p. 241',
           theory: '\\begin{bmatrix}L\\\\ L_d\\end{bmatrix} = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
-          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, spoiler: true },
+          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, answers: 'D.14/b1' },
         { title: 'Observer gains for the mass-spring-damper', page: 'p. 241', answers: 'D.14/b1',
           theory: '\\det(sI - A_2 + LC_2) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\tfrac bm + L_1,\\; c_1 = \\tfrac km + \\tfrac bm L_1 + L_2,\\; c_0 = \\tfrac{L_d}{m}' },
         polesCard(ctx, d),

@@ -87,15 +87,20 @@
       }
     } else {
       clPoles(ctx, level).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole ${i + 1}` }));
-      // Work mode: the target poles (B.11a) and the observer poles (B.13c) are answers
-      if (!polesRevealed(ctx)) return mk;
-      obsPolesOf(ctx, level).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 80 }));
-      const t = lib().ssPoles({ ...prob, pI: level === 'sf' ? null : prob.pI });
-      t.poles.forEach((p) => mk.push({ ...p, kind: 'target', label: 'target pole (problem)' }));
+      // Work mode: the target poles (B.11a) and the observer poles (B.13c, B.14b)
+      // are answers: shown once revealed or once that part is solved
+      const shown = polesRevealed(ctx);
+      if (shown || ctx.app.isSolved(OBS_KEY[level])) obsPolesOf(ctx, level).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 80 }));
+      if (shown || ctx.app.isSolved('B.11/a')) {
+        const t = lib().ssPoles({ ...prob, pI: level === 'sf' ? null : prob.pI });
+        t.poles.forEach((p) => mk.push({ ...p, kind: 'target', label: 'target pole (problem)' }));
+      }
     }
     return mk;
   }
 
+  // the part whose answer the observer poles are, per level
+  const OBS_KEY = { obs: 'B.13/c', dobs: 'B.14/b2' };
   const polesRevealed = (ctx) => !!(ctx.app && ctx.app.isRevealed(`B:${ctx.S.chapter}:poles`));
   function revealPoles(parent, ctx, what) {
     const btn = WB.ui.revealButton(ctx, `B:${ctx.S.chapter}:poles`, `Reveal ${what} in the s-plane`);
@@ -142,12 +147,22 @@
   }
   function obsKnobs(parent, ctx, withD) {
     slider(parent, { label: 'speed factor', unit: '×', min: 1, max: 40, step: 0.1, sig: 3, hint: 't_r,obs = t_r / factor for each pair (repo: 10)', ...bind(ctx, 'obsFactor') });
+    // the repo's disturbance pole is asked in B.14(b): Work mode keeps it (and its
+    // slider) out of sight until that part is solved
+    const pdShown = () => ctx.S.mode === 'explore' || ctx.app.isSolved('B.14/b2');
     segmented(parent, {
       label: 'observer ω<sub>n</sub> rule',
       options: [{ value: '2.2', label: '2.2 / t<sub>r</sub>' }, { value: 'tp', label: 'π/(2t<sub>r</sub>√(1−ζ²))' }],
       ...bind(ctx, 'obsRule'),
     });
-    if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -30, max: -0.05, step: 0.01, sig: 3, hint: 'disturbance-estimate pole (repo: −1)', ...bind(ctx, 'pD') });
+    if (withD) {
+      const box = el('div');
+      parent.append(box);
+      slider(box, { label: 'p<sub>d</sub>', min: -30, max: -0.05, step: 0.01, sig: 3, hint: 'disturbance-estimate pole (repo: −1)', ...bind(ctx, 'pD') });
+      const note = el('p', { class: 'muted small', text: 'The disturbance-estimate pole is set to the listing\'s value; its slider appears once B.14(b) is solved.' });
+      parent.append(note);
+      WB.ui.addRefresher(() => { box.hidden = !pdShown(); note.hidden = pdShown(); });
+    }
   }
   function xhatKnobs(parent, ctx) {
     slider(parent, { label: 'ẑ(0)', unit: 'm', min: -1, max: 1, step: 0.01, sig: 3, ...bind(ctx, 'z', () => ctx.st.xhat0) });
@@ -262,10 +277,10 @@
       const { A, B: Bm } = ctx.ss;
       return [
         ssCard(ctx),
-        ctrbCard(A, Bm, 'Controllability', 'p. 190 · Step 1'),
+        { ...ctrbCard(A, Bm, 'Controllability', 'p. 190 · Step 1'), answers: ['B.6/a', 'B.11/c'] },
         { title: 'Open-loop characteristic polynomial', page: 'p. 190 · Step 2',
           theory: '\\Delta_{ol}(s) = \\det(sI - A),\\quad \\mathbf a_A = (a_{n-1}, \\dots, a_0)',
-          numbers: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },
+          numbers: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true, answers: 'B.6/a' },
         polesCard(ctx, d, 'sf', ctx.S.mode === 'work' ? 'B.11/a' : undefined),
         { title: 'Gains (Ackermann / place)', page: 'p. 190 · Step 4, Eq. 11.32',
           theory: 'K = (\\boldsymbol\\alpha - \\mathbf a_A)\\,\\mathcal{A}_A^{-1}\\mathcal{C}_{A,B}^{-1},\\quad k_r = \\frac{-1}{C_r(A - BK)^{-1}B}',
@@ -362,8 +377,8 @@
         { title: 'Augmented pendulum model', page: 'p. 207 · Step 1', answers: 'B.12/a1',
           theory: 'C_r = (1, 0, 0, 0)',
           numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}` },
-        ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 207 · Step 2'),
-        polesCard(ctx, d, 'sfi'),
+        { ...ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 207 · Step 2'), answers: 'B.12/a1' },
+        polesCard(ctx, d, 'sfi', ctx.S.mode === 'work' ? 'B.11/a' : undefined),
         { title: 'Gains', page: 'p. 208 · Step 3',
           theory: 'K_1 = (K, k_I) = (\\boldsymbol\\alpha - \\mathbf a_{A_1})\\mathcal{A}_{A_1}^{-1}\\mathcal{C}_{A_1,B_1}^{-1},\\quad F = -Kx - k_I x_I',
           numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true, answers: 'B.12/a2' },
@@ -440,12 +455,12 @@
         ssCard(ctx),
         { title: 'Observability', page: 'p. 220–221, B.13(b)',
           theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ CA^2 \\\\ CA^3\\end{bmatrix} \\in \\mathbb{R}^{8\\times4},\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = 4',
-          numbers: `\\operatorname{rank}\\mathcal{O}_{A,C} = ${L.rank(O)}`, spoiler: true },
+          numbers: `\\operatorname{rank}\\mathcal{O}_{A,C} = ${L.rank(O)}`, spoiler: true, answers: 'B.13/b' },
         { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 232',
           theory: '\\dot{\\hat x} = A\\hat x + BF + L(y - C\\hat x),\\quad \\dot e = (A - LC)e,\\quad F \\text{ is the saturated force of the previous sample}' },
         { title: 'Observer poles and gain', page: 'p. 232 · Listing 13.2',
           theory: 't_{r,obs} = t_r / 10 \\text{ for each pair (repo)},\\quad L = \\text{place}(A^\\top, C^\\top, q)^\\top',
-          numbers: `\\omega_{n\\theta,obs} = ${tex(g.wnThObs)},\\; \\omega_{nz,obs} = ${tex(g.wnZObs)},\\quad L^\\top = ${texMat(L.T(g.L))}`, spoiler: true,
+          numbers: `\\omega_{n\\theta,obs} = ${tex(g.wnThObs)},\\; \\omega_{nz,obs} = ${tex(g.wnZObs)},\\quad L^\\top = ${texMat(L.T(g.L))}`, spoiler: true, answers: 'B.13/c',
           note: 'With two outputs many L place the same poles; this is the one scipy\'s YT iteration returns, so the page matches ctrlObserver.py.' },
         polesCard(ctx, d, 'sfi'),
         { title: 'Separation principle', page: 'p. 222–223',
@@ -534,7 +549,7 @@
           theory: '\\dot{\\hat x}_2 = A_2\\hat x_2 + B_1 F + L_2(y - C_2\\hat x_2),\\quad F = -K\\hat x - k_I x_I - \\hat d' },
         { title: 'Observer poles and gain', page: 'p. 252 · Listing 14.4',
           theory: '\\omega_{n,obs} = 2.2/(t_r/10) \\text{ for each pair},\\quad p_d = -1,\\quad L_2 = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
-          numbers: ctx.st.dobs ? `L_2^\\top = ${texMat(L.T(g.L2))}` : `L^\\top = ${texMat(L.T(g.L))}`, spoiler: true,
+          numbers: ctx.st.dobs ? `L_2^\\top = ${texMat(L.T(g.L2))}` : `L^\\top = ${texMat(L.T(g.L))}`, spoiler: true, answers: 'B.14/b2',
           note: 'Listing 14.4 switches the observer to the 2.2/t_r rule while the controller keeps π/(2t_r√(1−ζ²)), and its disturbance pole at −1 is slower than every controller pole.' },
         polesCard(ctx, g, 'sfi'),
       ];

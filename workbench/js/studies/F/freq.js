@@ -34,12 +34,19 @@
   // (the 700-point grid alone is only good to ~2%).
   const bandwidth = (Tc) => T.bandwidth(Tc, W, Math.SQRT1_2);
   const gmText = WB.freq.gmText;
+  // The plant Bode plots are what F.15(a, b, c) ask for (drawn by hand, then compared),
+  // so Work mode draws each loop's plant curve once its part is done. The outer plant
+  // includes the inner loop (P_out·T_in or k_DC·P_out), still gated by F.15(c).
+  const PLANT15 = { lon: 'F.15/a', inner: 'F.15/b', outer: 'F.15/c' };
+  const plantShown = (ctx, loop) => F.showsAnswer(ctx, PLANT15[loop]);
+  const plantLine = (ctx, loop, line) => (plantShown(ctx, loop) ? [line] : []);
   const marginMarks = (mg, color) => WB.freq.marginMarks(mg, { color });
 
   // ---------------------------------------------- gains for Ch 16 and 17 --
   // 'mine': your F.10 Work-mode gains (Ch 10 tab). 'ref': the reference F.10 design.
-  // The reference design shows the F.8 gains, so Work mode offers it once F.8(a, b, d) are solved.
-  const refOk = (ctx) => F.showsAnswer(ctx, ['F.8/a', 'F.8/b', 'F.8/d']);
+  // The reference design shows the F.8 gains and the F.10 integrator gains, so Work
+  // mode offers it once F.8(a, b, d) and F.10(b) are solved.
+  const refOk = (ctx) => F.showsAnswer(ctx, ['F.8/a', 'F.8/b', 'F.8/d', 'F.10/b2']);
   function f10Gains(ctx) {
     if (ctx.S.mode === 'explore' || (ctx.st.src === 'ref' && refOk(ctx))) return F.refF10(ctx.pModel);
     const w = ctx.S.ch.ch10 ? ctx.S.ch.ch10.w : F.W0;
@@ -53,7 +60,7 @@
         options: [{ value: 'mine', label: 'my F.10 gains (Ch 10 tab)' }, { value: 'ref', label: 'reference F.10 design' }],
         get: () => (ctx.S.mode === 'explore' ? 'ref' : ctx.st.src), set: (v) => { ctx.st.src = v; ctx.update(); },
       });
-    } else sec.append(el('p', { class: 'muted small', text: 'Using your F.10 gains from the Ch 10 tab. A reference design becomes available here once F.8(a), (b) and (d) are solved.' }));
+    } else sec.append(el('p', { class: 'muted small', text: 'Using your F.10 gains from the Ch 10 tab. A reference design becomes available here once F.8(a), (b), (d) and F.10(b) are solved.' }));
     slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma') });
     F.readout(sec, ctx, ALL.map((k) => ({ key: k, label: k })), () => f10Gains(ctx));
     sec.append(el('p', { class: 'muted small', text: ctx.S.mode === 'work' ? 'Answers below are computed from the gains selected here, so you can check your own design.' : 'Explore mode uses the reference F.10 design.' }));
@@ -75,7 +82,7 @@
   // Open-loop sinusoid around hover with the initial state set to the steady
   // sinusoid, so the double integrators do not drift.
   function sineSim(ctx, common) {
-    const s = ctx.sys, p = ctx.pModel, st = ctx.st, m = s.models(p);
+    const s = ctx.sys, p = ctx.pModel, st = ctx.st, m = s.models(p), Fe = F.feOf(ctx);
     const w = st.w0, A = st.loop === 'lon' ? st.AF : st.AT;
     const isLon = st.loop === 'lon';
     const x0 = common.x0.slice();
@@ -93,7 +100,7 @@
     const ctrl = {
       update(r, x, y, t) {
         const u = A * Math.sin(w * t);
-        return { u: isLon ? s.mix(m.Fe + u, 0, p) : s.mix(m.Fe, u, p) };
+        return { u: isLon ? s.mix(Fe + u, 0, p) : s.mix(Fe, u, p) };
       },
     };
     return F.simulate(ctx, { ...common, x0 }, null, ctrl);
@@ -262,17 +269,17 @@
       // spec bands and marks show the F.16 answers, so only after Reveal in Work mode
       const show = WB.ui.shown(ctx, 'F:ch16');
       if (v === 'lon') {
-        return { title: 'Altitude: P and PC (F.10 PID)', w: W, lines: [{ label: 'P_lon', ...T.bode(lp.P.lon, W), color: '--text-muted', width: 1.5 }, { label: 'P·C_PID', ...T.bode(lp.Ll, W), color: '--series-1' }],
+        return { title: 'Altitude: P and PC (F.10 PID)', w: W, lines: [...plantLine(ctx, 'lon', { label: 'P_lon', ...T.bode(lp.P.lon, W), color: '--text-muted', width: 1.5 }), { label: 'P·C_PID', ...T.bode(lp.Ll, W), color: '--series-1' }],
           specs: show ? [{ w0: pr.wno, w1: 1e4, db: db(s.gn), keep: 'below', color: '--series-3', label: `${fmt(db(s.gn), 3)} dB` }] : [],
           marks: show ? [] : [{ w: pr.wno, label: `ω_no = ${pr.wno}` }] };
       }
       if (v === 'inner') {
-        return { title: 'Inner loop: P and PC (F.8 PD)', w: W, lines: [{ label: 'P_in', ...T.bode(lp.P.inner, W), color: '--text-muted', width: 1.5 }, { label: 'P·C_PD', ...T.bode(lp.Li, W), color: '--series-1' }, { label: 'closed loop T_in', mag: T.bode(lp.Ti, W).mag, color: '--series-2', width: 1.5 }],
+        return { title: 'Inner loop: P and PC (F.8 PD)', w: W, lines: [...plantLine(ctx, 'inner', { label: 'P_in', ...T.bode(lp.P.inner, W), color: '--text-muted', width: 1.5 }), { label: 'P·C_PD', ...T.bode(lp.Li, W), color: '--series-1' }, { label: 'closed loop T_in', mag: T.bode(lp.Ti, W).mag, color: '--series-2', width: 1.5 }],
           marks: show
             ? [{ w: pr.wdin, label: `ω_din: |C| = ${fmt(db(abs(lp.Ci, pr.wdin)), 3)} dB` }, ...(isFinite(s.wSensor) ? [{ w: s.wSensor, label: '|T| = −20 dB', color: '--series-3' }] : [])]
             : [{ w: pr.wdin, label: `ω_din = ${pr.wdin}` }] };
       }
-      return { title: 'Outer loop: P and PC (F.10 PID)', w: W, lines: [{ label: 'P_out', ...T.bode(lp.Pout, W), color: '--text-muted', width: 1.5 }, { label: 'P·C', ...T.bode(lp.Lo, W), color: '--series-1' }],
+      return { title: 'Outer loop: P and PC (F.10 PID)', w: W, lines: [...plantLine(ctx, 'outer', { label: 'P_out', ...T.bode(lp.Pout, W), color: '--text-muted', width: 1.5 }), { label: 'P·C', ...T.bode(lp.Lo, W), color: '--series-1' }],
         specs: show ? [{ w0: 1e-3, w1: pr.wr, db: -db(s.gr), keep: 'above', color: '--series-3', label: `B_r = ${fmt(-db(s.gr), 3)} dB` }] : [],
         marks: show ? [{ w: pr.wdout, label: `ω_dout: ${fmt(-db(s.gout), 3)} dB` }] : [{ w: pr.wr, label: `ω_r = ${pr.wr}` }, { w: pr.wdout, label: `ω_dout = ${pr.wdout}` }] };
     },
@@ -518,7 +525,7 @@
       return {};
     },
     controller(ctx, { linear = false } = {}) {
-      const d = design18(ctx), Ts = ctx.S.sim.Ts, s = ctx.sys, p = ctx.pModel, m = s.models(p);
+      const d = design18(ctx), Ts = ctx.S.sim.Ts, s = ctx.sys, p = ctx.pModel, Fe = F.feOf(ctx);
       const Cl = T.filter(d.Cl, Ts), Ci = T.filter(d.Ci, Ts), Co = T.filter(d.Co, Ts), Fl = T.filter(d.Fl, Ts), Fo = T.filter(d.Fo, Ts);
       return {
         // Listing 18.3 pattern per loop: e = F(r) − y_m, u = C(e); F = F_e + C_lon(e_h)
@@ -526,7 +533,7 @@
           const Ft = Cl.step(Fl.step(r[0]) - y[1]);
           const thD = Co.step(Fo.step(r[1]) - y[0]);
           const tau = Ci.step(thD - y[2]);
-          return { u: s.mix((linear ? 0 : m.Fe) + Ft, tau, p), thetaD: thD };
+          return { u: s.mix((linear ? 0 : Fe) + Ft, tau, p), thetaD: thD };
         },
       };
     },
@@ -534,9 +541,13 @@
       const st = ctx.st;
       const top = section(parent, 'Loop being shaped', 'F.18 p. 403');
       segmented(top, { options: Object.entries(LOOPS).map(([v, l]) => ({ value: v, label: l })), ...bind(ctx, 'loop', () => st) });
+      // The reference design answers F.18(a–c): Work mode offers it once all three are solved.
+      const refBtn = F.showsAnswer(ctx, ['F.18/a', 'F.18/b', 'F.18/c'])
+        ? [el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference design (reveals answer)', onclick: () => { const r = refState(ctx), A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; for (const w of ['lon', 'inner', 'outer']) A[w] = st[w] = r[w]; ctx.update(); } })]
+        : [];
       top.append(el('div', { class: 'btn-row' },
         el('button', { type: 'button', class: 'btn', text: 'Start over (lead only)', onclick: () => { const A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; A[st.loop] = st[st.loop] = START[st.loop](); A[st.loop].k = autoK(ctx, st.loop); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference design (reveals answer)', onclick: () => { const r = refState(ctx), A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; for (const w of ['lon', 'inner', 'outer']) A[w] = st[w] = r[w]; ctx.update(); } })));
+        ...refBtn));
       top.append(el('p', { class: 'muted small', text: 'C = k·PI·lead·lag·LPF·LPF (outer loop: −k·…). The outer plant includes the current inner closed loop, so shape the inner loop first.' }));
       const c = () => st[st.loop];
       const onOff = (sec, key) => WB.ui.onOff(sec, ctx, () => c()[key]);
@@ -585,7 +596,7 @@
       const Lg = w === 'lon' ? d.Ll : w === 'inner' ? d.Li : d.Lo;
       const Pp = w === 'lon' ? d.P.lon : w === 'inner' ? d.P.inner : d.Pout;
       const mg = w === 'lon' ? d.mgl : w === 'inner' ? d.mgi : d.mgo;
-      const lines = [{ label: w === 'outer' ? 'P_out·T_in' : 'P', ...T.bode(Pp, W), color: '--text-muted', dash: [5, 4], width: 1.5 }, { label: 'loop gain P·C', ...T.bode(Lg, W), color: '--series-1' }];
+      const lines = [...plantLine(ctx, w, { label: w === 'outer' ? 'P_out·T_in' : 'P', ...T.bode(Pp, W), color: '--text-muted', dash: [5, 4], width: 1.5 }), { label: 'loop gain P·C', ...T.bode(Lg, W), color: '--series-1' }];
       if (ctx.st.showT) {
         const Fp = w === 'lon' ? d.Fl : w === 'outer' ? d.Fo : T.gain(1);
         lines.push({ label: w === 'inner' ? 'closed loop T' : 'closed loop F·T', mag: T.bode(T.mul(Fp, T.feedback(Lg)), W).mag, color: '--series-3', width: 1.5 });
@@ -599,7 +610,12 @@
       const d = design18(ctx), w = ctx.st.loop;
       const Lg = w === 'lon' ? d.Ll : w === 'inner' ? d.Li : d.Lo;
       const cl = L.roots(L.polyAdd(Lg.den, Lg.num));
-      const mk = L.roots(Lg.den).map((q) => ({ ...q, kind: 'ol', label: 'pole of L', noFit: Math.hypot(q.re, q.im) > 30 }));
+      // The plant's poles answer F.7(a) (altitude) and F.5(c) (lateral): until solved,
+      // Work mode marks only the poles of the student's C (and, outer loop, of T_in).
+      const olShown = F.showsAnswer(ctx, w === 'lon' ? 'F.7/a' : 'F.5/c');
+      const C = w === 'lon' ? d.Cl : w === 'inner' ? d.Ci : d.Co;
+      const olPoles = olShown ? L.roots(Lg.den) : [...L.roots(C.den), ...(w === 'outer' ? L.roots(d.Ti.den) : [])];
+      const mk = olPoles.map((q) => ({ ...q, kind: 'ol', label: olShown ? 'pole of L' : (w === 'outer' ? 'pole of C or T_in' : 'pole of C'), noFit: Math.hypot(q.re, q.im) > 30 }));
       cl.forEach((q) => mk.push({ ...q, kind: 'cl', label: 'closed-loop pole', noFit: Math.hypot(q.re, q.im) > 30 }));
       return { markers: mk, fitR: w === 'inner' ? 25 : 4 };
     },

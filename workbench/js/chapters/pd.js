@@ -16,6 +16,26 @@ WB.chapters = WB.chapters || {};
   const { tex, texPole, fmt, fmtPole } = M;
 
   // ---------------------------------------------------------------- shared --
+  // Anything that answers part `key` ('A.7/a') is shown in Explore mode, or in Work
+  // mode once that part is solved. Only Work mode consults app.isSolved, so contexts
+  // without a mode or an app (tools/regress_A.py) behave like Explore.
+  const shows = (ctx, key) => ctx.S.mode !== 'work' || ctx.app.isSolved(key);
+  const partKey = (ctx, ch, part) => `${ctx.sys.problems[ch].id}/${part}`;
+
+  // Gravity compensation the controllers actually add. τ_fl answers A.4(c) and τ_e
+  // answers A.4(a), so Work mode adds each only once that part is solved; until
+  // then τ = τ̃ and the torque plot shows only the student's own feedback.
+  function compApplied(ctx, comp = ctx.st.comp) {
+    if (comp === 'fl') return shows(ctx, partKey(ctx, 'ch4', 'c'));
+    if (comp === 'eq') return shows(ctx, partKey(ctx, 'ch4', 'a'));
+    return false;
+  }
+  function compNote(parent, ctx) {
+    if (ctx.S.mode !== 'work') return;
+    const { sym, problems } = ctx.sys;
+    parent.append(el('p', { class: 'muted small', text: `Work mode adds ${sym.ffText} once ${problems.ch4.id}(c) is solved, and ${sym.uText}_e once ${problems.ch4.id}(a) is solved (Ch 4 tab). Until then the controller sends only its own ${sym.uText}̃.` }));
+  }
+
   function clPoles(model, kP, kD) {
     return M.roots2(model.a1 + model.b0 * kD, model.a0 + model.b0 * kP);
   }
@@ -28,6 +48,7 @@ WB.chapters = WB.chapters || {};
     const { kP, kD } = ctx.gains;
     const st = ctx.st;
     const Ts = S.sim.Ts;
+    const comp = compApplied(ctx) ? st.comp : 'none';
     let rPrev = null;
     return {
       update(r, x) {
@@ -38,8 +59,8 @@ WB.chapters = WB.chapters || {};
         const deriv = st.arch === 'error' ? kD * (rdot - ydot) : -kD * ydot;
         const uTilde = kP * (r - y) + deriv;
         if (linear) return uTilde;
-        if (st.comp === 'fl') return uTilde + sys.feedbackLinearization(x, pModel);
-        if (st.comp === 'eq') return uTilde + sys.equilibriumInput(0, pModel);
+        if (comp === 'fl') return uTilde + sys.feedbackLinearization(x, pModel);
+        if (comp === 'eq') return uTilde + sys.equilibriumInput(0, pModel);
         return uTilde;
       },
     };
@@ -64,6 +85,7 @@ WB.chapters = WB.chapters || {};
       ],
       ...bind(ctx, 'comp'),
     });
+    compNote(parent, ctx);
   }
 
   function workGainSliders(parent, ctx) {
@@ -85,7 +107,7 @@ WB.chapters = WB.chapters || {};
     const ol = M.roots2(model.a1, model.a0);
     const cl = clPoles(model, kP, kD);
     // In Work mode the open-loop poles answer A.7(a) until it is solved.
-    const showOl = ctx.S.mode === 'explore' || ctx.app.isSolved(`${ctx.sys.problems.ch7.id}/a`);
+    const showOl = shows(ctx, partKey(ctx, 'ch7', 'a'));
     const markers = showOl ? ol.map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` })) : [];
     cl.forEach((p, i) => markers.push({ ...p, kind: 'cl', label: `closed-loop pole p${i + 1}`, dragId: draggable ? i : undefined }));
     if (ctx.st.arch === 'error' && kD > 1e-9) markers.push({ re: -kP / kD, im: 0, kind: 'zero', label: 'zero z = −kP/kD' });
@@ -106,7 +128,7 @@ WB.chapters = WB.chapters || {};
   function olPolesCard(ctx) {
     const ol = M.roots2(ctx.model.a1, ctx.model.a0);
     return {
-      title: 'Open-loop poles', page: 'p. 99',
+      title: 'Open-loop poles', page: 'p. 99', answers: partKey(ctx, 'ch7', 'a'),
       theory: 'p_{ol} = -\\frac{a_1}{2} \\pm \\sqrt{\\left(\\frac{a_1}{2}\\right)^2 - a_0}',
       numbers: `p_{ol} = ${texPole(ol[0])},\\; ${texPole(ol[1])}`,
       spoiler: true,
@@ -140,7 +162,8 @@ WB.chapters = WB.chapters || {};
     const tauE = sys.equilibriumInput(0, pModel);
     return {
       title: 'Gravity compensation', page: 'p. 104 · Listing 7.1',
-      answers: comp === 'none' ? undefined : `${sys.problems.ch4.id}/c`,
+      // τ_e at θ_e = 0 is a number from A.4(a); both forms show τ_fl from A.4(c).
+      answers: comp === 'none' ? undefined : comp === 'eq' ? [`${sys.problems.ch4.id}/a`, `${sys.problems.ch4.id}/c`] : `${sys.problems.ch4.id}/c`,
       theory: comp === 'fl'
         ? `${sys.sym.u} = ${sys.sym.ff} + \\tilde{${sys.sym.u}},\\quad ${sys.sym.ff} = ${sys.ffTex}`
         : comp === 'eq'
@@ -150,11 +173,11 @@ WB.chapters = WB.chapters || {};
     };
   }
 
-  function placementCard(ctx, desired, title, page) {
+  function placementCard(ctx, desired, title, page, answers) {
     const { model } = ctx;
     const { alpha1, alpha0 } = M.polyFromPoles(desired[0], desired[1]);
     return {
-      title, page,
+      title, page, answers,
       theory: '\\Delta^d_{cl}(s) = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad \\text{set } \\Delta_{cl}(s) = \\Delta^d_{cl}(s) \\text{ and match coefficients}',
       symbolic: 'k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
       numbers: `\\Delta_{cl}^d = s^2 + ${tex(alpha1)}\\,s + ${tex(alpha0)} \\quad \\Rightarrow k_P = ${tex((alpha0 - model.a0) / model.b0)},\\; k_D = ${tex((alpha1 - model.a1) / model.b0)}`,
@@ -371,6 +394,8 @@ WB.chapters = WB.chapters || {};
   }
 
   function showResult(node, r) {
+    // r.info: a message that makes no claim about correctness (e.g. "your plot is drawn").
+    if (r.info) { node.replaceChildren(el('span', { class: 'status-msg', text: r.msg || '' })); return; }
     node.replaceChildren(el('span', { class: r.ok ? 'status good' : 'status bad' },
       el('span', { class: 'status-icon', 'aria-hidden': 'true', text: r.ok ? '✓' : '✗' }),
       el('span', { text: r.ok ? 'Correct' : 'Not yet' })), el('span', { class: 'status-msg', text: r.msg || '' }));
@@ -473,7 +498,7 @@ WB.chapters = WB.chapters || {};
     math(ctx) {
       const cards = [plantCard(ctx), olPolesCard(ctx), closedLoopCard(ctx)];
       const desired = ctx.S.mode === 'work' ? ctx.sys.problems.ch7.desiredPoles : this.designPoles(ctx);
-      cards.push(placementCard(ctx, desired, ctx.S.mode === 'work' ? 'Pole placement (problem targets)' : 'Pole placement (your design)', 'p. 100'));
+      cards.push(placementCard(ctx, desired, ctx.S.mode === 'work' ? 'Pole placement (problem targets)' : 'Pole placement (your design)', 'p. 100', partKey(ctx, 'ch7', 'c')));
       cards.push(compensationCard(ctx));
       return cards;
     },
@@ -602,11 +627,15 @@ WB.chapters = WB.chapters || {};
     splane(ctx) {
       const markers = baseMarkers(ctx, ctx.S.mode === 'explore');
       const wn = this.wn(ctx);
-      if (ctx.S.mode === 'work') {
+      // In Work mode the spec's poles and ωn answer A.8(a), and the saturation
+      // bound ωn,max answers A.8(b): each appears once its part is solved.
+      const showA = shows(ctx, partKey(ctx, 'ch8', 'a'));
+      if (ctx.S.mode === 'work' && showA) {
         for (const p of this.designPoles(ctx)) markers.push({ ...p, kind: 'target', label: 'target pole (spec)' });
       }
       const sb = this.satBound(ctx);
-      return { markers, zetaRay: ctx.st.zeta, wnCircle: wn, wnMax: isFinite(sb.wnMax) ? sb.wnMax : null };
+      const showB = shows(ctx, partKey(ctx, 'ch8', 'b'));
+      return { markers, zetaRay: ctx.st.zeta, wnCircle: showA ? wn : null, wnMax: showB && isFinite(sb.wnMax) ? sb.wnMax : null };
     },
 
     onPoleDrag(ctx, id, re, im) {
@@ -630,14 +659,14 @@ WB.chapters = WB.chapters || {};
         theory: (st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2 t_r \\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}')
           + ',\\quad \\Delta^d_{cl} = s^2 + 2\\zeta\\omega_n s + \\omega_n^2,\\quad p = -\\zeta\\omega_n \\pm j\\omega_n\\sqrt{1-\\zeta^2}',
         numbers: `\\omega_n = ${tex(wn)},\\quad \\Delta^d_{cl} = s^2 + ${tex(2 * st.zeta * wn)}\\,s + ${tex(wn * wn)},\\quad p = ${texPole(poles[0])},\\; ${texPole(poles[1])}`,
-        spoiler: true,
+        spoiler: true, answers: partKey(ctx, 'ch8', 'a'),
       });
-      cards.push(placementCard(ctx, poles, 'Gains from the spec', 'p. 100, A.8 p. 122'));
+      cards.push(placementCard(ctx, poles, 'Gains from the spec', 'p. 100, A.8 p. 122', partKey(ctx, 'ch8', 'a')));
       cards.push({
         title: 'Saturation limits the rise time', page: 'p. 119 · Eq. 8.8, p. 120 · Fig. 8-13',
         theory: `k_P \\le \\frac{\\tilde{u}_{max}}{e_{max}},\\quad \\omega_n \\le \\sqrt{a_0 + b_0\\frac{\\tilde{u}_{max}}{e_{max}}},\\quad t_r \\ge \\frac{2.2}{\\omega_{n,max}},\\quad \\tilde{u}_{max} = u_{max} - |u_e|`,
         numbers: `u_e = ${tex(sb.ue)}\\;(${st.comp === 'fl' ? sym.ff + '\\text{ at } ' + sym.y + '_0' : st.comp === 'eq' ? sym.u + '_e' : '\\text{none}'}),\\quad \\tilde{u}_{max} = ${tex(sb.uTildeMax)},\\; e_{max} = ${tex(sb.eMax)}\\,\\text{rad}\\quad \\Rightarrow \\omega_{n,max} = ${tex(sb.wnMax)},\\; t_{r,min} = ${tex(sb.trMin)}\\,\\text{s}`,
-        spoiler: true,
+        spoiler: true, answers: partKey(ctx, 'ch8', 'b'),
         note: 'u_e uses the feedforward torque at the initial angle; e_max is the size of the first step. The red region in the s-plane marks ωₙ > ωₙ,max.',
       });
       cards.push(compensationCard(ctx));
@@ -656,7 +685,8 @@ WB.chapters = WB.chapters || {};
       const peakFor = (tr) => {
         const wn = 2.2 / tr;
         const g = gainsFromPoles(model(), polesFromWnZeta(wn, prob.zeta));
-        const fake = { ...ctx, gains: g, st: { ...ctx.st, comp: 'fl', arch: 'output' } };
+        // Explore semantics: the check always adds τ_fl, whatever the Work-mode gating.
+        const fake = { ...ctx, gains: g, st: { ...ctx.st, comp: 'fl', arch: 'output' }, S: { ...ctx.S, mode: 'explore' } };
         const p = ctx.pModel;
         const out = WB.sim.simulate({
           plant: { f: (x, u) => ctx.sys.f(x, u, p), h: ctx.sys.h, uLimit: ctx.sys.uLimit(p) },
@@ -726,5 +756,5 @@ WB.chapters = WB.chapters || {};
   };
 
   // Shared with later chapters (PID, root locus, frequency response).
-  WB.pd = { makeController, clPoles, gainsFromPoles, polesFromWnZeta, wnFromTr, problemPanel, checkNumbers, num, sharedControls, plantCard, closedLoopCard, compensationCard, baseMarkers, showResult };
+  WB.pd = { makeController, clPoles, gainsFromPoles, polesFromWnZeta, wnFromTr, problemPanel, checkNumbers, num, sharedControls, plantCard, closedLoopCard, compensationCard, baseMarkers, showResult, shows, partKey, compApplied, compNote };
 })();

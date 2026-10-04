@@ -13,6 +13,42 @@ window.WB = window.WB || {};
 
   // s-plane legends: pages pass data.kindNames = {kind: label} (plot.js).
 
+  // ----------------------------------------------- Work-mode answer gating --
+  // Anything that answers part `key` ('E.4/c') shows in Explore mode, or in Work
+  // mode once that part is solved. Only Work mode gates, so contexts without a
+  // mode or app (tools/regress_E.py) behave like Explore.
+  const shows = (ctx, key) => ctx.S.mode !== 'work' || ctx.app.isSolved(key);
+  const e4 = (part) => `${sysE().problems.ch4.id}/${part}`;
+  // Feedforward force F_ff(z) for comp 'fl' (F_fl(z), the answer to E.4(c)), 'eq'
+  // (F_e at z_e, E.4(a)) or 'none'. In Work mode each is applied only once its
+  // part is solved: before that 'fl' adds nothing and 'eq' adds the student's own
+  // F_e (ctx.st.FeW, the "your F_e" slider; 0 without one). `always` is for
+  // internal runs whose force never reaches the screen (the E.8(f) check).
+  function ffOf(ctx, comp, { always = false } = {}) {
+    const s = sysE(), p = ctx.pModel;
+    if (comp === 'fl') return always || shows(ctx, e4('c')) ? (z) => s.Ffl(z, p) : () => 0;
+    if (comp === 'eq') {
+      const Fe = always || shows(ctx, e4('a')) ? s.Fe(p) : (ctx.st && ctx.st.FeW) || 0;
+      return () => Fe;
+    }
+    return () => 0;
+  }
+  // Is the workbench's F_ff applied (false: Work mode before E.4(a)/(c))?
+  const ffApplied = (ctx, comp) => comp === 'none' || shows(ctx, e4(comp === 'fl' ? 'c' : 'a'));
+  // "your F_e" slider for comp 'eq' in Work mode before E.4(a) is solved, and a
+  // note saying what is applied. Shown or hidden with the comp control's value.
+  function ffWorkControls(parent, ctx) {
+    if (ctx.S.mode !== 'work') return;
+    const solvedA = shows(ctx, e4('a')), solvedC = shows(ctx, e4('c'));
+    if (solvedA && solvedC) return;
+    if (ctx.st.FeW === undefined) ctx.st.FeW = 0;
+    if (!solvedA) {
+      slider(parent, { label: 'your F<sub>e</sub>', unit: 'N', min: 0, max: 30, step: 0.01, sig: 4, hint: 'applied with F_e until E.4(a) is solved',
+        ...bind(ctx, 'FeW'), disabled: () => ctx.st.comp !== 'eq' });
+    }
+    parent.append(el('p', { class: 'muted small', text: `Work mode: ${[!solvedC && 'F_fl(z) is applied once E.4(c) is solved (Ch 4 tab); until then it adds nothing', !solvedA && 'F_e is your F_e until E.4(a) is solved'].filter(Boolean).join('; ')}.` }));
+  }
+
   // -------------------------------------------------- successive loop closure --
   // Design model (E.5(c), p. 386–387): P_in = b0/s², b0 = ℓ/(m2ℓ²/3 + m1 z_e²);
   // P_out = −g/s². Inner PD: Δ = s² + b0 kD s + b0 kP; its DC gain is 1. Outer PD
@@ -45,12 +81,12 @@ window.WB = window.WB || {};
   // sample, trapezoidal integrators, dirty derivative Eq. 10.4.
   //   opt.meas: 'state' (true ż, θ̇: E.8, E.9) | 'dirty' (measured z, θ: E.10)
   //   opt.antiwindup: 'gate' (integrate z only when |ż| < v̄, E.10(c)) | 'none'
+  //   opt.ffAlways: apply F_ff even where Work mode would hold it back (ffOf)
   function nestedPID(ctx, g, opt = {}, { linear = false } = {}) {
-    const { pModel, S } = ctx;
-    const s = sysE();
+    const { S } = ctx;
     const Ts = S.sim.Ts, sigma = opt.sigma ?? 0.05;
     const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
-    const FeV = s.Fe(pModel);
+    const ffAt = ffOf(ctx, opt.comp, { always: opt.ffAlways });
     let zPrev = null, thPrev = 0, zd = 0, thd = 0, Iz = 0, ezPrev = 0, Ith = 0, ethPrev = 0;
     return {
       update(r, x, yMeas) {
@@ -70,7 +106,7 @@ window.WB = window.WB || {};
         if (g.kIth) Ith += (Ts / 2) * (eth + ethPrev);
         const Ft = g.kPth * eth + (g.kIth || 0) * Ith - g.kDth * thd;
         let ff = 0;
-        if (!linear) ff = opt.comp === 'fl' ? s.Ffl(z, pModel) : opt.comp === 'eq' ? FeV : 0;
+        if (!linear) ff = ffAt(z);
         zPrev = z; thPrev = th; ezPrev = ez; ethPrev = eth;
         return { u: ff + Ft, thetaR, ff, Ft, zdHat: zd, thdHat: thd, Iz };
       },
@@ -169,7 +205,8 @@ window.WB = window.WB || {};
     const lin = s.linear(pModel, { comp: opt.comp === 'fl' ? 'fl' : 'eq' });
     const { A, B, C } = lin;
     const z0 = lin.ze;
-    const ff = (z) => (linear ? 0 : opt.comp === 'fl' ? s.Ffl(z, pModel) : lin.Fe);
+    const ffAt = ffOf(ctx, opt.comp === 'fl' ? 'fl' : 'eq');
+    const ff = (z) => (linear ? 0 : ffAt(z));
     const Ts = S.sim.Ts, uLim = s.uLimit(pModel);
     const useObs = level === 'obs' || level === 'dobs';
     const useDO = level === 'dobs' && opt.dobs !== false;
@@ -285,6 +322,7 @@ window.WB = window.WB || {};
   const bandwidth = (Tc, W) => WB.tf.bandwidth(Tc, W, WB.tf.mag(Tc, W[0]) * 10 ** (-3 / 20));
 
   WB.E = {
+    shows, ffOf, ffApplied, ffWorkControls,
     pdDesign, innerPoles, outerPoles, nestedPoles, nestedPID, nestedLinearSim,
     ssPoles, augI, augD, obsGain, ssDesign, makeSS, Cr,
     readout, numGrid, knob, beforeSwitch, beforeLastSwitch, onBeam, P, answersOf, poleText, bandwidth, fmt,

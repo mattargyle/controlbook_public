@@ -112,23 +112,53 @@ def _evaluate(a):
         rows.append(row)
     return {'rows': rows}
 
+# Optional: 'plant' is the workbench's own f(state, u) source (run in a separate
+# namespace with 'plantParams', default 'params'). Once per step, at its start (a
+# zero-order hold, as WB.sim does), 'ctrl' names a function of the state components
+# whose value is added to u[k], then saturated at uLimit and disturbed by d[k];
+# 'hold' names a function hold(state, u[k]) that returns the input held over the step
+# (for vector inputs, e.g. a student's feedback law plus the workbench's mixing).
 def _simulate(a):
     code = _compile(a['code'])
     ns = _namespace(code, a['params'])
-    f = ns.get(a['fn'])
+    name = 'f' if a.get('plant') else a['fn']
+    f = (_namespace(compile(a['plant'], '<workbench plant>', 'exec'), a.get('plantParams') or a['params']) if a.get('plant') else ns).get(name)
     if not callable(f):
-        return {'error': f"NameError: define a function named {a['fn']}", 'where': ''}
+        return {'error': f"NameError: define a function named {name}", 'where': ''}
+    ctrl = ns.get(a['ctrl']) if a.get('ctrl') else None
+    if a.get('ctrl') and not callable(ctrl):
+        return {'error': f"NameError: define a function named {a['ctrl']}", 'where': ''}
+    hold = ns.get(a['hold']) if a.get('hold') else None
+    if a.get('hold') and not callable(hold):
+        return {'error': f"NameError: define a function named {a['hold']}", 'where': ''}
+    lim, d = a.get('uLimit'), a.get('d')
+    sat = (lambda v: max(-lim, min(lim, v))) if lim else (lambda v: v)
     x = np.array(a['x0'], dtype=float).reshape(-1, 1)
     n, Ts = x.shape[0], a['Ts']
     def F(xx, u):
         v = np.asarray(f(xx, u), dtype=float)
         if v.size != n:
-            raise ValueError(f'{a["fn"]} returned shape {v.shape}; expected ({n}, 1)')
+            raise ValueError(f'{name} returned shape {v.shape}; expected ({n}, 1)')
         return v.reshape(n, 1)
     xs = []
     for k, u in enumerate(a['u']):
         if isinstance(u, list):  # vector input: a column, as check passes it
             u = np.array(u, dtype=float).reshape(-1, 1)
+        if ctrl:
+            try:
+                uc = np.asarray(ctrl(*x[:, 0].tolist()), dtype=float)
+                if uc.size != 1:
+                    raise ValueError(f'returned {uc.size} values; expected one number')
+                u = sat(float(uc.item()) + u)
+            except Exception as e:
+                return _err(e, f" (in {a['ctrl']}, at t = {k * Ts:.3g} s)")
+            if d:
+                u = sat(u + d[k])
+        if hold:
+            try:
+                u = np.asarray(hold(x, u), dtype=float)
+            except Exception as e:
+                return _err(e, f' (at t = {k * Ts:.3g} s)')
         xs.append(x[:, 0].tolist())
         if k == len(a['u']) - 1:
             break

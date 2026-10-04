@@ -28,10 +28,14 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const PinFull = (ctx) => { const l = ctx.sys.linear(ctx.pModel); return T.tf([l.b0, 0, 0], [1, 0, 0, 0, -ctx.pModel.m1 * ctx.pModel.g ** 2 / l.De]); };
 
   const KN = (st) => ({ trTh: st.trTh, zetaTh: st.zetaTh, M: st.M, zetaZ: st.zetaZ, rule: '2.2' });
+  // Work mode keeps its own k_Iz (st.kIzW): the Explore default −10⁻⁴ is an answer to
+  // E.P.6(c). Its starting value is E.P.6's starting k_I, which is not.
+  const KIZ_W0 = -3e-4;
+  const kIzKey = (ctx) => (ctx.S.mode === 'work' ? 'kIzW' : 'kIz');
   function loopsOf(ctx) {
     const st = ctx.st;
     const d = E.pdDesign(ctx.pModel, KN(st));
-    const g = { ...d, kIz: st.kIz, kIth: st.kIth || 0 };
+    const g = { ...d, kIz: ctx.S.mode === 'work' ? st.kIzW ?? KIZ_W0 : st.kIz, kIth: st.kIth || 0 };
     const Cin = T.pid({ kP: g.kPth, kI: g.kIth, kD: g.kDth, sigma: st.sigma }), Cout = T.pid({ kP: g.kPz, kI: g.kIz, kD: g.kDz, sigma: st.sigma });
     const Lin = T.mul(Pin(ctx), Cin), Lout = T.mul(Pout(ctx), Cout);
     return { g, Cin, Cout, Lin, Lout, Tin: T.feedback(Lin), Tout: T.feedback(Lout) };
@@ -43,13 +47,21 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     E.knob(sec, ctx, 'zetaTh', 'ζ<sub>θ</sub>', 0.3, 1.5, 0.005);
     E.knob(sec, ctx, 'M', 'M = t<sub>r<sub>z</sub></sub>/t<sub>r<sub>θ</sub></sub>', 1.5, 30, 0.1, { sig: 3 });
     E.knob(sec, ctx, 'zetaZ', 'ζ<sub>z</sub>', 0.3, 1.5, 0.005);
-    E.knob(sec, ctx, 'kIz', 'k<sub>I<sub>z</sub></sub>', -0.1, 0, 0.00001, { sig: 3 });
+    const work = ctx.S.mode === 'work';
+    if (work && ctx.st.kIzW === undefined) ctx.st.kIzW = KIZ_W0;
+    E.knob(sec, ctx, kIzKey(ctx), 'k<sub>I<sub>z</sub></sub>', -0.1, 0, 0.00001, { sig: 3 });
     E.knob(sec, ctx, 'kIth', 'k<sub>I<sub>θ</sub></sub>', 0, 50, 0.01, { sig: 3 });
     E.knob(sec, ctx, 'sigma', 'σ', 0.005, 0.3, 0.001, { unit: 's', sig: 3 });
-    sec.append(el('p', { class: 'muted small', text: 'Defaults: the E.8 specs (t_rθ = 1 s, M = 10, ζ = 0.707) with k_Iz = −10⁻⁴ from E.P.6, k_Iθ = 0 and σ = 0.05. These are not the gains that pass E.10 (see the E.10 solution).' }));
+    // Work mode: the E.10 sample design is an answer to E.10(b), so its button waits for it.
+    const e10 = work && !E.shows(ctx, `${ctx.sys.problems.ch10.id}/b2`);
+    sec.append(el('p', { class: 'muted small', text: work
+      ? `Defaults: the E.8 specs (t_rθ = 1 s, M = 10, ζ = 0.707), k_Iθ = 0 and σ = 0.05; k_Iz starts at E.P.6's starting value. Set k_Iz yourself (E.P.6(c)).${e10 ? ' The E.10 sample design is available once E.10(b) is solved.' : ''}`
+      : 'Defaults: the E.8 specs (t_rθ = 1 s, M = 10, ζ = 0.707) with k_Iz = −10⁻⁴ from E.P.6, k_Iθ = 0 and σ = 0.05. These are not the gains that pass E.10 (see the E.10 solution).' }));
+    const specs = work ? { trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIth: 0 } : { trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0 };
     sec.append(el('div', { class: 'btn-row' },
-      el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.8 specs', onclick: () => { Object.assign(ctx.st, { trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0 }); ctx.update(); } }),
-      el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.10 sample design', title: 'the robust design from the E.10 solution', onclick: () => { Object.assign(ctx.st, E10_SAMPLE); ctx.update(); } })));
+      el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.8 specs', onclick: () => { Object.assign(ctx.st, specs); ctx.update(); } }),
+      ...(e10 ? [] : [el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.10 sample design', title: 'the robust design from the E.10 solution', onclick: () => { Object.assign(ctx.st, E10_SAMPLE, work ? { kIzW: E10_SAMPLE.kIz } : {}); ctx.update(); } })])));
+    if (work) sec.append(el('p', { class: 'muted small', text: FL_NOTE }));
     const show = () => WB.ui.shown(ctx, `E:${ctx.S.chapter}:gains`);
     const box = el('div');
     sec.append(box);
@@ -72,6 +84,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       ...bind(ctx, 'loop'),
     });
   }
+  const FL_NOTE = 'Work mode: the time plots add F_fl(z) once E.4(c) is solved (Ch 4 tab); until then F = F̃.';
   const E10_SAMPLE = { trTh: 0.15, zetaTh: 0.707, M: 8, zetaZ: 0.707, kIz: -0.05, kIth: 20 };
   const freqDefaults = (extra = {}) => ({ comp: 'fl', trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0, sigma: 0.05, loop: 'in', vbar: 0.05, ...extra });
   const nestedCtl = (ctx, o) => E.nestedPID(ctx, loopsOf(ctx).g, { comp: 'fl', meas: 'dirty', sigma: ctx.st.sigma, antiwindup: 'gate', vbar: ctx.st.vbar }, o);
@@ -104,6 +117,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, ...bind(ctx, 'w0') });
       segmented(sec, { label: 'Inner plant: also show the full E.5(b) model', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'full') });
       sec.append(el('p', { class: 'muted small', text: 'Sketch the straight-line approximation by hand first. In Work mode each plant’s Bode plot appears when you mark that part drawn. The time plots show the E.8 nested loop for reference.' }));
+      if (ctx.S.mode === 'work') sec.append(el('p', { class: 'muted small', text: FL_NOTE }));
     },
 
     bode(ctx) {
@@ -234,7 +248,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         : [{ w: st.wdout, label: 'ω_d,out' }, { w: st.wsin, label: '0.6 rad/s' }];
       return {
         title: inner ? 'Inner loop: P_in and P_in·C_in' : 'Outer loop: P_out and P_out·C_out', w: W,
-        lines: [{ label: inner ? 'P_in' : 'P_out', ...T.bode(P, W), color: '--text-muted', width: 1.5 }, { label: inner ? 'P_in C_in (PD)' : 'P_out C_out (PID)', ...T.bode(Lg, W), color: '--series-1' }],
+        // The plant's Bode plot answers E.15(a)/(b): in Work mode only once drawn.
+        lines: [...(drawn(ctx, inner) ? [{ label: inner ? 'P_in' : 'P_out', ...T.bode(P, W), color: '--text-muted', width: 1.5 }] : []), { label: inner ? 'P_in C_in (PD)' : 'P_out C_out (PID)', ...T.bode(Lg, W), color: '--series-1' }],
         specs: show && inner ? [{ w0: 1e-4, w1: st.wr, db: db(1 / s.gr), keep: 'above', color: '--series-3', label: `${fmt(db(1 / s.gr), 3)} dB` }] : [],
         marks,
       };
@@ -286,7 +301,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           check: (v) => pc(v.v, s().gn, 'percent'),
           solution: () => [{ tex: `|L_{in}(j300)| = ${tex(db(s().gn))}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%` }, { html: 'Above 1/σ = 20 rad/s the dirty-derivative PD flattens at k<sub>P</sub> + k<sub>D</sub>/σ, so |L<sub>in</sub>| falls at −40 dB/dec.' }] },
         { id: 'out', title: 'Outer loop: Bode plots of the plant and of the plant under PID',
-          html: 'Select <em>Bode of: outer (z)</em>. The book asks for the E.10 gains; the knobs default to the E.8 specs with k<sub>I<sub>z</sub></sub> = −10⁻⁴ (buttons load either). Dirty derivative as above.' },
+          html: 'Select <em>Bode of: outer (z)</em>. The book asks for the E.10 gains; the knobs default to the E.8 specs with a small k<sub>I<sub>z</sub></sub> (the buttons load the E.8 specs or the E.10 sample design). Dirty derivative as above.' },
         { id: 'd', title: '(d) Output disturbance below 0.1 rad/s, % in z', inputs: { v: '%' },
           check: (v) => {
             const g = PD().num(v.v), x = s();
@@ -436,6 +451,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     return { Cin, Cout, Lin, Tin, Po, Lout, Tout, F, si, so, stableIn, stableOut, intOk: st.d.out.pi.on, peakT: peak(Tout), peakFT: peak(T.mul(F, Tout)) };
   }
 
+  // The sample designs answer E.18(a)/(b): in Work mode they load once that part is solved.
+  const sampleOk = (ctx, part) => E.shows(ctx, `${ctx.sys.problems.ch18.id}/${part}`);
+  const SAMPLE_LATER = { ok: false, msg: 'The sample design is an answer to this part: it loads once the part is solved (or in Explore mode).' };
+
   CH.ch18 = {
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping both loops', pages: 'pp. 323–374',
     defaults() { return { loop: 'in', showT: true, d: startDesign() }; },
@@ -449,13 +468,14 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const d = lsDesign(ctx), Ts = ctx.S.sim.Ts;
       const Ci = T.filter(d.Cin, Ts), Co = T.filter(d.Cout, Ts), Ff = T.filter(d.F, Ts);
       const { sys, pModel } = ctx, z0 = sys.ze(pModel);
+      const ffl = E.ffOf(ctx, 'fl');  // Work mode: once E.4(c) is solved
       return {
         update(r, x, yMeas) {
           const z = yMeas[0], th = yMeas[1];
           const rf = Ff.step(r - z0);
           const thetaR = Co.step(rf - (z - z0));
           const Ft = Ci.step(thetaR - th);
-          return { u: (linear ? 0 : sys.Ffl(z, pModel)) + Ft, thetaR };
+          return { u: (linear ? 0 : ffl(z)) + Ft, thetaR };
         },
       };
     },
@@ -526,7 +546,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const d = lsDesign(ctx), pr = ctx.sys.problems.ch18, inner = ctx.st.loop !== 'out';
       const s = inner ? pr.inner : pr.outer, mg = inner ? d.si.mg : d.so.mg;
       const lines = [
-        { label: inner ? 'P_in' : 'P = P_out·T_in', ...T.bode(inner ? Pin(ctx) : d.Po, W), color: '--text-muted', dash: [5, 4], width: 1.5 },
+        // The plant answers E.15(a)/(b): in Work mode only once that part is drawn.
+        ...(drawn(ctx, inner) ? [{ label: inner ? 'P_in' : 'P = P_out·T_in', ...T.bode(inner ? Pin(ctx) : d.Po, W), color: '--text-muted', dash: [5, 4], width: 1.5 }] : []),
         { label: inner ? 'L_in = P_in C_in' : 'L_out = P C_out', ...T.bode(inner ? d.Lin : d.Lout, W), color: '--series-1' },
       ];
       if (ctx.st.showT) lines.push({ label: inner ? 'T_in' : 'F·T_out', mag: T.bode(inner ? d.Tin : T.mul(d.F, d.Tout), W).mag, color: '--series-3', width: 1.5 });
@@ -543,7 +564,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const d = lsDesign(ctx), Lg = ctx.st.loop === 'out' ? d.Lout : d.Lin;
       const cl = L.roots(L.polyAdd(Lg.den, Lg.num));
       const R = ctx.st.loop === 'out' ? 8 : 120;
-      const mk = [{ re: 0, im: 0, kind: 'ol', label: 'plant poles at 0' }];
+      // The design model's poles at 0 answer E.5(c).
+      const mk = E.shows(ctx, `${ctx.sys.problems.ch5.id}/c`) ? [{ re: 0, im: 0, kind: 'ol', label: 'plant poles at 0' }] : [];
       cl.forEach((q, i) => mk.push({ ...q, kind: 'cl', label: `closed-loop pole ${i + 1}`, noFit: Math.hypot(q.re, q.im) > R }));
       return { markers: mk, fitR: Math.min(R, Math.max(1, ...cl.filter((q) => Math.hypot(q.re, q.im) <= R).map((q) => Math.hypot(q.re, q.im)))) };
     },
@@ -572,7 +594,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         {
           id: 'a', title: '(a) Inner loop meets its specs',
           check: () => { const d = lsDesign(ctx), s = d.si; const ok = s.lowOk && s.highOk && s.pmOk && d.stableIn; return { ok, msg: `low ${s.lowOk ? '✓' : '✗'}, high ${s.highOk ? '✓' : '✗'}, PM ${fmt(s.mg.pm, 3)}° ${s.pmOk ? '✓' : '✗'}` }; },
-          actions: [{ label: 'Load sample inner design', run: () => { st.d.in = sampleInner(); st.loop = 'in'; ctx.update(); return null; } }],
+          actions: [{ label: 'Load sample inner design', run: () => { if (!sampleOk(ctx, 'a')) return SAMPLE_LATER; st.d.in = sampleInner(); st.loop = 'in'; ctx.update(); return null; } }],
           solution: () => [
             { html: 'P<sub>in</sub> = b₀/s² has −40 dB/dec and −180° everywhere, so a gain alone gives PM = 0. To get +49.9 dB at 1 rad/s and −49.9 dB at 1000 rad/s, the loop needs about 100 dB over three decades: it can cross over near 40 rad/s with phase lead there, then roll off.' },
             { html: 'Sample: lead at ω = 40 rad/s with M = 20 (+64.8° max), a low-pass at 400 rad/s, and k = 135 so the loop crosses at 40 rad/s. PM ≈ 59°, |L(j1)| ≈ 51.1 dB, |L(j1000)| ≈ −51.6 dB, inner bandwidth ≈ 66 rad/s (python-control agrees).' },
@@ -586,7 +608,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
             const ok = s.lowOk && s.highOk && s.pmOk && d.stableOut && d.intOk && db(d.peakFT) <= 0.5;
             return { ok, msg: `low ${s.lowOk ? '✓' : '✗'}, high ${s.highOk ? '✓' : '✗'}, PM ${fmt(s.mg.pm, 3)}°, integrator ${d.intOk ? '✓' : '✗'}, peak |FT| ${fmt(db(d.peakFT), 3)} dB` };
           },
-          actions: [{ label: 'Load sample outer design', run: () => { st.d.in = sampleInner(); st.d.out = sampleOuter(); st.d.pf = { on: true, p: 0.7 }; st.loop = 'out'; ctx.update(); return null; } }],
+          actions: [{ label: 'Load sample outer design', run: () => { if (!sampleOk(ctx, 'b')) return SAMPLE_LATER; st.d.in = sampleInner(); st.d.out = sampleOuter(); st.d.pf = { on: true, p: 0.7 }; st.loop = 'out'; ctx.update(); return null; } }],
           solution: () => [
             { html: 'An integrator (s + z<sub>I</sub>)/s rejects constant input disturbances. With −g/s² that is three integrators (−270°), so the loop needs strong lead at crossover. Sample: −k (s + 0.2)/s · lead(ω = 2, M = 30) · 30/(s + 30), k = 0.0735: PM ≈ 59.7° at 2 rad/s, |L(j0.1)| ≈ 44.5 dB, |L(j100)| ≈ −71 dB. Outer bandwidth ≈ 3.3 rad/s, about 20× below the inner loop.' },
             { html: 'Unfiltered, T<sub>out</sub> peaks at about 2 dB (21% overshoot). A prefilter F = 0.7/(s + 0.7) brings the peak to 0 dB, at the cost of a slower rise.' },
@@ -599,6 +621,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
             const res = ctx.app.result(), i = E.beforeSwitch(ctx, res), n = res.t.length - 1 - Math.round(0.05 / ctx.S.sim.Ts);
             const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]), eEnd = Math.abs(res.rAll[0][n] - res.yAll[0][n]);
             const ok = e < 0.002 && eEnd < 0.005 && isFinite(eEnd);
+            if (!E.ffApplied(ctx, 'fl')) return { ok: false, msg: 'F_fl(z) is applied once E.4(c) is solved (Ch 4 tab).' };
             return { ok, msg: `error ${fmt(1000 * e, 3)} mm before the first switch, ${fmt(1000 * eEnd, 3)} mm just before t_end (d = ${fmt(ctx.S.sim.dist, 3)} N).` };
           },
           solution: () => [{ html: 'Both C(s) and F(s) run as state-space filters (controllable canonical form) integrated with RK4 at T<sub>s</sub>, with substeps for the fast inner-loop poles. The sample design tracks the square wave and rejects the 0.5 N step through the outer integrator.' }],

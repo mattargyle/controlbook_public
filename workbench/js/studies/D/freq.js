@@ -204,7 +204,8 @@
       WB.ui.addRefresher(() => {
         const s = specs(ctx);
         const row = WB.ui.metric;
-        box.replaceChildren(...(WB.ui.shown(ctx, 'D:ch16:specs') ? [
+        const show = WB.ui.shown(ctx, 'D:ch16:specs') || ['a', 'b', 'c'].every((k) => ctx.app.isSolved(`D.16/${k}`));
+        box.replaceChildren(...(show ? [
           row('unit-ramp error k/k_I', `${fmt(s.ramp, 3)} m`),
           row('d_in below ω_d,in: 1/|C|', `${fmt(-s.Bdin, 3)} dB → ${fmt(100 * s.gdin, 3)} %`),
           row('exact |P/(1+PC)| at ω_d,in', `${fmt(100 * s.gdinExact, 3)} %`),
@@ -213,7 +214,9 @@
       });
     },
 
+    // The plot part asks for these curves: in Work mode they appear once it is done.
     bode(ctx) {
+      if (!lib.shows(ctx, 'D.16/plot')) return null;
       const s = specs(ctx), st = ctx.st;
       return {
         title: 'Bode: plant and loop gain', w: W,
@@ -230,16 +233,16 @@
           theory: 'E = \\frac{1}{1+PC}R + \\frac{PC}{1+PC}N,\\quad + \\frac{1}{1+PC}D_{out} + \\frac{P}{1+PC}D_{in}' },
         { title: 'Type 1 from the Bode plot', page: 'p. 294 · Eq. 16.11',
           theory: 'M_v = \\lim_{\\omega\\to 0}|j\\omega\\,P(j\\omega)C(j\\omega)|,\\quad e_{ss} = \\frac{A}{M_v} \\text{ for a ramp of slope } A',
-          numbers: `M_v = ${tex(s.Mv)} \\Rightarrow e_{ramp} = ${tex(s.ramp)}\\,\\text{m}`, spoiler: true },
+          numbers: `M_v = ${tex(s.Mv)} \\Rightarrow e_{ramp} = ${tex(s.ramp)}\\,\\text{m}`, answers: 'D.16/a' },
         { title: 'M_v of the mass-spring-damper under PID', page: 'p. 294 · Eq. 16.11', answers: 'D.16/a',
           theory: 'M_v = \\lim_{s\\to0} s\\,\\frac{1/m}{s^2 + \\frac bm s + \\frac km}\\,\\frac{k_I}{s} = \\frac{k_I}{k}' },
         { title: 'Input disturbance', page: 'p. 290 · Eq. 16.8, p. 291 · Eq. 16.9',
           theory: '20\\log|PC| - 20\\log|P| = 20\\log|C| \\ge B_{d_{in}} \\text{ for } \\omega \\le \\omega_{d_{in}},\\quad \\gamma_{d_{in}} = 10^{-B_{d_{in}}/20}',
-          numbers: `|C(j\\omega_{d,in})| = ${tex(s.Bdin)}\\,\\text{dB} \\Rightarrow \\gamma_{d_{in}} = ${tex(s.gdin)}\\quad(\\text{exact } |P/(1+PC)| = ${tex(s.gdinExact)})`, spoiler: true,
+          numbers: `|C(j\\omega_{d,in})| = ${tex(s.Bdin)}\\,\\text{dB} \\Rightarrow \\gamma_{d_{in}} = ${tex(s.gdin)}\\quad(\\text{exact } |P/(1+PC)| = ${tex(s.gdinExact)})`, answers: 'D.16/b',
           note: ctx.S.mode !== 'explore' ? 'The book\'s rule assumes |PC| ≫ 1 at ω_d,in. Check that assumption for your gains.' : `The book's rule assumes |PC| ≫ 1 at ω_d,in. Here |PC(j${fmt(ctx.st.wdin, 3)})| = ${fmt(absAt(s.Lg, ctx.st.wdin), 3)}, so the exact value differs from 1/|C|.` },
         { title: 'Noise', page: 'p. 287 · Eq. 16.6',
           theory: '20\\log|PC| \\le 20\\log\\gamma_n \\text{ for } \\omega \\ge \\omega_{no}',
-          numbers: `|PC(j\\omega_{no})| = ${tex(db(s.gn))}\\,\\text{dB} \\Rightarrow \\gamma_n = ${tex(s.gn)}`, spoiler: true },
+          numbers: `|PC(j\\omega_{no})| = ${tex(db(s.gn))}\\,\\text{dB} \\Rightarrow \\gamma_n = ${tex(s.gn)}`, answers: 'D.16/c' },
         { title: 'C_PID with dirty derivative', page: 'p. 313',
           theory: 'C(s) = \\frac{(k_D + \\sigma k_P)s^2 + (k_P + \\sigma k_I)s + k_I}{s(\\sigma s + 1)}',
           numbers: `C(s) = ${T.texTf(s.C)}` },
@@ -253,11 +256,12 @@
         if (g === null) return { ok: false, msg: 'Enter a number.' };
         if (M.close(g, a)) return { ok: true, msg: `Matches the book's ${what} rule.` };
         if (M.close(g, b)) return { ok: true, msg: 'Matches the exact closed-loop value.' };
-        return { ok: false, msg: `Check ${what}.` };
+        return { ok: false, msg: 'Not within 1% of the book\'s approximation or of the exact value.' };
       };
       lib.panel(parent, ctx, ctx.sys.problems.ch16, [
         { id: 'plot', title: 'Bode plots of the plant and of the plant under PID',
-          html: 'With <code>bode</code> in your code: P(s), and P(s)C(s) with the D.10 gains and the dirty derivative in C (p. 313). The Bode panel here draws both for the gains in the sliders: <em>Load my D.10 gains</em> copies your Work-mode D.10 gains.' },
+          html: 'With <code>bode</code> in your code: P(s), and P(s)C(s) with the D.10 gains and the dirty derivative in C (p. 313). When you have them, click the button: the Bode panel here then draws both for the gains in the sliders (<em>Load my D.10 gains</em> copies your Work-mode D.10 gains).',
+          done: 'I\'ve plotted them' },
         { id: 'a', title: '(a) Tracking error to a unit ramp under PID', inputs: { v: 'e<sub>ss</sub> [m]' },
           html: 'For the PID gains in the sliders (load your D.10 gains first).',
           check: (v) => (ctx.st.kI > 0 ? lib.check(v, { v: s().ramp }, { v: 'e_ss' }) : { ok: false, msg: 'Set kI > 0.' }),
@@ -289,7 +293,7 @@
       WB.ui.addRefresher(() => {
         const l = loop(ctx);
         const row = WB.ui.metric;
-        box.replaceChildren(...(WB.ui.shown(ctx, 'D:ch17:m') ? [
+        box.replaceChildren(...(CH.ch17.marginsShown(ctx) ? [
           row('phase margin (smallest)', `${fmt(l.mg.pm, 3)}° at ω_co = ${fmt(l.mg.wc, 3)} rad/s`),
           ...(l.mg.gcs.length > 1 ? [row('all gain crossovers', l.mg.gcs.map((c) => `${fmt(c.pm, 3)}° at ${fmt(c.w, 3)}`).join(', '))] : []),
           row('gain margin(s)', gmText(l.mg)),
@@ -300,8 +304,12 @@
       });
     },
 
+    // Margins and bandwidth answer (a) and (c): shown once both are solved or revealed.
+    marginsShown: (ctx) => WB.ui.shown(ctx, 'D:ch17:m') || (ctx.app.isSolved('D.17/a') && ctx.app.isSolved('D.17/c')),
+    // Part (b) asks for these curves: in Work mode they appear once it is done.
     bode(ctx) {
-      const l = loop(ctx), show = WB.ui.shown(ctx, 'D:ch17:m');
+      if (!lib.shows(ctx, 'D.17/b')) return null;
+      const l = loop(ctx), show = CH.ch17.marginsShown(ctx);
       const marks = show ? marginMarks(l.mg) : [];
       if (show && isFinite(l.bw)) marks.push({ w: l.bw, label: `−3 dB ${fmt(l.bw, 3)}`, color: '--series-2' });
       if (show && l.bwN > 1) marks.push({ w: l.bwLast, label: `−3 dB ${fmt(l.bwLast, 3)}`, color: '--series-2' });
@@ -318,13 +326,13 @@
       return [
         { title: 'Crossover and phase margin', page: 'p. 303–304',
           theory: '|P(j\\omega_{co})C(j\\omega_{co})| = 1,\\quad PM = \\angle P(j\\omega_{co})C(j\\omega_{co}) + 180^\\circ',
-          numbers: `\\omega_{co} = ${tex(l.mg.wc)},\\quad PM = ${tex(l.mg.pm)}^\\circ`, spoiler: true },
+          numbers: `\\omega_{co} = ${tex(l.mg.wc)},\\quad PM = ${tex(l.mg.pm)}^\\circ`, answers: 'D.17/a' },
         { title: 'Gain margin', page: 'p. 305',
           theory: 'GM = \\frac{1}{|PC(j\\omega_{180})|},\\quad \\angle PC(j\\omega_{180}) = -180^\\circ',
-          numbers: l.mg.crossings.length ? `GM = ${l.mg.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB at } ' + tex(c.w)).join(';\\;')}` : 'GM = \\infty \\;(\\text{phase never reaches } -180^\\circ)', spoiler: true },
+          numbers: l.mg.crossings.length ? `GM = ${l.mg.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB at } ' + tex(c.w)).join(';\\;')}` : 'GM = \\infty \\;(\\text{phase never reaches } -180^\\circ)', answers: 'D.17/a' },
         { title: 'Open vs. closed loop', page: 'p. 306–307',
           theory: 'T = \\frac{PC}{1+PC}:\\; |PC| \\gg 1 \\Rightarrow |T| \\approx 1,\\; |PC| \\ll 1 \\Rightarrow |T| \\approx |PC|',
-          numbers: `\\omega_{bw} = ${tex(l.bw)}${l.bwN > 1 ? `\\;(\\text{final roll-off } ${tex(l.bwLast)})` : ''}\\;\\text{vs.}\\;\\omega_{co} = ${tex(l.mg.wc)}`, spoiler: true,
+          numbers: `\\omega_{bw} = ${tex(l.bw)}${l.bwN > 1 ? `\\;(\\text{final roll-off } ${tex(l.bwLast)})` : ''}\\;\\text{vs.}\\;\\omega_{co} = ${tex(l.mg.wc)}`, answers: ['D.17/a', 'D.17/c'],
           note: 'Usually |T| rolls off a little above ω_co. With D.8-style gains (k_D ≫ k_I) the PID zeros are complex and put a notch in |C| near √(k_I/k_D), so |T| can dip below −3 dB at low frequency and recover.' },
         { title: 'C_PID with dirty derivative', page: 'p. 313',
           theory: 'C(s) = k_P + \\frac{k_I}{s} + \\frac{k_D s}{\\sigma s + 1}',
@@ -343,7 +351,7 @@
             if (!r.ok) return r;
             const inf = /^\s*(inf|∞|infinity)\s*$/i.test(String(v.gm));
             if (!x.mg.crossings.length) return inf ? { ok: true, msg: 'Within 1%; the phase never reaches −180°.' } : { ok: false, msg: 'Check GM.' };
-            if (inf) return { ok: false, msg: 'Check GM: the phase does cross −180°.' };
+            if (inf) return { ok: false, msg: 'Check GM.' };
             return lib.check({ gm: v.gm }, { gm: db(x.mg.gm) }, { gm: 'GM' });
           },
           solution: () => {
@@ -355,7 +363,8 @@
             ];
           } },
         { id: 'b', title: 'Open-loop and closed-loop Bode plots on one graph',
-          html: 'In your code, plot P(s)C(s) and T(s) = PC/(1 + PC) together. The Bode panel here shows both for the gains in the sliders.' },
+          html: 'In your code, plot P(s)C(s) and T(s) = PC/(1 + PC) together. When you have, click the button: the Bode panel here then shows both for the gains in the sliders.',
+          done: 'I\'ve plotted them' },
         { id: 'c', title: 'Closed-loop bandwidth, and how it relates to the crossover frequency', inputs: { bw: 'ω<sub>bw</sub> [rad/s]' },
           html: 'Either the first −3 dB crossing of |T| (what <code>bandwidth</code> returns) or its final roll-off is accepted. The solution discusses the relation to ω<sub>co</sub>.',
           check: (v) => {
@@ -530,7 +539,11 @@
             const ok = d.integOk && d.lowOk && d.highOk && d.pmOk && d.stable;
             return { ok, msg: `integrator ${d.integOk ? '✓' : '✗'}, tracking ${d.lowOk ? '✓' : '✗'}, noise ${d.highOk ? '✓' : '✗'}, PM ${fmt(d.mg.pm, 3)}° ${d.pmOk ? '✓' : '✗'}, stable ${d.stable ? '✓' : '✗'}` };
           },
-          actions: [{ label: 'Load the reference design', run: () => { Object.assign(ctx.st, presetRef(ctx)); ctx.update(); return null; } }],
+          actions: [{ label: 'Load the reference design', run: () => {
+            // Applying it answers (a): Work mode allows it once (a) is solved.
+            if (!lib.shows(ctx, 'D.18/a')) return { ok: false, msg: 'Work mode loads the reference design once your own design passes (a). Explore mode has it now.' };
+            Object.assign(ctx.st, presetRef(ctx)); ctx.update(); return null;
+          } }],
           solution: () => {
             const r = presetRef(ctx), d = this.design(ctx, { ...ctx.st, ...r });
             return [

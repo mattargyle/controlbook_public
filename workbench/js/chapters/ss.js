@@ -58,7 +58,9 @@ WB.chapters = WB.chapters || {};
     const st = ctx.st, level = ctx.level, g = ctx.gains;
     const { A, B, C } = ctx.ss;
     const Ts = S.sim.Ts, uLim = sys.uLimit(pModel);
-    const ff = (th) => (linear || st.comp !== 'fl' ? 0 : sys.feedbackLinearization([th, 0], pModel));
+    // Work mode adds τ_fl only once A.4(c) is solved (PD().compApplied).
+    const flOn = !linear && st.comp === 'fl' && PD().compApplied(ctx);
+    const ff = (th) => (flOn ? sys.feedbackLinearization([th, 0], pModel) : 0);
     const useObs = level === 'obs' || level === 'dobs';
     const useDO = level === 'dobs' && st.dobs;
     const sigma = 0.05;
@@ -159,6 +161,7 @@ WB.chapters = WB.chapters || {};
       options: [{ value: 'fl', label: 'feedback lin. τ_fl(θ̂)' }, { value: 'none', label: 'none' }],
       ...bind(ctx, 'comp'),
     });
+    PD().compNote(parent, ctx);
   }
 
   // ------------------------------------------------------------- analysis --
@@ -180,13 +183,19 @@ WB.chapters = WB.chapters || {};
     return [];
   }
 
+  // Each chapter's part whose answer the desired (target) poles give away.
+  const TARGETS_PART = { ch11: ['ch11', 'a'], ch12: ['ch12', 'a'], ch13: ['ch13', 'c'], ch14: ['ch14', 'b1'] };
+  const targetsKey = (ctx) => { const [ch, part] = TARGETS_PART[ctx.S.chapter] || ['ch11', 'a']; return PD().partKey(ctx, ch, part); };
+
   function markers(ctx) {
     const { A } = ctx.ss;
-    const mk = L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}` }));
+    // In Work mode the open-loop poles answer A.7(a), and the target poles are
+    // computed from the spec, so each stays off until its part is solved.
+    const mk = PD().shows(ctx, PD().partKey(ctx, 'ch7', 'a')) ? L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
     const explore = ctx.S.mode === 'explore';
     closedLoopPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `controller pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 0 : 2) : undefined }));
     observerPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 10 : 12) : undefined }));
-    if (!explore) {
+    if (!explore && ctx.app.isSolved(targetsKey(ctx))) {
       const d = design(ctx);
       for (const p of d.poles) mk.push({ ...p, kind: 'target', label: 'target pole (problem)' });
     }
@@ -234,7 +243,7 @@ WB.chapters = WB.chapters || {};
     const st = ctx.st;
     const wn = wnOf(st);
     return {
-      title: 'Desired closed-loop poles', page: 'p. 113 · Eq. 8.5, p. 184',
+      title: 'Desired closed-loop poles', page: 'p. 113 · Eq. 8.5, p. 184', answers: targetsKey(ctx),
       theory: (st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}') + ',\\quad \\Delta^d_{cl} = (s^2 + 2\\zeta\\omega_n s + \\omega_n^2)' + (ctx.level === 'sf' ? '' : '(s - p_I)'),
       numbers: `\\omega_n = ${tex(wn)},\\quad \\Delta^d_{cl} = ${WB.tf.polyTex(L.polyFromRoots(d.poles))},\\quad p = ${d.poles.map((p) => texPole(p)).join(',\\;')}`,
       spoiler: true,
@@ -279,12 +288,12 @@ WB.chapters = WB.chapters || {};
       const g = ctx.gains;
       return [
         ssCard(ctx),
-        ctrbCard(A, B, 'Controllability', 'p. 180 · Eq. 11.29'),
+        { ...ctrbCard(A, B, 'Controllability', 'p. 180 · Eq. 11.29'), answers: PD().partKey(ctx, 'ch11', 'c') },
         polesCard(ctx, d),
-        { title: 'Pole placement (Ackermann)', page: 'p. 182 · Eq. 11.32',
+        { title: 'Pole placement (Ackermann)', page: 'p. 182 · Eq. 11.32', answers: PD().partKey(ctx, 'ch11', 'd'),
           theory: 'K = (\\alpha - a_A)\\,\\mathcal{A}_A^{-1}\\,\\mathcal{C}_{A,B}^{-1}',
           numbers: `K = ${texMat([d.K])}\\quad(\\text{eig}(A - BK) = ${d.poles.map((p) => texPole(p)).join(',\\;')})`, spoiler: true },
-        { title: 'Reference gain', page: 'p. 182 · Eq. 11.35',
+        { title: 'Reference gain', page: 'p. 182 · Eq. 11.35', answers: PD().partKey(ctx, 'ch11', 'd'),
           theory: 'k_r = \\frac{-1}{C(A - BK)^{-1}B}',
           numbers: `k_r = ${tex(d.kr)}`, spoiler: true,
           note: 'For this plant k_r = K₁: with a free integrator in the plant, unity DC gain needs the reference to enter exactly like the position feedback.' },
@@ -366,12 +375,13 @@ WB.chapters = WB.chapters || {};
       const { A1, B1 } = augI(ctx.ss);
       return [
         ssCard(ctx),
-        { title: 'Augmented system', page: 'p. 198 · Eq. 12.1',
+        // A₁, B₁ hold the numbers of A and B (A.6).
+        { title: 'Augmented system', page: 'p. 198 · Eq. 12.1', answers: PD().partKey(ctx, 'ch6', 'a'),
           theory: '\\dot x_I = r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix}',
           numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}` },
-        ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'),
+        { ...ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'), answers: PD().partKey(ctx, 'ch6', 'a') },
         polesCard(ctx, d),
-        { title: 'Gains', page: 'p. 199–201',
+        { title: 'Gains', page: 'p. 199–201', answers: PD().partKey(ctx, 'ch12', 'a'),
           theory: 'K_1 = \\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I\\int_0^t (r - y)\\,d\\tau',
           numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
       ];
@@ -456,10 +466,10 @@ WB.chapters = WB.chapters || {};
         ssCard(ctx),
         { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224',
           theory: '\\dot{\\hat x} = A\\hat x + B(u - \\tau_{fl}(\\hat\\theta)) + L(y - C\\hat x),\\quad \\dot e = (A - LC)e' },
-        { title: 'Observability', page: 'p. 221',
+        { title: 'Observability', page: 'p. 221', answers: PD().partKey(ctx, 'ch13', 'b'),
           theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ \\vdots \\\\ CA^{n-1}\\end{bmatrix},\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = n',
           numbers: `\\mathcal{O} = ${texMat(O)},\\quad \\operatorname{rank} = ${L.rank(O)}`, spoiler: true },
-        { title: 'Observer gain', page: 'p. 221 · Eq. 13.16, p. 222',
+        { title: 'Observer gain', page: 'p. 221 · Eq. 13.16, p. 222', answers: PD().partKey(ctx, 'ch13', 'c'),
           theory: 'L = \\mathcal{O}_{A,C}^{-1}\\mathcal{A}_A^{-T}(\\beta - a_A)^\\top = \\text{place}(A^\\top, C^\\top, q)^\\top',
           numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, spoiler: true },
         { title: 'Separation principle', page: 'p. 223–224',
@@ -546,12 +556,12 @@ WB.chapters = WB.chapters || {};
       return [
         { title: 'Why the plain observer is biased', page: 'p. 240 · Eq. 14.2–14.3',
           theory: '\\dot x = Ax + B(u + d),\\quad \\dot e = (A - LC)e + Bd \\Rightarrow e_{ss} \\ne 0 \\text{ for constant } d' },
-        { title: 'Augmented model (ḋ = 0)', page: 'p. 240',
+        { title: 'Augmented model (ḋ = 0)', page: 'p. 240', answers: PD().partKey(ctx, 'ch6', 'a'),
           theory: 'A_2 = \\begin{bmatrix}A & B\\\\ 0 & 0\\end{bmatrix},\\quad C_2 = \\begin{bmatrix}C & 0\\end{bmatrix}',
           numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` },
         { title: 'Disturbance observer', page: 'p. 241',
           theory: '\\dot{\\hat x} = A\\hat x + B(u + \\hat d) + L(y - C\\hat x),\\quad \\dot{\\hat d} = L_d(y - C\\hat x),\\quad u = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
-        { title: 'Observer gains', page: 'p. 241',
+        { title: 'Observer gains', page: 'p. 241', answers: PD().partKey(ctx, 'ch14', 'b1'),
           theory: '\\begin{bmatrix}L\\\\ L_d\\end{bmatrix} = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
           numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, spoiler: true,
           note: 'The A.14 solution\'s observer (|q| ≈ 5.5–10) is slower than its controller (ω_n ≈ 12.6), the opposite of the usual "observer 5–10× faster" rule.' },

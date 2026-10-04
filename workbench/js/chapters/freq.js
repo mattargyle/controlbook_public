@@ -16,8 +16,9 @@ WB.chapters = WB.chapters || {};
   const gmText = (mg) => (mg.crossings && mg.crossings.length ? mg.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)}`).join(', ') : '∞');
 
   const plantTf = (ctx) => T.tf([ctx.model.b0], [1, ctx.model.a1, ctx.model.a0]);
-  // C_PID with dirty derivative (p. 313)
-  const pidTf = (st) => T.pid(st);
+  // C_PID with dirty derivative (p. 313), from the chapter's gains (Work: the student's).
+  const pidTf = (ctx) => T.pid({ ...ctx.gains, sigma: ctx.st.sigma });
+  const shows = (ctx, ch, part) => PD().shows(ctx, PD().partKey(ctx, ch, part));
 
   // A.10 gains (t_r = 0.6, ζ = 0.9, ω_n = π/(2t_r√(1−ζ²)), k_I = 0.2, σ = 0.05) on the book parameters.
   function a10(sys) {
@@ -28,23 +29,37 @@ WB.chapters = WB.chapters || {};
     return { ...PD().gainsFromPoles(model, PD().polesFromWnZeta(wn, pr.zeta)), kI: pr.ki, sigma: pr.sigma };
   }
 
+  // Work mode uses the student's own gains (st.w): the A.10 gains answer A.10(c),
+  // so the buttons that load them appear once that part is solved.
   function pidControls(parent, ctx) {
     const sec = section(parent, 'C_PID from A.10', 'p. 161, p. 313');
-    slider(sec, { label: 'k<sub>P</sub>', min: 0, max: 2, step: 0.001, ...bind(ctx, 'kP') });
-    slider(sec, { label: 'k<sub>I</sub>', min: 0, max: 2, step: 0.001, ...bind(ctx, 'kI') });
-    slider(sec, { label: 'k<sub>D</sub>', min: 0, max: 0.5, step: 0.0005, ...bind(ctx, 'kD') });
+    const work = ctx.S.mode === 'work';
+    const g = () => (work ? ctx.st.w : ctx.st);
+    slider(sec, { label: 'k<sub>P</sub>', min: 0, max: 2, step: 0.001, ...bind(ctx, 'kP', g) });
+    slider(sec, { label: 'k<sub>I</sub>', min: 0, max: 2, step: 0.001, ...bind(ctx, 'kI', g) });
+    slider(sec, { label: 'k<sub>D</sub>', min: 0, max: 0.5, step: 0.0005, ...bind(ctx, 'kD', g) });
     slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma') });
-    sec.append(el('div', { class: 'btn-row' },
-      el('button', { type: 'button', class: 'btn btn-quiet', text: 'A.10 gains (k_I = 0.2, repo)', onclick: () => { Object.assign(ctx.st, a10(ctx.sys)); ctx.update(); } }),
-      el('button', { type: 'button', class: 'btn btn-quiet', text: 'book figures (k_I = 0.25)', onclick: () => { Object.assign(ctx.st, a10(ctx.sys), { kI: 0.25 }); ctx.update(); } })));
+    const set = (kI) => { const a = a10(ctx.sys); Object.assign(g(), { kP: a.kP, kD: a.kD, kI: kI ?? a.kI }); ctx.st.sigma = a.sigma; ctx.update(); };
+    const row = el('div', { class: 'btn-row' },
+      el('button', { type: 'button', class: 'btn btn-quiet', text: 'A.10 gains (k_I = 0.2, repo)', onclick: () => set() }),
+      el('button', { type: 'button', class: 'btn btn-quiet', text: 'book figures (k_I = 0.25)', onclick: () => set(0.25) }));
+    sec.append(row);
+    if (work) {
+      const note = el('p', { class: 'muted small', text: `Set your A.10 gains. Buttons with the A.10 gains appear once ${ctx.sys.problems.ch10.id}(c) is solved (Ch 10 tab).` });
+      sec.append(note);
+      WB.ui.addRefresher(() => { const on = shows(ctx, 'ch10', 'c1'); row.hidden = !on; note.hidden = on; });
+    }
     return sec;
   }
 
-  function pidDefaults(sys) { return { ...a10(sys), arch: 'output', comp: 'fl', deriv: 'dirty', antiwindup: 'gate', vbar: 0.08 }; }
+  // w: Work-mode starting gains, deliberately not A.10's.
+  function pidDefaults(sys) { return { ...a10(sys), arch: 'output', comp: 'fl', deriv: 'dirty', antiwindup: 'gate', vbar: 0.08, w: { kP: 0.3, kI: 0.1, kD: 0.08 } }; }
+  const pidGains = (ctx) => { const g = ctx.S.mode === 'work' ? ctx.st.w : ctx.st; return { kP: g.kP, kI: g.kI, kD: g.kD }; };
 
   function clMarkers(ctx, Lg) {
     const poles = L.roots(L.polyAdd(Lg.den, Lg.num));
-    const mk = L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` }));
+    // The plant's poles answer A.7(a) in Work mode until it is solved.
+    const mk = shows(ctx, 'ch7', 'a') ? L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` })) : [];
     poles.forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 40 }));
     return { markers: mk, fitR: 15 };
   }
@@ -69,7 +84,9 @@ WB.chapters = WB.chapters || {};
       return WB.models.openLoop(ctx, o);
     },
     linearLabel: 'linear model (with transient)',
+    // The prediction uses |P(jω₀)| and ∠P(jω₀), so in Work mode it waits for A.15(a) like the Bode plot.
     outputSeries(ctx, res, deg) {
+      if (!this.drawn(ctx)) return [];
       const P = plantTf(ctx), g = T.at(P, ctx.st.w0);
       const mag = L.C.abs(g), ph = L.C.arg(g);
       const w = ctx.st.w0, n = res.t.length;
@@ -86,7 +103,11 @@ WB.chapters = WB.chapters || {};
       slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, ...bind(ctx, 'w0') });
       slider(sec, { label: 'A', unit: 'N·m', min: 0, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'A') });
       segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'asym') });
-      sec.append(el('p', { class: 'muted small', text: 'Feedback linearization is on, so θ follows P(s). After the transient, θ is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀), plus a constant offset from the free integrator.' }));
+      if (ctx.S.mode === 'work') {
+        sec.append(el('p', { class: 'muted small', text: `τ_fl is added once ${ctx.sys.problems.ch4.id}(c) is solved, so θ follows P(s). After the transient, θ is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀). The predicted sinusoid is drawn once (a) is done.` }));
+      } else {
+        sec.append(el('p', { class: 'muted small', text: 'Feedback linearization is on, so θ follows P(s). After the transient, θ is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀), plus a constant offset from the free integrator.' }));
+      }
     },
     // A.15(a) is drawn by hand: in Work mode the plot (and P's poles) appear once it is done.
     drawn: (ctx) => ctx.S.mode === 'explore' || ctx.app.isSolved(`${ctx.sys.problems.ch15.id}/a`),
@@ -146,15 +167,15 @@ WB.chapters = WB.chapters || {};
     id: 'ch16', num: 16, tab: 'Ch 16', title: 'Frequency-domain specs', pages: 'pp. 283–301',
     defaults(sys) { const p = sys.problems.ch16; return { ...pidDefaults(sys), wr: p.wr, wdin: p.wdin, wno: p.wno, A: p.parabolaA }; },
     simDefaults(sys) { return sys.problems.ch16.sim; },
-    gains(ctx) { return { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD }; },
+    gains: pidGains,
     controller: (ctx, o) => WB.pid.makePID(ctx, o),
 
     specs(ctx) {
-      const P = plantTf(ctx), C = pidTf(ctx.st), Lg = T.mul(P, C), st = ctx.st;
+      const P = plantTf(ctx), C = pidTf(ctx), Lg = T.mul(P, C), st = ctx.st, g = ctx.gains;
       const Br = db(T.mag(Lg, st.wr));
       const Bdin = db(T.mag(C, st.wdin));
       const Bn = -db(T.mag(Lg, st.wno));
-      const Ma = ctx.model.b0 * st.kI / ctx.model.a1;   // lim s^2 P C
+      const Ma = ctx.model.b0 * g.kI / ctx.model.a1;   // lim s^2 P C
       return { Br, gr: Math.pow(10, -Br / 20), Bdin, gdin: Math.pow(10, -Bdin / 20), Bn, gn: Math.pow(10, -Bn / 20), Ma, B2: db(Ma), eParab: 2 * st.A / Ma, eParabBook: st.A / Ma, Lg, P };
     },
 
@@ -168,7 +189,7 @@ WB.chapters = WB.chapters || {};
       sec.append(box);
       WB.ui.addRefresher(() => {
         const s = this.specs(ctx);
-        const show = WB.ui.shown(ctx, 'ch16:specs');
+        const show = WB.ui.shown(ctx, 'ch16:specs') || ['a', 'b', 'c', 'd'].every((k) => shows(ctx, 'ch16', k));
         const row = WB.ui.metric;
         box.replaceChildren(...(show ? [
           row(`tracking below ω_r: B_r`, `${fmt(s.Br, 3)} dB → ${fmt(100 * s.gr, 3)} %`),
@@ -179,20 +200,25 @@ WB.chapters = WB.chapters || {};
       });
     },
 
+    // The spec levels are the answers to A.16(a), (c), (d): in Work mode each one is
+    // drawn once its part is solved; until then only the given frequencies are marked.
     bode(ctx) {
       const s = this.specs(ctx), st = ctx.st;
       const P = T.bode(s.P, W), Lb = T.bode(s.Lg, W);
+      const specs = [], marks = [];
+      if (shows(ctx, 'ch16', 'a')) specs.push({ w0: 1e-3, w1: st.wr, db: s.Br, keep: 'above', color: '--series-3', label: `B_r = ${fmt(s.Br, 3)} dB` });
+      else marks.push({ w: st.wr, label: 'ω_r' });
+      if (shows(ctx, 'ch16', 'd')) specs.push({ w0: st.wno, w1: 1e4, db: -s.Bn, keep: 'below', color: '--series-3', label: `${fmt(-s.Bn, 3)} dB` });
+      else marks.push({ w: st.wno, label: 'ω_no' });
+      marks.push({ w: st.wdin, label: shows(ctx, 'ch16', 'c') ? `ω_d,in: |C| = ${fmt(s.Bdin, 3)} dB` : 'ω_d,in' });
       return {
         title: 'Bode: plant and loop gain', w: W,
-        lines: [{ label: 'P(jω)', ...P, color: '--text-muted', width: 1.5 }, { label: 'P(jω)C(jω)', ...Lb, color: '--series-1' }],
-        specs: [
-          { w0: 1e-3, w1: st.wr, db: s.Br, keep: 'above', color: '--series-3', label: `B_r = ${fmt(s.Br, 3)} dB` },
-          { w0: st.wno, w1: 1e4, db: -s.Bn, keep: 'below', color: '--series-3', label: `${fmt(-s.Bn, 3)} dB` },
-        ],
-        marks: [{ w: st.wdin, label: `ω_d,in: |C| = ${fmt(s.Bdin, 3)} dB` }],
+        // P's own Bode plot answers A.15(a) (drawn by hand), as on the Ch 15 tab.
+        lines: [...(shows(ctx, 'ch15', 'a') ? [{ label: 'P(jω)', ...P, color: '--text-muted', width: 1.5 }] : []), { label: 'P(jω)C(jω)', ...Lb, color: '--series-1' }],
+        specs, marks,
       };
     },
-    splane(ctx) { return clMarkers(ctx, T.mul(plantTf(ctx), pidTf(ctx.st))); },
+    splane(ctx) { return clMarkers(ctx, T.mul(plantTf(ctx), pidTf(ctx))); },
 
     math(ctx) {
       const s = this.specs(ctx);
@@ -201,16 +227,16 @@ WB.chapters = WB.chapters || {};
           theory: 'E = \\frac{1}{1+PC}R + \\frac{PC}{1+PC}N + \\frac{1}{1+PC}D_{out} + \\frac{P}{1+PC}D_{in}' },
         { title: 'Tracking', page: 'p. 286 · Eq. 16.4, p. 287 · Eq. 16.5',
           theory: '20\\log|PC| \\ge 20\\log\\tfrac{1}{\\gamma_r} \\text{ for } \\omega \\le \\omega_r,\\quad \\gamma_r = 10^{-B_r/20}',
-          numbers: `B_r = ${tex(s.Br)}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(s.gr)}`, spoiler: true },
+          numbers: `B_r = ${tex(s.Br)}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(s.gr)}`, spoiler: true, answers: PD().partKey(ctx, 'ch16', 'a') },
         { title: 'Input disturbance', page: 'p. 290 · Eq. 16.8–16.9',
           theory: '20\\log|PC| - 20\\log|P| = 20\\log|C| \\ge 20\\log\\tfrac{1}{\\gamma_{d_{in}}}',
-          numbers: `|C(j\\omega_{d,in})| = ${tex(s.Bdin)}\\,\\text{dB} \\Rightarrow \\gamma_{d_{in}} = ${tex(s.gdin)}`, spoiler: true },
+          numbers: `|C(j\\omega_{d,in})| = ${tex(s.Bdin)}\\,\\text{dB} \\Rightarrow \\gamma_{d_{in}} = ${tex(s.gdin)}`, spoiler: true, answers: PD().partKey(ctx, 'ch16', 'c') },
         { title: 'Noise', page: 'p. 287 · Eq. 16.6',
           theory: '20\\log|PC| \\le 20\\log\\gamma_n \\text{ for } \\omega \\ge \\omega_{no}',
-          numbers: `|PC(j\\omega_{no})| = ${tex(-s.Bn)}\\,\\text{dB} \\Rightarrow \\gamma_n = ${tex(s.gn)}`, spoiler: true },
+          numbers: `|PC(j\\omega_{no})| = ${tex(-s.Bn)}\\,\\text{dB} \\Rightarrow \\gamma_n = ${tex(s.gn)}`, spoiler: true, answers: PD().partKey(ctx, 'ch16', 'd') },
         { title: 'Type 2 from the Bode plot', page: 'p. 293–295 · Eq. 16.12',
           theory: 'M_a = \\lim_{\\omega\\to0}|(j\\omega)^2 PC| = 10^{B_2/20},\\quad r = At^2 \\Rightarrow R = \\frac{2A}{s^3},\\; e_{ss} = \\frac{2A}{M_a}',
-          numbers: `M_a = \\frac{b_0 k_I}{a_1} = ${tex(s.Ma)}\\;(${tex(s.B2)}\\,\\text{dB}),\\quad e_{ss} = ${tex(s.eParab)}`, spoiler: true,
+          numbers: `M_a = \\frac{b_0 k_I}{a_1} = ${tex(s.Ma)}\\;(${tex(s.B2)}\\,\\text{dB}),\\quad e_{ss} = ${tex(s.eParab)}`, spoiler: true, answers: PD().partKey(ctx, 'ch16', 'b'),
           note: 'The A.16(b) solution uses A/M_a = 5·10^(−28/20) = 0.2, i.e. treats 5t² as R = 5/s³. Since L{t²} = 2/s³, the error is 2A/M_a.' },
       ];
     },
@@ -244,11 +270,13 @@ WB.chapters = WB.chapters || {};
     id: 'ch17', num: 17, tab: 'Ch 17', title: 'Stability margins', pages: 'pp. 303–322',
     defaults(sys) { return pidDefaults(sys); },
     simDefaults(sys) { return sys.problems.ch17.sim; },
-    gains(ctx) { return { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD }; },
+    gains: pidGains,
+    // The margins and bandwidth answer A.17: Work mode shows them once it is solved (or revealed).
+    marginsShown: (ctx) => WB.ui.shown(ctx, 'ch17:m') || shows(ctx, 'ch17', 'a'),
     controller: (ctx, o) => WB.pid.makePID(ctx, o),
 
     loop(ctx) {
-      const Lg = T.mul(plantTf(ctx), pidTf(ctx.st));
+      const Lg = T.mul(plantTf(ctx), pidTf(ctx));
       const Tc = T.feedback(Lg);
       const mg = T.margins(Lg);
       const { mag } = T.bode(Tc, W);
@@ -262,7 +290,7 @@ WB.chapters = WB.chapters || {};
       sec.append(box);
       WB.ui.addRefresher(() => {
         const l = this.loop(ctx);
-        const show = WB.ui.shown(ctx, 'ch17:m');
+        const show = this.marginsShown(ctx);
         const row = WB.ui.metric;
         box.replaceChildren(...(show ? [
           row('phase margin', `${fmt(l.mg.pm, 3)}° at ω_co = ${fmt(l.mg.wc, 3)} rad/s`),
@@ -275,7 +303,7 @@ WB.chapters = WB.chapters || {};
 
     bode(ctx) {
       const l = this.loop(ctx);
-      const show = WB.ui.shown(ctx, 'ch17:m');
+      const show = this.marginsShown(ctx);
       const marks = show ? marginMarks(l.mg) : [];
       if (show && isFinite(l.bw)) marks.push({ w: l.bw, label: `bandwidth ${fmt(l.bw, 3)}`, color: '--series-2' });
       return {
@@ -291,17 +319,17 @@ WB.chapters = WB.chapters || {};
       return [
         { title: 'Crossover and phase margin', page: 'p. 303–304',
           theory: '|P(j\\omega_{co})C(j\\omega_{co})| = 1,\\quad PM = \\angle P(j\\omega_{co})C(j\\omega_{co}) + 180^\\circ',
-          numbers: `\\omega_{co} = ${tex(l.mg.wc)},\\quad PM = ${tex(l.mg.pm)}^\\circ`, spoiler: true },
+          numbers: `\\omega_{co} = ${tex(l.mg.wc)},\\quad PM = ${tex(l.mg.pm)}^\\circ`, spoiler: true, answers: PD().partKey(ctx, 'ch17', 'a') },
         { title: 'Gain margin', page: 'p. 306',
           theory: 'GM = \\frac{1}{|PC(j\\omega_{180})|},\\quad \\angle PC(j\\omega_{180}) = -180^\\circ',
-          numbers: isFinite(l.mg.gm) ? `GM = ${tex(db(l.mg.gm))}\\,\\text{dB}` : 'GM = \\infty \\;(\\text{phase never reaches } -180^\\circ)', spoiler: true },
+          numbers: isFinite(l.mg.gm) ? `GM = ${tex(db(l.mg.gm))}\\,\\text{dB}` : 'GM = \\infty \\;(\\text{phase never reaches } -180^\\circ)', spoiler: true, answers: PD().partKey(ctx, 'ch17', 'a') },
         { title: 'Open vs. closed loop', page: 'p. 306–307',
           theory: 'T = \\frac{PC}{1+PC}:\\; |PC| \\gg 1 \\Rightarrow |T| \\approx 1,\\; |PC| \\ll 1 \\Rightarrow |T| \\approx |PC|',
-          numbers: `\\omega_{bw} = ${tex(l.bw)}\\;\\text{vs.}\\;\\omega_{co} = ${tex(l.mg.wc)}`, spoiler: true,
+          numbers: `\\omega_{bw} = ${tex(l.bw)}\\;\\text{vs.}\\;\\omega_{co} = ${tex(l.mg.wc)}`, spoiler: true, answers: PD().partKey(ctx, 'ch17', 'a'),
           note: 'PM ≈ 60° behaves like ζ ≈ 0.707 (Fig. 17-7). A smaller PM gives peaking in |T| and a bandwidth above ω_co.' },
         { title: 'C_PID with dirty derivative', page: 'p. 313',
           theory: 'C(s) = k_P + \\frac{k_I}{s} + \\frac{k_D s}{\\sigma s + 1} = \\frac{(k_D + \\sigma k_P)s^2 + (k_P + \\sigma k_I)s + k_I}{s(\\sigma s + 1)}',
-          numbers: `C(s) = ${T.texTf(pidTf(ctx.st))}` },
+          numbers: `C(s) = ${T.texTf(pidTf(ctx))}` },
         { title: 'Bode gain-phase relationship', page: 'p. 310 · Eq. 17.1',
           theory: '\\text{slope } -20\\text{ dB/dec} \\leftrightarrow -90^\\circ,\\; -40 \\leftrightarrow -180^\\circ:\\; \\text{cross over between } -20 \\text{ and } -40 \\text{ for } PM \\approx 60^\\circ' },
       ];
@@ -333,7 +361,7 @@ WB.chapters = WB.chapters || {};
   }
   function presetRepo(ctx) {
     const d = { k: 1, lead: { on: true, w: 10, M: 10 }, lag: { on: true, z: 5, M: 90 }, lpf1: { on: true, p: 90 }, lpf2: { on: true, p: 100 }, pf: { on: true, p: 2 } };
-    const C0 = T.mul(pidTf(ctx.st), blocks.lpf1.tf(d.lpf1), blocks.lag.tf(d.lag), blocks.lead.tf(d.lead));
+    const C0 = T.mul(pidTf(ctx), blocks.lpf1.tf(d.lpf1), blocks.lag.tf(d.lag), blocks.lead.tf(d.lead));
     d.k = 1 / T.mag(T.mul(plantTf(ctx), C0), 6.35);   // loopShaping.py: crossover at 6.35 rad/s
     return d;
   }
@@ -342,14 +370,14 @@ WB.chapters = WB.chapters || {};
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping', pages: 'pp. 323–374',
     defaults(sys) { return { ...pidDefaults(sys), ...presetNone(), showT: true }; },
     simDefaults(sys) { return { ...sys.problems.ch18.sim, mismatch: sys.problems.ch18.mismatch }; },
-    gains(ctx) { return { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD }; },
+    gains: pidGains,
     linearLabel: 'linear loop (no saturation, d, noise)',
 
     design(ctx) {
       const st = ctx.st;
       let Cl = T.gain(st.k);
       for (const key of Object.keys(blocks)) if (st[key].on) Cl = T.mul(Cl, blocks[key].tf(st[key]));
-      const Cp = pidTf(st), P = plantTf(ctx);
+      const Cp = pidTf(ctx), P = plantTf(ctx);
       const C = T.mul(Cp, Cl), Lg = T.mul(P, C), Lp = T.mul(P, Cp);
       const F = st.pf.on ? T.lpf(st.pf.p) : T.gain(1);
       const pr = ctx.sys.problems.ch18;
@@ -368,23 +396,34 @@ WB.chapters = WB.chapters || {};
       const Ts = ctx.S.sim.Ts;
       const Cf = T.filter(d.C, Ts), Ff = T.filter(d.F, Ts);
       const { sys, pModel } = ctx;
+      const fl = !linear && PD().compApplied(ctx, 'fl');  // Work mode: once A.4(c) is solved
       return {
         // Listing 18.3 / ctrlLoopshape.py: e = F(r) − y, τ = τ_fl(y) + C(e)
         update(r, x, yMeas) {
           const rf = Ff.step(r);
           const ut = Cf.step(rf - yMeas);
-          return linear ? ut : sys.feedbackLinearization([yMeas, 0], pModel) + ut;
+          return fl ? sys.feedbackLinearization([yMeas, 0], pModel) + ut : ut;
         },
       };
     },
 
     buildControls(parent, ctx) {
       const pre = section(parent, 'Start from', 'p. 340–348');
-      pre.append(el('div', { class: 'btn-row' },
-        el('button', { type: 'button', class: 'btn', text: 'C_pid only', onclick: () => { Object.assign(ctx.st, presetNone()); ctx.update(); } }),
+      // The book and repo designs answer A.18(a): Work mode offers them once it is solved.
+      const designs = [
         el('button', { type: 'button', class: 'btn', text: 'Book text design', title: 'lag 1.5/40, lead 40/10, LPF 50 and 150, prefilter 3', onclick: () => { Object.assign(ctx.st, presetBook()); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn', text: 'Repo loopShaping.py', title: 'LPF 90, lag 5/90, lead 10/10, gain to cross at 6.35, LPF 100, prefilter 2', onclick: () => { Object.assign(ctx.st, presetRepo(ctx)); ctx.update(); } })));
-      pre.append(el('p', { class: 'muted small', text: 'C(s) = C_pid(s) · k · lead · lag · LPF · LPF. Both presets use C_pid from A.10 (k_I set in the PID section below).' }));
+        el('button', { type: 'button', class: 'btn', text: 'Repo loopShaping.py', title: 'LPF 90, lag 5/90, lead 10/10, gain to cross at 6.35, LPF 100, prefilter 2', onclick: () => { Object.assign(ctx.st, presetRepo(ctx)); ctx.update(); } }),
+      ];
+      pre.append(el('div', { class: 'btn-row' },
+        el('button', { type: 'button', class: 'btn', text: 'C_pid only', onclick: () => { Object.assign(ctx.st, presetNone()); ctx.update(); } }), ...designs));
+      const preNote = el('p', { class: 'muted small' });
+      pre.append(preNote);
+      WB.ui.addRefresher(() => {
+        const on = shows(ctx, 'ch18', 'a');
+        designs.forEach((b) => { b.hidden = !on; });
+        preNote.textContent = on ? 'C(s) = C_pid(s) · k · lead · lag · LPF · LPF. Both presets use C_pid from A.10 (k_I set in the PID section below).'
+          : `C(s) = C_pid(s) · k · lead · lag · LPF · LPF. The book's and the repo's designs can be loaded here once ${ctx.sys.problems.ch18.id}(a) is solved.`;
+      });
 
       const g = section(parent, 'Gain k', 'p. 324');
       slider(g, { label: 'k', min: 0.01, max: 100, log: true, sig: 4, ...bind(ctx, 'k') });

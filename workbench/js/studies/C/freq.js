@@ -59,9 +59,18 @@
       slider(sec, { label, min, max, step: (max - min) / 4000, sig: 4, ...bind(ctx, key, () => st) });
     }
     slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma', () => st) });
-    sec.append(el('div', { class: 'btn-row' },
-      el('button', { type: 'button', class: 'btn btn-quiet', text: 'C.10 gains (repo)', onclick: () => { Object.assign(st, pick(c10(ctx.sys, bookParams(ctx.sys)))); ctx.update(); } }),
-      el('button', { type: 'button', class: 'btn btn-quiet', text: 'book figures (C.8 loops)', title: 't_rθ = 1 s, M = 10, ζ = 0.9, k_I = 0.15', onclick: () => { Object.assign(st, pick(c8fig(ctx.sys, bookParams(ctx.sys)))); ctx.update(); } })));
+    // "Load my C.10 gains" copies the Work-mode gains of the Ch 10 tab. The C.10 and
+    // C.8 designs answer C.10(c) and C.8(b, d), so in Work mode their buttons appear
+    // once those parts are solved.
+    const row = el('div', { class: 'btn-row' },
+      el('button', { type: 'button', class: 'btn btn-quiet', text: 'Load my C.10 gains', title: 'Copy the Work-mode gains and σ from the Ch 10 tab', onclick: () => {
+        const c = ctx.S.ch.ch10;
+        if (c && c.w) Object.assign(st, { kPth: c.w.kPth, kDth: c.w.kDth, kPphi: c.w.kPphi, kDphi: c.w.kDphi, kIphi: c.w.kIphi, sigma: c.sigma ?? st.sigma });
+        ctx.update();
+      } }));
+    if (lib().shows(ctx, 'C.10/c1')) row.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'C.10 gains (repo)', onclick: () => { Object.assign(st, pick(c10(ctx.sys, bookParams(ctx.sys)))); ctx.update(); } }));
+    if (lib().shows(ctx, 'C.8/b', 'C.8/d')) row.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'book figures (C.8 loops)', title: 't_rθ = 1 s, M = 10, ζ = 0.9, k_I = 0.15', onclick: () => { Object.assign(st, pick(c8fig(ctx.sys, bookParams(ctx.sys)))); ctx.update(); } }));
+    sec.append(row);
     segmented(sec, {
       label: 'Bode plot',
       options: [{ value: 'inner', label: 'inner loop (θ)' }, { value: 'outer', label: 'outer loop (φ)' }],
@@ -82,9 +91,11 @@
     const Tin = T.feedback(Lin), Tout = T.feedback(Lout);
     return { Lin, Lout, Tin, Tout, mgIn: T.margins(Lin), mgOut: T.margins(Lout), bwIn: bandwidth(Tin), bwOut: bandwidth(Tout) };
   }
-  function clMarkers(ctx, Lg, title) {
+  // showOl: whether the open-loop poles (which include the plant's) may be shown;
+  // in Work mode they wait for the part that derives the plant.
+  function clMarkers(ctx, Lg, title, showOl = true) {
     const poles = L.roots(L.polyAdd(Lg.den, Lg.num));
-    const mk = L.roots(Lg.den).map((q, i) => ({ ...q, kind: 'ol', label: `pole of ${title} ${i + 1}` }));
+    const mk = showOl ? L.roots(Lg.den).map((q, i) => ({ ...q, kind: 'ol', label: `pole of ${title} ${i + 1}` })) : [];
     poles.forEach((q, i) => mk.push({ ...q, kind: 'cl', label: `closed-loop pole ${i + 1}`, noFit: Math.hypot(q.re, q.im) > 40 }));
     return { markers: mk };
   }
@@ -98,7 +109,10 @@
     controller(ctx) { const { A, w0 } = ctx.st; return { update: (r, x, y, t) => A * Math.sin(w0 * t) }; },
     // Predicted steady sinusoids from the exact transfer functions, plus the
     // constant/ramp drift of the free double integrator (fitted over the last period).
+    // The predicted sinusoid is the plant's frequency response at ω₀, so in Work mode
+    // the θ prediction waits for part (a) and the φ prediction for part (b).
     outputSeries(ctx, res, sc, oi) {
+      if (!lib().shows(ctx, oi === 0 ? 'C.15/a' : 'C.15/b')) return [];
       const ex = exactTf(ctx.pModel), G = oi === 0 ? ex.th : ex.ph;
       const g = T.at(G, ctx.st.w0), mag = L.C.abs(g), ph = L.C.arg(g), w = ctx.st.w0;
       const pred = Array.from(res.t, (t) => ctx.st.A * mag * Math.sin(w * t + ph));
@@ -123,7 +137,7 @@
         options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }],
         ...bind(ctx, 'exact'),
       });
-      sec.append(el('p', { class: 'muted small', text: 'The double integrator makes θ drift after the start-up transient; the dotted prediction includes that drift. Sweep ω₀ to find the panel mode. In Work mode each loop\'s Bode plot appears once you have drawn it (parts a and b).' }));
+      sec.append(el('p', { class: 'muted small', text: 'The double integrator makes θ drift after the start-up transient; the dotted prediction includes that drift. Sweep ω₀ to find the panel mode. In Work mode each loop\'s Bode plot and predicted sinusoid appear once you have drawn it (parts a and b).' }));
     },
     // C.15(a) and (b) are drawn by hand: in Work mode each loop's Bode plot (and
     // its poles and zeros) appears once that part is done.
@@ -247,18 +261,20 @@
       const show = WB.ui.shown(ctx, 'C:ch16:specs');
       if (st.view === 'inner') {
         const inv = T.tf([1], [1, 0, 0]);
+        // P_in's Bode plot answers C.15(a): Work mode draws it once that part is done.
+        const plant = lib().shows(ctx, 'C.15/a');
         return { title: 'Inner loop: P_in and P_in·C_in', w: W, lines: [
-          { label: 'P_in', ...T.bode(pIn(p), W), color: '--text-muted', width: 1.5 },
-          { label: '1/s²', ...T.bode(inv, W), color: '--series-3', dash: [4, 4], width: 1.2 },
+          ...(plant ? [{ label: 'P_in', ...T.bode(pIn(p), W), color: '--text-muted', width: 1.5 },
+            { label: '1/s²', ...T.bode(inv, W), color: '--series-3', dash: [4, 4], width: 1.2 }] : []),
           { label: 'P_in·C_in', ...T.bode(s.l.Lin, W), color: '--series-1' },
         ], marks: [{ w: st.wdin, label: show ? `ω_d,in: |C_in| = ${fmt(s.Bdin, 3)} dB` : 'ω_d,in' }] };
       }
       return { title: 'Outer loop: P_out and P_out·C_out', w: W, lines: [
-        { label: 'P_out', ...T.bode(pOut(p), W), color: '--text-muted', width: 1.5 },
+        ...(lib().shows(ctx, 'C.15/b') ? [{ label: 'P_out', ...T.bode(pOut(p), W), color: '--text-muted', width: 1.5 }] : []),   // answers C.15(b)
         { label: 'P_out·C_out', ...T.bode(s.l.Lout, W), color: '--series-1' },
       ], marks: [{ w: st.wno, label: show ? `ω_no: |PC| = ${fmt(-s.Bn, 3)} dB` : 'ω_no' }] };
     },
-    splane(ctx) { const l = loops(ctx); return ctx.st.view === 'inner' ? clMarkers(ctx, l.Lin, 'P_in C_in') : clMarkers(ctx, l.Lout, 'P_out C_out'); },
+    splane(ctx) { const l = loops(ctx); return ctx.st.view === 'inner' ? clMarkers(ctx, l.Lin, 'P_in C_in', lib().shows(ctx, 'C.5/d')) : clMarkers(ctx, l.Lout, 'P_out C_out', lib().shows(ctx, 'C.5/c')); },
 
     math(ctx) {
       const s = this.specs(ctx), st = ctx.st;
@@ -284,11 +300,11 @@
       const s = () => this.specs(ctx, { ...pick(c10(ctx.sys, ctx.pModel)), A: pr.parabA, wdin: pr.wdin, wno: pr.wno });
       PD().problemPanel(parent, ctx, pr, [
         { id: 'p1', title: 'Inner loop: Bode plots of the plant and of the plant under PD control',
-          html: 'Use <code>bode</code> with the C.10 gains (<em>C.10 gains (repo)</em> in the controls loads them). The workbench\'s Bode plot (<em>inner loop</em> view) shows P<sub>in</sub>, 1/s² and P<sub>in</sub>C<sub>in</sub>.',
+          html: 'Use <code>bode</code> with the C.10 gains (<em>Load my C.10 gains</em> in the controls copies yours from the Ch 10 tab). The workbench\'s Bode plot (<em>inner loop</em> view) shows P<sub>in</sub>C<sub>in</sub>, and P<sub>in</sub> and 1/s² once C.15(a) is done.',
           check: () => {
             const g = pick(c10(ctx.sys, ctx.pModel)), st = ctx.st;
             const ok = ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi', 'sigma'].every((k) => M.close(st[k], g[k], 1e-3, 1e-9));
-            return ok ? { ok: true, msg: 'The sliders hold the C.10 gains.' } : { ok: false, msg: 'Load the C.10 gains (button in the controls) to plot the loops the problem asks for.' };
+            return ok ? { ok: true, msg: 'The sliders hold the C.10 gains.' } : { ok: false, msg: 'Set the sliders to the C.10 gains (Load my C.10 gains copies yours from the Ch 10 tab) to plot the loops the problem asks for.' };
           } },
         { id: 'a', title: '(a) Steady-state error to θ<sub>r</sub> = 20t²', inputs: { v: 'e<sub>ss</sub> [rad]' },
           check: (v) => {
@@ -303,7 +319,7 @@
           check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gdin }, { v: 'percent' }),
           solution: () => [{ tex: `|C_{in}(j0.1)| = ${tex(s().Bdin)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gdin)}\\%` }, { html: 'Book: 38 dB, 1.26% (C.8 gains).' }] },
         { id: 'p2', title: 'Outer loop: Bode plots of the plant and of the plant under PID control',
-          html: 'Use <code>bode</code> with the C.10 gains. The workbench\'s Bode plot (<em>outer loop</em> view) shows P<sub>out</sub> and P<sub>out</sub>C<sub>out</sub>.' },
+          html: 'Use <code>bode</code> with the C.10 gains. The workbench\'s Bode plot (<em>outer loop</em> view) shows P<sub>out</sub>C<sub>out</sub>, and P<sub>out</sub> once C.15(b) is done.' },
         { id: 'c', title: '(c) % of noise above 10 rad/s in φ', inputs: { v: '%' },
           check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gn }, { v: 'percent' }),
           solution: () => [{ tex: `|P_{out}C_{out}(j10)| = ${tex(-s().Bn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%` }, { html: 'Book: −8.4 dB, 38%. The part says "using PI control", but the loop is the PID of C.10.' }] },
@@ -352,7 +368,7 @@
         marks,
       };
     },
-    splane(ctx) { const l = loops(ctx); return ctx.st.view === 'inner' ? clMarkers(ctx, l.Lin, 'P_in C_in') : clMarkers(ctx, l.Lout, 'P_out C_out'); },
+    splane(ctx) { const l = loops(ctx); return ctx.st.view === 'inner' ? clMarkers(ctx, l.Lin, 'P_in C_in', lib().shows(ctx, 'C.5/d')) : clMarkers(ctx, l.Lout, 'P_out C_out', lib().shows(ctx, 'C.5/c')); },
 
     math(ctx) {
       const l = loops(ctx);
@@ -513,10 +529,19 @@
       const st = ctx.st;
       const pre = section(parent, 'Start from', 'p. 362–369');
       const g0 = () => c10(ctx.sys, ctx.pModel);
-      pre.append(el('div', { class: 'btn-row' },
-        el('button', { type: 'button', class: 'btn', text: 'Nothing', onclick: () => { Object.assign(st, presetNone()); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn', text: 'Book text', title: 'C_in = 45·8/(s+8) with rate feedback; C_out with k = 0.0275; C.8 rate gains and the listing\'s outer model, as in Figs. 18-29 to 18-35', onclick: () => { Object.assign(st, presetBook(ctx.pModel, g0())); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn', text: 'Repo listings', title: 'loopShapingInner.py / loopShapingOuter.py', onclick: () => { Object.assign(st, presetRepo(ctx.pModel, g0())); ctx.update(); } })));
+      // The book's and the repo's compensators are worked answers to C.18(a) and (b):
+      // Work mode offers them once both parts are solved.
+      const presets = el('div', { class: 'btn-row' },
+        el('button', { type: 'button', class: 'btn', text: 'Nothing', onclick: () => { Object.assign(st, presetNone()); ctx.update(); } }));
+      if (lib().shows(ctx, 'C.18/a', 'C.18/b')) {
+        presets.append(
+          el('button', { type: 'button', class: 'btn', text: 'Book text', title: 'C_in = 45·8/(s+8) with rate feedback; C_out with k = 0.0275; C.8 rate gains and the listing\'s outer model, as in Figs. 18-29 to 18-35', onclick: () => { Object.assign(st, presetBook(ctx.pModel, g0())); ctx.update(); } }),
+          el('button', { type: 'button', class: 'btn', text: 'Repo listings', title: 'loopShapingInner.py / loopShapingOuter.py', onclick: () => { Object.assign(st, presetRepo(ctx.pModel, g0())); ctx.update(); } }));
+      }
+      pre.append(presets);
+      if (ctx.S.mode === 'work') {
+        pre.append(el('p', { class: 'muted small', text: 'In Work mode each loop\'s Bode plot, poles and spec readouts appear once you have derived its plant: (a) inner plant for C_in, (b) outer plant for C_out. The book and repo designs are offered here once (a) and (b) are solved.' }));
+      }
       segmented(pre, {
         label: 'Rate-feedback gains k<sub>D<sub>θ</sub></sub>, k<sub>D<sub>φ</sub></sub>',
         options: [{ value: 'c10', label: 'C.10 (problem, repo)' }, { value: 'c8', label: 'C.8 loops (book figures)' }],
@@ -536,7 +561,7 @@
         const s0 = section(parent, 'Inner plant', 'p. 362');
         segmented(s0, {
           label: 'Rate feedback τ = −k<sub>D<sub>θ</sub></sub>θ̇ + τ′',
-          options: [{ value: true, label: 'on (book text)' }, { value: false, label: 'off: 1/((Js+Jp)s²) (repo)' }],
+          options: [{ value: true, label: 'on (book text)' }, { value: false, label: lib().shows(ctx, 'C.5/d') ? 'off: 1/((Js+Jp)s²) (repo)' : 'off (repo)' }],
           ...bind(ctx, 'rate', () => st.inner),
         });
         slider(s0, { label: 'k', min: 0.01, max: 1000, log: true, sig: 4, ...bind(ctx, 'k', () => st.inner) });
@@ -585,20 +610,27 @@
       sp.append(box);
       WB.ui.addRefresher(() => {
         const d = this.design(ctx);
-        const row = WB.ui.specRow;
-        box.replaceChildren(
+        const row = WB.ui.specRow, metric = WB.ui.metric;
+        // Each loop's readouts follow from its plant, so they wait for (a) / (b) in Work mode.
+        const hold = (what) => metric(what, '— solve the plant part first');
+        box.replaceChildren(...(this.plantShown(ctx, 'inner') ? [
           row('inner: |PC| ≥ 1/0.01 below 0.01 rad/s', d.inner.track, `${fmt(db(d.inner.lowI), 3)} dB`),
           row('inner: |PC| ≤ 0.01 above 20 rad/s', d.inner.noise, `${fmt(db(d.inner.highI), 3)} dB`),
           row('inner: PM ≈ 60°', d.inner.pm, `${fmt(d.mgI.pm, 3)}° at ${fmt(d.mgI.wc, 3)}`),
+        ] : [hold('inner loop (C.18(a))')]), ...(this.plantShown(ctx, 'outer') ? [
           row('outer: type ≥ 1 (step error 0)', d.outer.type, `type ${d.outer.typeO}`),
           row('outer: |PC|/|P| ≥ 10 below 0.01 rad/s', d.outer.din, `${fmt(db(d.outer.dinO), 3)} dB`),
           row('outer: |PC| ≤ 10⁻⁴ above 10 rad/s', d.outer.noise, `${fmt(db(d.outer.highO), 3)} dB`),
           row('outer: PM ≈ 60°', d.outer.pm, `${fmt(d.mgO.pm, 3)}° at ${fmt(d.mgO.wc, 3)}`),
-        );
+        ] : [hold('outer loop (C.18(b))')]));
       });
     },
 
+    // The loop's Bode plot (with C = 1 it is the plant itself) answers the plant part
+    // C.18(a1) / (b1), so Work mode draws each loop once its plant is derived.
+    plantShown: (ctx, loop) => lib().shows(ctx, loop === 'inner' ? 'C.18/a1' : 'C.18/b1'),
     bode(ctx) {
+      if (!this.plantShown(ctx, ctx.st.loop)) return null;
       const d = this.design(ctx), pr = ctx.sys.problems.ch18;
       if (ctx.st.loop === 'inner') {
         const ip = pr.inner;
@@ -622,6 +654,7 @@
       ], marks: marginMarks(d.mgO) };
     },
     splane(ctx) {
+      if (!this.plantShown(ctx, ctx.st.loop)) return { markers: [] };
       const d = this.design(ctx);
       return ctx.st.loop === 'inner' ? clMarkers(ctx, d.Li, 'P_in C_in') : clMarkers(ctx, d.Lo, 'P C_out');
     },
@@ -639,8 +672,10 @@
           note: `k_Dφ = ${fmt(g.kDphi, 4)}. The book and loopShapingOuter.py differ here; see ISSUES.md.` },
         { title: 'Your compensators', page: 'p. 362, p. 368',
           theory: `C_{in}(s) = ${T.texTf(d.Ci, 4)},\\quad C_{out}(s) = ${T.texTf(d.Co, 4)}` },
+        // Each loop's margins follow from its plant (with C = 1 they are the plant's), so
+        // Work mode shows them once C.18(a1) / (b1) is solved.
         { title: 'Margins', page: 'p. 304–306',
-          theory: `\\text{inner: } PM = ${tex(d.mgI.pm)}^\\circ \\text{ at } ${tex(d.mgI.wc)},\\quad \\text{outer: } PM = ${tex(d.mgO.pm)}^\\circ \\text{ at } ${tex(d.mgO.wc)},\\; GM = ${d.mgO.crossings.length ? d.mgO.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB}').join(',\\;') : '\\infty'}` },
+          theory: (this.plantShown(ctx, 'inner') ? `\\text{inner: } PM = ${tex(d.mgI.pm)}^\\circ \\text{ at } ${tex(d.mgI.wc)}` : '\\text{inner: after part (a), inner plant}') + ',\\quad ' + (this.plantShown(ctx, 'outer') ? `\\text{outer: } PM = ${tex(d.mgO.pm)}^\\circ \\text{ at } ${tex(d.mgO.wc)},\\; GM = ${d.mgO.crossings.length ? d.mgO.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB}').join(',\\;') : '\\infty'}` : '\\text{outer: after part (b), outer plant}') },
         { title: 'Implementation (ctrlLoopshape.py)', page: 'p. 335 · Eq. 18.3–18.4',
           theory: '\\theta_r = -k_{D_\\phi}\\dot{\\hat\\phi} + C_{out}\\big(F(\\phi_r) - \\phi\\big),\\quad \\tau = C_{in}(\\theta_r - \\theta)\\;[-\\,k_{D_\\theta}\\dot{\\hat\\theta}]' },
       ];
@@ -684,7 +719,7 @@
             { code: 'def P_in(s, kD, sigma):\n    J = P.Js + P.Jp\n    return (sigma * s + 1) / (\n        sigma * J * s**3 + J * s**2 + kD * s)' },
             { html: 'Book: p. 362 uses Θ/τ = (1/J<sub>s</sub>)/(s² + (b/J<sub>s</sub>)s + k/J<sub>s</sub>), which gives (σs + 1)/(σJ<sub>s</sub>s³ + (σb + J<sub>s</sub>)s² + (σk + b + k<sub>D</sub>)s + k); that form is accepted too (see ISSUES.md).' },
           ] },
-        { id: 'a', title: '(a) Inner-loop specs',
+        { id: 'a', title: '(a) Inner-loop specs', after: 'a1',
           check: () => { const d = this.design(ctx), i = d.inner; return { ok: i.track && i.noise && i.pm, msg: `tracking ${i.track ? '✓' : '✗'}, noise ${i.noise ? '✓' : '✗'}, PM ${fmt(d.mgI.pm, 3)}° ${i.pm ? '✓' : '✗'}` }; },
           solution: () => [{ html: 'Book text (p. 362–363): proportional gain 45, then a low-pass at 8 rad/s, PM 76.9° (with the C.8 loops\' k<sub>D<sub>θ</sub></sub> = 38.9, not C.10\'s). The listing (Listing 18.7) is a different design: a lead at 0.41 rad/s with M = 15 on 1/(6s²), no rate feedback. Try both presets.' }] },
         { id: 'b1', title: '(b) Outer plant with rate feedback',
@@ -701,7 +736,7 @@
             { code: 'def P_out(s, kD, sigma):\n    Jp, b, k = P.Jp, P.b, P.k\n    num = (b * s + k) * (sigma * s + 1)\n    den = ((Jp * s**2 + b * s + k)\n           * (sigma * s + 1)\n           + kD * s * (b * s + k))\n    return num / den' },
             { html: 'Book: p. 366. <code>loopShapingOuter.py</code> uses a different model (see ISSUES.md).' },
           ] },
-        { id: 'b', title: '(b) Outer-loop specs',
+        { id: 'b', title: '(b) Outer-loop specs', after: 'b1',
           check: () => { const d = this.design(ctx), o = d.outer; return { ok: o.type && o.din && o.noise && o.pm, msg: `type ${o.type ? '✓' : '✗'}, d_in ${o.din ? '✓' : '✗'}, noise ${o.noise ? '✓' : '✗'}, PM ${fmt(d.mgO.pm, 3)}° ${o.pm ? '✓' : '✗'}` }; },
           solution: () => [{ html: 'Book (p. 367–368): integrator k<sub>I</sub> = 0.1, lead at 0.15 rad/s with M = 120, lag (s + 0.5)/(s + 0.0083), gain 0.0275, low-pass filters at 1.5 and 1.8 rad/s, prefilter 0.1/(s + 0.1). Its PM 51.75° at 0.15 rad/s (Fig. 18-34) is for the listing\'s outer model with the book-text inner loop and the C.8 rate gains (the <em>Book text</em> preset reproduces it). On the correctly derived plant the same C<sub>out</sub> has PM ≈ 83°.' }] },
       ]);

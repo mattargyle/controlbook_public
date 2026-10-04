@@ -611,8 +611,10 @@
         ...innerCards(ctx, g).slice(3), outerCards(ctx, g, { withI: true })[4],
         { title: 'Stability and the coefficients', page: 'p. 164',
           theory: '\\text{a stable polynomial has all its coefficients of one sign}' },
+        // the whole polynomial answers B.P.6(a) and the listing's value B.10(c), so
+        // this card gives only the constant term and the sign
         { title: 'Sign of k_Iz', page: 'p. 164', answers: 'B.8/d1',
-          theory: '(1 + k_{Dz})s^3 + (k_{Pz} - q k_{Dz})s^2 + (k_{Iz} - q k_{Pz})s - q k_{Iz}:\\; -q k_{Iz} > 0 \\Rightarrow k_{Iz} < 0 \\text{ (the listing uses } -0.05)',
+          theory: '\\text{constant term of the outer } \\Delta_{cl} \\text{ with the integrator: } -q\\,k_{Iz} > 0 \\Rightarrow k_{Iz} < 0,\\quad q = \\sqrt{3g/2\\ell}',
           note: 'App. P.6 plots the locus versus k_Iz.' },
       ];
     },

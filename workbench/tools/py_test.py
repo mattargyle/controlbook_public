@@ -23,6 +23,14 @@ INDEX = WB / "index.html"
 
 # JS helpers installed on each page.
 HELPERS = r"""
+(() => {  // remember each time plot's data for yourDeviations
+  const TP = WB.plot.TimePlot.prototype;
+  if (TP.__wrapped) return;
+  const set = TP.setData;
+  window.__plotData = new Map();
+  TP.setData = function (d) { window.__plotData.set(this, d); return set.call(this, d); };
+  TP.__wrapped = true;
+})();
 window.__t = {
   parts: () => [...document.querySelectorAll('#problem .part')],
   title: (p) => (p.querySelector('.part-title .collapse-label') || p.querySelector('.part-title')).textContent,
@@ -38,7 +46,7 @@ window.__t = {
       if (t && !/^(Starting Python|Running)/.test(t)) break;
       await new Promise((r) => setTimeout(r, 100));
     }
-    return { good: !!res.querySelector('.status.good'), text: res.textContent.slice(0, 400) };
+    return { good: !!res.querySelector('.status.good'), bad: !!res.querySelector('.status.bad'), text: res.textContent.slice(0, 400) };
   },
   solution(p) {
     this.button(p, 'Show solution').click();
@@ -46,6 +54,30 @@ window.__t = {
     return pre ? pre.textContent : null;
   },
   locked: () => document.querySelectorAll('.math-card.locked').length,
+  // "Plot my ..." style buttons (overlays of the student's own answer).
+  overlayButtons: (p) => [...p.querySelectorAll('.part-buttons button')].map((b) => b.textContent)
+    .filter((t) => /^(Plot|Use|Simulate) my /.test(t) && t !== 'Simulate my f'),
+  // Each visible "your ..." time series against the closest reference series:
+  // [{label, dev}] with dev = max|yours - ref| / max|ref| (a correct answer gives ~0).
+  yourDeviations() {
+    const out = [];
+    for (const [plot, d] of window.__plotData || []) {
+      if (plot.box.closest('[hidden]')) continue;
+      const refs = d.series.filter((s) => !/\byour\b/i.test(s.label || '') && !/measured|^zₑ$|reference/.test(s.label || ''));
+      for (const s of d.series.filter((q) => /\byour\b/i.test(q.label || ''))) {
+        let dev = Infinity;
+        for (const r of refs) {
+          if (r.y.length !== s.y.length) continue;
+          let e = 0, m = 1e-9;
+          for (let k = 0; k < r.y.length; k++) { if (!Number.isFinite(r.y[k])) continue; e = Math.max(e, Math.abs(s.y[k] - r.y[k])); m = Math.max(m, Math.abs(r.y[k])); }
+          dev = Math.min(dev, e / m);
+        }
+        out.push({ label: s.label, dev });
+      }
+    }
+    return out;
+  },
+  yourLegends: () => [...document.querySelectorAll('.legend-item')].map((e) => e.textContent).filter((t) => /\byour\b/i.test(t)),
 };
 return true;
 """
@@ -101,6 +133,16 @@ def main():
                 if c.js(f"return !!__t.button({part}, 'Simulate my f')"):
                     r = c.js(f"return await __t.press({part}, 'Simulate my f')")
                     report(r["good"], f"{args.study} {ch} {title}: Simulate my f overlaps the arm", r["text"])
+                for label in c.js(f"return __t.overlayButtons({part})"):
+                    r = c.js(f"return await __t.press({part}, {json.dumps(label)})")
+                    yours = c.js("return __t.yourLegends()")
+                    ok = not r["bad"] and bool(r["text"]) and (bool(yours) or label.startswith("Use my"))
+                    report(ok, f"{args.study} {ch} {title}: {label} draws the student's answer", f"{r['text']} | legends: {yours}")
+                    if label.startswith("Use my"):
+                        continue
+                    devs = c.js("return new Promise((r) => setTimeout(() => r(__t.yourDeviations()), 300))")
+                    bad = [d for d in devs if not (d["dev"] is not None and d["dev"] < 1e-3)]
+                    report(bool(devs) and not bad, f"{args.study} {ch} {title}: {label} with the solution lies on the workbench's model", json.dumps(devs))
             # Non-Python parts of this chapter that unlock cards: solve them from their solutions is
             # not generic, so only require that Python parts unlocked something when cards were locked.
             locked1 = c.js("return __t.locked()")

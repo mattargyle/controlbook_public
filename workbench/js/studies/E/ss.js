@@ -49,15 +49,19 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   }
 
   // ------------------------------------------------------------- controls --
+  // The simplified model (A₄₁ = 0) answers E.5(c): Work mode names it only once solved.
+  const flModelShown = (ctx) => showsAnswer(ctx, `${pid(ctx, 'ch5')}/c`) && showsAnswer(ctx, `${pid(ctx, 'ch4')}/c`);
   function compControl(parent, ctx) {
+    const fl = flModelShown(ctx);
     segmented(parent, {
       label: 'Equilibrium force and model',
       options: [
         { value: 'eq', label: 'F = F<sub>e</sub> + F̃, Jacobian A', title: 'consistent with E.6 / E.11' },
-        { value: 'fl', label: 'F = F<sub>fl</sub>(z) + F̃, A₄₁ = 0', title: 'feedback linearization; the m1 g z̃ coupling is cancelled' },
+        { value: 'fl', label: `F = F<sub>fl</sub>(z) + F̃${fl ? ', A₄₁ = 0' : ''}`, title: fl ? 'feedback linearization; the m1 g z̃ coupling is cancelled' : 'feedback linearization (E.4(c)) with the matching linear model' },
       ],
       ...bind(ctx, 'comp'),
     });
+    E.ffWorkControls(parent, ctx);  // Work mode: F_fl, F_e wait for E.4(c), E.4(a)
   }
 
   function poleKnobs(parent, ctx, { pI = false } = {}) {
@@ -105,21 +109,39 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     });
   }
 
+  // Work mode has no pole knobs: their defaults are sample answers (E.11(a), E.12(c)).
+  const workNote = (parent) => parent.append(el('p', { class: 'muted small', text: 'Target markers on the s-plane: your E.11(a) poles (with p_I from E.12(a) once entered there).' }));
+
   // ------------------------------------------------------------- markers --
   function markers(ctx, level) {
     const { A } = ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp });
     const explore = ctx.S.mode === 'explore';
-    // eig(A) comes from the E.6 model: in Work mode it waits for E.6.
-    const mk = showsAnswer(ctx, `${ctx.sys.problems.ch6.id}/a`) ? L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
+    // eig(A) comes from the E.6 model (or the E.5(c) one): in Work mode it waits for them.
+    const olShown = showsAnswer(ctx, `${pid(ctx, 'ch6')}/a`) && (ctx.st.comp !== 'fl' || flModelShown(ctx));
+    const mk = olShown ? L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
+    if (!explore) {
+      // Work mode: the knob poles are a valid answer to E.11(a) (and tuned designs for
+      // E.12–E.14), so the targets are the student's own E.11(a) poles (and p_I from E.12(a)).
+      clPoles(ctx, level).forEach((q) => mk.push({ ...q, kind: 'cl', label: 'closed-loop pole' }));
+      obsPolesOf(ctx, level).forEach((q) => mk.push({ ...q, kind: 'obs', label: 'observer pole', noFit: ctx.st.zoom === 'ctrl' }));
+      for (const q of myTargets(ctx, level)) mk.push({ ...q, kind: 'target', label: 'your pole (E.11(a), E.12(a))' });
+      return mk;
+    }
     const d = E.ssDesign(ctx.pModel, knobsOf(ctx.st), level);
     const near = (q, list) => list.reduce((b, c, j) => (Math.hypot(c.re - q.re, c.im - q.im) < Math.hypot(list[b].re - q.re, list[b].im - q.im) ? j : b), 0);
     clPoles(ctx, level).forEach((q, i) => {
       const j = near(q, d.poles);
-      mk.push({ ...q, kind: 'cl', label: j < 2 ? 'controller pole (fast pair)' : j < 4 ? 'controller pole (slow pair)' : 'integrator pole', dragId: explore ? (j < 2 ? 0 : j < 4 ? 1 : 2) : undefined });
+      mk.push({ ...q, kind: 'cl', label: j < 2 ? 'controller pole (fast pair)' : j < 4 ? 'controller pole (slow pair)' : 'integrator pole', dragId: j < 2 ? 0 : j < 4 ? 1 : 2 });
     });
-    obsPolesOf(ctx, level).forEach((q) => mk.push({ ...q, kind: 'obs', label: 'observer pole', dragId: explore ? (Math.abs(q.im) > 1e-9 ? 10 : 12) : undefined, noFit: ctx.st.zoom === 'ctrl' }));
-    if (!explore) for (const q of d.poles) mk.push({ ...q, kind: 'target', label: 'target pole (specs)' });
+    obsPolesOf(ctx, level).forEach((q) => mk.push({ ...q, kind: 'obs', label: 'observer pole', dragId: Math.abs(q.im) > 1e-9 ? 10 : 12, noFit: ctx.st.zoom === 'ctrl' }));
     return mk;
+  }
+  // The student's E.11(a) poles (if valid) plus their E.12(a) p_I for the integrator levels.
+  function myTargets(ctx, level) {
+    const ps = userPoles(ctx);
+    if (!validatePoles(ps).ok) return [];
+    const pI = PD().num(ansKey(ctx, pid(ctx, 'ch12'))['a.pI']);
+    return level === 'sf' || pI === null || !(pI < 0) ? ps : [...ps, { re: pI, im: 0 }];
   }
 
   function onDrag(ctx, id, re, im) {
@@ -138,8 +160,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   function ssCard(ctx) {
     const { A, B } = ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp });
     return {
-      title: `State-space model (${ctx.st.comp === 'fl' ? 'F_fl(z), A₄₁ = 0' : 'Jacobian, F_e'})`, page: 'p. 387 · E.6, p. 183',
-      answers: ctx.st.comp === 'fl' ? [`${pid(ctx, 'ch6')}/a`, `${pid(ctx, 'ch4')}/c`] : `${pid(ctx, 'ch6')}/a`,
+      title: `State-space model (${ctx.st.comp === 'fl' ? (flModelShown(ctx) ? 'F_fl(z), A₄₁ = 0' : 'F_fl(z)') : 'Jacobian, F_e'})`, page: 'p. 387 · E.6, p. 183',
+      answers: ctx.st.comp === 'fl' ? [`${pid(ctx, 'ch6')}/a`, `${pid(ctx, 'ch4')}/c`, `${pid(ctx, 'ch5')}/c`] : `${pid(ctx, 'ch6')}/a`,
       theory: '\\dot{\\tilde x} = A\\tilde x + B\\tilde F,\\quad \\tilde x = x - x_e,\\; x_e = (\\tfrac{\\ell}{2}, 0, 0, 0),\\quad \\tilde F = F - F_{ff}',
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
     };
@@ -212,7 +234,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       controller(ctx, o) { return E.makeSS(ctx, ctx.gains, level, { comp: ctx.st.comp, est: ctx.st.est, antiwindup: ctx.st.antiwindup, dobs: ctx.st.dobs, zhat0: ctx.st.zhat0 || 0 }, o); },
       splane(ctx) { return { markers: markers(ctx, level), kindNames: { cl: 'controller pole', obs: 'observer pole', ol: 'open-loop pole', target: 'target pole' } }; },
       onPoleDrag: onDrag,
-      targets(ctx) { return level === 'sf' ? { tr: ctx.st.trZ } : {}; },
+      targets(ctx) { return level === 'sf' && ctx.S.mode === 'explore' ? { tr: ctx.st.trZ } : {}; },
     }, extra);
   }
   function defaultsFor(sys, key, level, extra = {}) {
@@ -245,10 +267,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         options: [{ value: 'true', label: 'true state' }, { value: 'dirty', label: 'z, θ + dirty derivatives' }],
         ...bind(ctx, 'est'),
       });
-      if (ctx.S.mode === 'work') workGrid(sec, ctx, { kr: true });
-      const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Pole knobs', 'p. 389 · E.11(a)');
+      if (ctx.S.mode === 'work') { workGrid(sec, ctx, { kr: true }); workNote(sec); return; }
+      const spec = section(parent, 'Pole knobs', 'p. 389 · E.11(a)');
       poleKnobs(spec, ctx);
-      if (ctx.S.mode === 'explore') gainsReadout(spec, ctx, 'sf');
+      gainsReadout(spec, ctx, 'sf');
     },
     math(ctx) {
       const d = E.ssDesign(ctx.pModel, knobsOf(ctx.st), 'sf');
@@ -339,10 +361,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         options: [{ value: 'clamp', label: 'hold integrator while saturated' }, { value: 'none', label: 'none' }],
         ...bind(ctx, 'antiwindup'),
       });
-      if (ctx.S.mode === 'work') workGrid(sec, ctx, { ki: true });
-      const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Pole knobs', 'p. 389 · E.12(c)');
+      if (ctx.S.mode === 'work') { workGrid(sec, ctx, { ki: true }); workNote(sec); return; }
+      const spec = section(parent, 'Pole knobs', 'p. 389 · E.12(c)');
       poleKnobs(spec, ctx, { pI: true });
-      if (ctx.S.mode === 'explore') gainsReadout(spec, ctx, 'sfi');
+      gainsReadout(spec, ctx, 'sfi');
     },
     extraPlot(ctx, res) {
       return { opts: { title: 'integrator x_I(t)', yLabel: 'x_I [m·s]', unit: 'm·s' }, data: { series: [{ label: 'x_I = ∫(z_r − z) dt', y: Array.from(res.extras.integrator || []), color: '--series-1' }] } };
@@ -433,12 +455,12 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     buildControls(parent, ctx) {
       const sec = section(parent, 'Controller (uses x̂)', 'p. 222 · Fig. 13-3');
       compControl(sec, ctx);
-      if (ctx.S.mode === 'work') workGrid(sec, ctx, { ki: true, Lrows: 4 });
-      const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Controller and observer knobs', 'p. 224 · §13.2');
-      poleKnobs(spec, ctx, { pI: true });
-      obsKnobs(spec, ctx);
+      const work = ctx.S.mode === 'work';
+      if (work) { workGrid(sec, ctx, { ki: true, Lrows: 4 }); workNote(sec); }
+      const spec = section(parent, work ? 'Observer start' : 'Controller and observer knobs', 'p. 224 · §13.2');
+      if (!work) { poleKnobs(spec, ctx, { pI: true }); obsKnobs(spec, ctx); }
       slider(spec, { label: 'ẑ(0) − z<sub>e</sub>', unit: 'm', min: -0.2, max: 0.2, step: 0.005, sig: 3, hint: 'initial estimate error', ...bind(ctx, 'zhat0') });
-      if (ctx.S.mode === 'explore') gainsReadout(spec, ctx, 'obs');
+      if (!work) gainsReadout(spec, ctx, 'obs');
     },
     math(ctx) {
       const d = E.ssDesign(ctx.pModel, knobsOf(ctx.st), 'obs');
@@ -454,7 +476,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           theory: `\\operatorname{rank}\\mathcal{O}_{A,C} = ${L.rank(O)}` },
         { title: 'Observer gain with two outputs', page: 'p. 225',
           theory: '\\text{with two outputs } L \\text{ is } 4\\times2 \\text{ and not unique: any } L \\text{ with the desired eig}(A - LC) \\text{ works}' },
-        { title: 'Decoupled observer gain for the block and beam', page: 'p. 225 (B.13 uses place(Aᵀ, Cᵀ)ᵀ)', answers: `${pid(ctx, 'ch13')}/c`,
+        { title: ctx.S.mode === 'explore' ? 'Decoupled observer gain for the block and beam' : 'Observer gain for the block and beam', page: 'p. 225 (B.13 uses place(Aᵀ, Cᵀ)ᵀ)', answers: `${pid(ctx, 'ch13')}/c`,
           theory: 'L =\\begin{bmatrix}\\beta_{z1} & 0\\\\ 0 & \\beta_{\\theta1}\\\\ \\beta_{z0} & a_{32}\\\\ a_{41} & \\beta_{\\theta0}\\end{bmatrix} \\Rightarrow A - LC = \\text{blockdiag}\\left(\\begin{bmatrix}-\\beta_{z1} & 1\\\\ -\\beta_{z0} & 0\\end{bmatrix}, \\begin{bmatrix}-\\beta_{\\theta1} & 1\\\\ -\\beta_{\\theta0} & 0\\end{bmatrix}\\right)',
           numbers: `q = ${d.obsPoles.map((q) => texPole(q)).join(',\\;')},\\quad L = ${texMat(d.L)}`,
           note:'With two outputs L is not unique: python\'s place gives a different, dense L with the same eigenvalues. Any L with the right eig(A − LC) answers (c).' },
@@ -547,11 +569,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         options: [{ value: true, label: 'on' }, { value: false, label: 'off (E.14a)' }],
         ...bind(ctx, 'dobs'),
       });
-      if (ctx.S.mode === 'work') workGrid(sec, ctx, { ki: true, Lrows: 5 });
-      const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Controller and observer knobs', 'p. 241');
+      if (ctx.S.mode === 'work') { workGrid(sec, ctx, { ki: true, Lrows: 5 }); workNote(sec); return; }
+      const spec = section(parent, 'Controller and observer knobs', 'p. 241');
       poleKnobs(spec, ctx, { pI: true });
       obsKnobs(spec, ctx, { pD: true });
-      if (ctx.S.mode === 'explore') gainsReadout(spec, ctx, 'dobs');
+      gainsReadout(spec, ctx, 'dobs');
     },
     math(ctx) {
       const d = E.ssDesign(ctx.pModel, knobsOf(ctx.st), 'dobs');
@@ -565,7 +587,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           numbers: `\\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` },
         { title: 'Disturbance observer', page: 'p. 241',
           theory: '\\dot{\\hat x} = A\\hat x + B(u - F_{ff} + \\hat d) + L(\\tilde y - C\\hat x),\\quad \\dot{\\hat d} = L_d(\\tilde y - C\\hat x),\\quad \\tilde F = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
-        { title: 'Decoupled gains: a z block and a θ–d block', page: 'p. 241', answers: `${pid(ctx, 'ch14')}/b1`,
+        { title: ctx.S.mode === 'explore' ? 'Decoupled gains: a z block and a θ–d block' : 'Disturbance-observer gain of the block and beam', page: 'p. 241', answers: `${pid(ctx, 'ch14')}/b1`,
           theory: '\\theta\\text{–}d \\text{ block: } s^3 + \\beta_2 s^2 + \\beta_1 s + b_0 L_d = (s^2 + 2\\zeta\\omega s + \\omega^2)(s - p_d)',
           numbers: `L_2 = ${texMat(d.L)}` },
         polesCard(ctx, d, 'dobs'),

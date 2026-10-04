@@ -218,6 +218,58 @@ WB.tf = (function () {
     };
   }
 
+  // Least squares A x = b by modified Gram-Schmidt on unit-norm columns, or null
+  // when the columns are (nearly) dependent.
+  function lsq(A, b) {
+    const k = A[0].length, dot = (u, v) => u.reduce((s, x, i) => s + x * v[i], 0);
+    const cols = Array.from({ length: k }, (_, j) => A.map((r) => r[j]));
+    const nrm = cols.map((c) => Math.sqrt(dot(c, c)) || 1);
+    const Q = cols.map((c, j) => c.map((v) => v / nrm[j]));
+    const R = Array.from({ length: k }, () => new Array(k).fill(0));
+    for (let j = 0; j < k; j++) {
+      for (let i = 0; i < j; i++) { R[i][j] = dot(Q[i], Q[j]); Q[j] = Q[j].map((v, r) => v - R[i][j] * Q[i][r]); }
+      R[j][j] = Math.sqrt(dot(Q[j], Q[j]));
+      if (R[j][j] < 1e-12) return null;
+      Q[j] = Q[j].map((v) => v / R[j][j]);
+    }
+    const z = Q.map((q) => dot(q, b));
+    for (let j = k - 1; j >= 0; j--) { for (let i = j + 1; i < k; i++) z[j] -= R[j][i] * z[i]; z[j] /= R[j][j]; }
+    return z.map((v, j) => v / nrm[j]);
+  }
+
+  // The lowest-order proper G(s) (denominator degree <= maxN, real coefficients)
+  // that reproduces samples P at complex points sPts to 1e-6, or null. Levy's
+  // linear least squares on num(s) - P den(s) = 0 with den monic, with P scaled to
+  // unit size and solved by QR (fourth-order plants are too ill-conditioned for
+  // the normal equations).
+  function fit(sPts, P, maxN = 4) {
+    const scale = Math.max(...P.map((v) => Math.hypot(v.re, v.im)), 1e-300);
+    const Pn = P.map((v) => C.of(v.re / scale, v.im / scale));
+    for (let n = 0; n <= maxN; n++) {
+      for (let m = 0; m <= n; m++) {
+        // unknowns: a_0..a_{n-1} (den), b_0..b_m (num); rows: real and imaginary parts
+        const rows = [], rhs = [];
+        sPts.forEach((s, i) => {
+          const pw = [C.of(1)];
+          for (let k = 1; k <= n; k++) pw.push(C.mul(pw[k - 1], s));
+          const cols = [...pw.slice(0, n).map((w) => C.mul(Pn[i], w)), ...pw.slice(0, m + 1).map((w) => C.mul(C.of(-1), w))];
+          const r = C.mul(C.of(-1), C.mul(Pn[i], pw[n]));
+          rows.push(cols.map((c) => c.re), cols.map((c) => c.im));
+          rhs.push(r.re, r.im);
+        });
+        const x = lsq(rows, rhs);
+        if (!x || !x.every(Number.isFinite)) continue;
+        const G = { num: x.slice(n).reverse().map((v) => v * scale), den: [1, ...x.slice(0, n).reverse()] };
+        const ok = sPts.every((s, i) => {
+          const g = C.div(L.polyvalC(G.num, s), L.polyvalC(G.den, s));
+          return Math.hypot(g.re - P[i].re, g.im - P[i].im) <= 1e-6 * scale;
+        });
+        if (ok) return G;
+      }
+    }
+    return null;
+  }
+
   // LaTeX for a polynomial and a transfer function.
   function polyTex(p, v = 's', sig = 4) {
     const n = p.length - 1;
@@ -237,6 +289,6 @@ WB.tf = (function () {
 
   return {
     tf, mul, add, gain, feedback, at, mag, db, bode, logspace, margins, crossDown, bandwidth, rootLocus,
-    pid, lead, lag, lpf, pi, poles, zeros, dcgain, ss, filter, repoFilter, polyTex, texTf,
+    pid, lead, lag, lpf, pi, poles, zeros, dcgain, ss, filter, repoFilter, fit, polyTex, texTf,
   };
 })();

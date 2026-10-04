@@ -136,12 +136,18 @@
   }
   const WORK_SPEC = { K1: ['K<sub>1</sub>', -50, 200], K2: ['K<sub>2</sub>', -200, 1000], K3: ['K<sub>3</sub>', -20, 100], K4: ['K<sub>4</sub>', -200, 1500], kr: ['k<sub>r</sub>', 0, 200], ki: ['k<sub>I</sub>', -300, 0] };
   const workSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, WORK_SPEC, keys);
+  // The problem's target poles answer C.11(a) (the same tuning is used through C.14),
+  // so in Work mode the toggle appears once C.11(a) is solved.
+  const showTargets = (ctx) => lib().shows(ctx, 'C.11/a');
   function targetToggle(parent, ctx) {
-    segmented(parent, {
+    const seg = segmented(parent, {
       label: 'Target poles from the problem (s-plane rings)',
       options: [{ value: false, label: 'hidden' }, { value: true, label: 'shown' }],
       get: () => !!ctx.st.showTargets, set: (v) => { ctx.st.showTargets = v; ctx.update(); },
     });
+    const note = el('p', { class: 'muted small', text: 'The problem\'s target poles can be shown here once C.11(a) is solved.' });
+    parent.append(note);
+    WB.ui.addRefresher(() => { const ok = showTargets(ctx); seg.row.hidden = !ok; note.hidden = ok; });
   }
   function awControl(parent, ctx) {
     segmented(parent, {
@@ -169,14 +175,15 @@
   function markers(ctx, level, specPoles) {
     const { A } = lib().ss(ctx.pModel), g = ctx.gains, st = ctx.st;
     const explore = ctx.S.mode === 'explore';
-    const mk = L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}` }));
+    // The open-loop poles answer C.5(b) / C.6: hidden in Work mode until one is solved.
+    const mk = lib().showsOl(ctx) ? L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
     if (explore) {
       g.th.forEach((q) => mk.push({ ...q, kind: 'cl', label: 'controller pole (θ pair)', dragId: 'cth' }));
       g.ph.forEach((q) => mk.push({ ...q, kind: 'cl', label: 'controller pole (φ pair)', dragId: 'cph' }));
       if (level !== 'sf') mk.push({ re: st.pI, im: 0, kind: 'cl', label: 'integrator pole p_I', dragId: 'cI' });
     } else {
       clPoles(ctx, level).forEach((q, i) => mk.push({ ...q, kind: 'cl', label: `closed-loop pole ${i + 1}` }));
-      if (st.showTargets) specPoles.forEach((q) => mk.push({ ...q, kind: 'target', label: 'target pole (problem)' }));
+      if (st.showTargets && showTargets(ctx)) specPoles.forEach((q) => mk.push({ ...q, kind: 'target', label: 'target pole (problem)' }));
     }
     if (level === 'obs' || level === 'dobs') {
       const o = obsOf(ctx);
@@ -212,9 +219,9 @@
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
     };
   }
-  // The general method, then this tuning's numbers (locked by `answers` where they
-  // answer a part, otherwise a spoiler).
-  function polesCard(ctx, d, level, answers) {
+  // The general method, then this tuning's numbers. In Work mode the tuning is the
+  // problem's (C.11-C.14 share it), so its poles answer C.11(a) and stay locked.
+  function polesCard(ctx, d, level, answers = 'C.11/a') {
     const st = ctx.st;
     const wTex = st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}';
     return [
@@ -223,7 +230,7 @@
       { title: 'Desired poles for this tuning', page: 'p. 193',
         theory: `\\omega_{n_\\theta} = ${tex(d.wnTh)},\\; \\omega_{n_\\phi} = ${tex(d.wnPhi)},\\quad \\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(d.poles))}`,
         note: 'For the t_r, ζ, M tuning (set in Explore mode; the problem\'s tuning by default).',
-        ...(answers ? { answers } : { theory: undefined, numbers: `\\omega_{n_\\theta} = ${tex(d.wnTh)},\\; \\omega_{n_\\phi} = ${tex(d.wnPhi)},\\quad \\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(d.poles))}`, spoiler: true }) },
+        answers },
     ];
   }
   const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page);
@@ -272,7 +279,7 @@
       const { A, B } = lib().ss(ctx.pModel);
       return [
         ssCard(ctx),
-        ctrbCard(A, B, 'Controllability', 'p. 193 · Step 1'),
+        { ...ctrbCard(A, B, 'Controllability', 'p. 193 · Step 1'), answers: 'C.11/c' },
         { title: 'Open-loop characteristic polynomial', page: 'p. 193 · Step 2',
           theory: '\\Delta_{ol}(s) = \\det(sI - A) = s^4 + a_3s^3 + a_2s^2 + a_1s + a_0',
           numbers: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },
@@ -405,8 +412,9 @@
       { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 237 · Listing 13.3',
         theory: '\\dot{\\hat x} = A\\hat x + B\\tau_{k-1} + L(y_m - C\\hat x),\\quad y = (\\theta, \\phi)^\\top,\\quad L \\in \\mathbb{R}^{4\\times 2}' },
       { title: 'Observability', page: 'p. 221',
-        theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ CA^2 \\\\ CA^3\\end{bmatrix},\\quad \\operatorname{rank}\\mathcal{O}_{A,C} = 4',
-        numbers: `\\operatorname{rank}\\mathcal{O}_{A,C} = ${L.rank(O)}\\;(\\text{already } ${L.rank(O.slice(0, 4))} \\text{ from } C, CA)`, spoiler: true },
+        theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ \\vdots \\\\ CA^{n-1}\\end{bmatrix},\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = n' },
+      { title: 'Observability of the satellite', page: 'p. 234', answers: 'C.13/b',
+        theory: `\\operatorname{rank}\\mathcal{O}_{A,C} = ${L.rank(O)}\\;(\\text{already } ${L.rank(O.slice(0, 4))} \\text{ from } C, CA)` },
       { title: 'Observer gain (two outputs)', page: 'p. 236 · Listing 13.3',
         theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top,\\quad q = \\text{roots}\\big((s^2 + 2\\zeta\\omega_{obs,\\theta}s + \\omega_{obs,\\theta}^2)(s^2 + 2\\zeta\\omega_{obs,\\phi}s + \\omega_{obs,\\phi}^2)\\big)',
         numbers: d.L ? `q = ${d.obsPoles.map((q) => texPole(q)).join(',\\;')},\\quad L^\\top = ${texMat(L.T(d.L))}` : '', spoiler: true,
@@ -417,7 +425,9 @@
       const { A2, C2 } = augD(A, B, C);
       cards.push({ title: 'Disturbance observer', page: 'p. 240–241, pp. 258–259 · Listing 14.6',
         theory: 'A_2 = \\begin{bmatrix}A & B\\\\ 0 & 0\\end{bmatrix},\\; C_2 = \\begin{bmatrix}C & 0\\end{bmatrix},\\quad \\tau = -K\\hat x - k_I\\textstyle\\int e - \\hat d',
-        numbers: `\\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` + (d.L2 ? `,\\quad L_2^\\top = ${texMat(L.T(d.L2))}` : ''), spoiler: true });
+        numbers: d.L2 ? `L_2^\\top = ${texMat(L.T(d.L2))}` : '', spoiler: true });
+      cards.push({ title: 'Observability of the augmented model', page: 'p. 254', answers: 'C.14/b0',
+        theory: `\\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` });
     }
     return cards;
   }

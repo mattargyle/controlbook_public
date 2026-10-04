@@ -23,19 +23,27 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const inputForce = (st, t) => WB.models.inputTorque(st, t);   // same shapes as Study A
 
   // F = F_comp + F_in(t), with F_comp = 0, F_e (at z_e) or F_fl(z).
-  function openLoop(ctx, { linear = false } = {}) {
+  // Fe overrides the workbench's F_e (E.4 in Work mode applies the student's own).
+  // In Work mode F_e and F_fl answer E.4(a) and E.4(c), so neither reaches the
+  // force plot before that part is solved: F_e is then the student's "your F_e"
+  // (st.FeW, 0 without one) and F_fl adds nothing (WB.E.ffOf).
+  function openLoop(ctx, { linear = false, Fe } = {}) {
     const { sys, pModel } = ctx;
     const st = ctx.st;
+    const z0 = st.zE !== undefined ? st.zE : sys.ze(pModel);
+    const FeV = Fe !== undefined ? Fe : WB.E.shows(ctx, E4A(ctx)) ? sys.Fe(pModel, z0) : st.FeW || 0;
+    const ffl = WB.E.ffOf(ctx, 'fl');
     return {
       update(r, x, yMeas, t) {
         const fin = inputForce(st, t);
         if (linear || st.comp === 'none') return { u: fin, Fin: fin };
-        const z0 = st.zE !== undefined ? st.zE : sys.ze(pModel);
-        const ff = st.comp === 'eq' ? sys.Fe(pModel, z0) : sys.Ffl(x[0], pModel);
+        const ff = st.comp === 'eq' ? FeV : ffl(x[0]);
         return { u: ff + fin, Fin: fin };
       },
     };
   }
+  const E4A = (ctx) => `${ctx.sys.problems.ch4.id}/a`;
+  const E4C = (ctx) => `${ctx.sys.problems.ch4.id}/c`;
 
   function inputControls(parent, ctx, { comps } = {}) {
     const names = { zero: 'none', const: 'constant', pulse: 'pulse', square: 'square', sine: 'sine' };
@@ -102,7 +110,30 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const showsAnswer = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isSolved(key);
   const LEN_NOTE = ' <code>P.length</code> is the same as <code>P.ell</code>, as in <code>blockbeamParam.py</code>.';
 
+  // "Plot my answer" overlays (js/core/yours.js).
+  const Y = WB.yours;
+  const fin = (ctx) => (t) => inputForce(ctx.st, t);
+  // A "your" trace that joins the autoscale only while it stays within a few times
+  // the range of the reference it is drawn against, so a model that blows up
+  // doesn't flatten the plot.
+  const ser = (label, y, ref, more) => Y.series(label, y, { lim: 4 * Math.max(1e-6, ...Array.from(ref, Math.abs)), ...more });
+  const OUT2 = { C: [[1, 0, 0, 0], [0, 1, 0, 0]], D: [[0], [0]] };   // y = (z, θ)
+  // The student's model x̃ = x − x_e on the z and θ plots: z_e added back, θ in plot units.
+  const outTrace = (lr, oi, sc, zE) => (oi === 0 ? Array.from(lr.y[0], (v) => v + zE) : sc(lr.y[1]));
+  // One number from a Python call, or NaN.
+  const num = (v) => (typeof v === 'number' ? v : NaN);
+
   // ------------------------------------------------------------- Chapter 2 --
+  // E.2(a): the student's kinetic(z, θ, ż, θ̇) along the prescribed motion.
+  async function runKinetic(ctx, code) {
+    const res = ctx.app.result();
+    const out = await WB.py.evaluate(code, [{ params: withLength(ctx.pModel), calls: res.x.map((x) => ({ name: 'kinetic', args: x })) }]);
+    if (out.error) return Y.pyError(out);
+    const K = out.rows[0].calls;
+    if (!K.every((v) => typeof v === 'number')) return { ok: false, msg: 'kinetic should return one number.' };
+    return { n: K.length, K };
+  }
+
   // Prescribed motion z(t), θ(t) (as hw02 does); the energy is computed, not simulated.
   CH.ch2 = Object.assign({}, common, {
     id: 'ch2', num: 2, tab: 'Ch 2', title: 'Kinetic energy', pages: 'pp. 19–40',
@@ -137,22 +168,25 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       slider(sec, { label: 'z amplitude', unit: 'm', min: 0, max: 0.25, step: 0.005, sig: 3, ...bind(ctx, 'Az') });
       slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 45, step: 0.5, sig: 3, ...bind(ctx, 'Ath') });
       slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'f') });
-      sec.append(el('p', { class: 'muted small', text: 'z(t) = z_e + A_z sin(2πft), θ(t) = A_θ sin(πft). No dynamics: the motion is imposed, as in hw02. Once E.2(a) is solved (or in Explore mode) the energy plot splits K into its parts.' }));
+      sec.append(el('p', { class: 'muted small', text: 'z(t) = z_e + A_z sin(2πft), θ(t) = A_θ sin(πft). No dynamics: the motion is imposed, as in hw02. In Work mode the plot below is empty until you click Plot my K (your K) or solve E.2(a) (K along the motion and its parts).' }));
     },
 
-    // The split into parts shows the form of K, so in Work mode it waits for E.2(a).
+    // K(t) and its split into parts answer E.2(a), so in Work mode the plot is empty
+    // until (a) is solved, then K; "Plot my K" adds the student's own K.
     extraPlot(ctx, res) {
       const mJ = (a) => Array.from(a, (v) => v * 1000);
-      const split = showsAnswer(ctx, `${ctx.sys.problems.ch2.id}/a`);
+      const show = showsAnswer(ctx, `${ctx.sys.problems.ch2.id}/a`);
+      const y = Y.data(ctx, 'ch2.a'), K = mJ(res.extras.K);
       return {
         opts: { title: 'kinetic energy', yLabel: 'K [mJ]', unit: 'mJ' },
         data: { series: [
-          ...(split ? [
+          ...(show ? [
             { label: 'block, along the beam', y: mJ(res.extras.Kr), color: '--series-2', width: 1.5 },
             { label: 'block, carried by the beam', y: mJ(res.extras.Kt), color: '--series-3', width: 1.5 },
             { label: 'beam', y: mJ(res.extras.Kb), color: '--text-muted', width: 1.5 },
+            { label: 'total K', y: K, color: '--series-1' },
           ] : []),
-          { label: 'total K', y: mJ(res.extras.K), color: '--series-1' },
+          ...(y ? [ser('your K (Python)', mJ(y.K), show ? K : mJ(y.K))] : []),
         ] },
       };
     },
@@ -177,9 +211,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         {
           id: 'a', title: '(a) Kinetic energy',
           html: 'Write K as a function of z, θ, ż and θ̇. The block is a point mass near the surface of the beam.' + LEN_NOTE,
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'kinetic', args: ['z', 'theta', 'zdot', 'thetadot'], truth: (p, a) => ctx.sys.kinetic(xOf(a), p) }],
-          }, 'def kinetic(z, theta, zdot, thetadot):\n    # kinetic energy of the system\n    K = ...\n    return K\n'),
+          }, 'def kinetic(z, theta, zdot, thetadot):\n    # kinetic energy of the system\n    K = ...\n    return K\n'), {
+            actions: [{ label: 'Plot my K', run: (code) => Y.plot(ctx, 'ch2.a', code, runKinetic, () => 'Your K(t) along the motion set on the right is the dotted trace on the energy plot.') }],
+          }),
           solution: () => [
             { html: 'The block at distance z along the beam moves with ż along the beam and zθ̇ across it. The beam turns about its end, so J = m₂ℓ²/12 + m₂(ℓ/2)² = m₂ℓ²/3 (parallel-axis theorem).' },
             { tex: 'K = \\tfrac12 m_1\\big(\\dot z^2 + z^2\\dot\\theta^2\\big) + \\tfrac12\\frac{m_2\\ell^2}{3}\\dot\\theta^2' },
@@ -212,6 +248,47 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     return { ok, msg: ok ? msg : `${msg} They should overlap.` };
   }
 
+  // E.3(a): the student's potential(z, θ) along the simulated motion.
+  async function runPotential(ctx, code) {
+    const res = ctx.app.result();
+    const out = await WB.py.evaluate(code, [{ params: withLength(ctx.pModel), calls: res.x.map((x) => ({ name: 'potential', args: [x[0], x[1]] })) }]);
+    if (out.error) return Y.pyError(out);
+    const Pv = out.rows[0].calls;
+    if (!Pv.every((v) => typeof v === 'number')) return { ok: false, msg: 'potential should return one number.' };
+    return { n: Pv.length, P: Pv };
+  }
+
+  // E.3(c): the work done by the student's τ and −Bq̇ along the simulated motion,
+  // with the same trapezoid rule (and force samples) as the workbench's "work done by F".
+  async function runForces(ctx, code) {
+    const res = ctx.app.result(), n = res.t.length, Ts = ctx.S.sim.Ts, u = res.uApplied;
+    const at = (x, F) => [{ name: 'generalized_force', args: [...x, F] }, { name: 'damping_force', args: [...x, F] }];
+    const calls = [...res.x.flatMap((x, k) => at(x, u[k])), ...res.x.slice(1).flatMap((x, k) => at(x, u[k]))];
+    const out = await WB.py.evaluate(code, [{ params: withLength(ctx.pModel), calls }]);
+    if (out.error) return Y.pyError(out);
+    const c = out.rows[0].calls.map((v) => [v].flat(Infinity));
+    const bad = c.findIndex((v) => v.length !== 2 || !v.every((q) => typeof q === 'number'));
+    if (bad >= 0) return { ok: false, msg: `${bad % 2 ? 'damping_force' : 'generalized_force'} should return two numbers, one along z and one along θ.` };
+    // power (τ − Bq̇)·q̇ at sample i of call block `off`, with state x
+    const pw = (off, i, x) => (c[off + 2 * i][0] + c[off + 2 * i + 1][0]) * x[2] + (c[off + 2 * i][1] + c[off + 2 * i + 1][1]) * x[3];
+    const W = new Float64Array(n);
+    let w = 0;
+    for (let k = 1; k < n; k++) {
+      w += 0.5 * Ts * (pw(0, k - 1, res.x[k - 1]) + pw(2 * n, k - 1, res.x[k]));
+      W[k] = w * 1000;
+    }
+    return { n, W };
+  }
+
+  // E.3(d): the student's accelerations, simulated like "Simulate my f".
+  const ACCEL_F_PY = '\n\ndef _wb_eom(state, F):\n    a = np.asarray(accelerations(*state[:, 0].tolist(), F), dtype=float).ravel()\n    if a.size != 2:\n        raise ValueError(f"accelerations returned {a.size} values; expected two (zddot, thetaddot)")\n    return np.array([[state[2][0]], [state[3][0]], [a[0]], [a[1]]])\n';
+  async function runAccel(ctx, code) {
+    const res = ctx.app.result();
+    const out = await WB.py.simulate(code + ACCEL_F_PY, { fn: '_wb_eom', params: withLength(ctx.pTrue), x0: res.x[0], u: Array.from(res.uApplied), Ts: ctx.S.sim.Ts });
+    if (out.error) return Y.pyError(out);
+    return { n: out.x.length, z: out.x.map((x) => x[0]), theta: out.x.map((x) => x[1]) };
+  }
+
   CH.ch3 = Object.assign({}, common, {
     id: 'ch3', num: 3, tab: 'Ch 3', title: 'Euler-Lagrange equations', pages: 'pp. 41–56',
     linear: false,
@@ -221,7 +298,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     buildControls(parent, ctx) {
       const sec = section(parent, 'Open-loop simulation', 'p. 386 · E.3(e)');
       inputControls(sec, ctx, { comps: COMPS });
-      sec.append(el('p', { class: 'muted small', text: 'The block and beam has no stable equilibrium: any tilt makes the block slide and the beam tip further. The energy plot checks the EOM: E(t) − E(0) must equal the work done by F.' }));
+      WB.E.ffWorkControls(sec, ctx);
+      sec.append(el('p', { class: 'muted small', text: 'The block and beam has no stable equilibrium: any tilt makes the block slide and the beam tip further. The energy plot checks the EOM: E(t) − E(0) must equal the work done by F. In Work mode it is empty until you plot your own P or forces or solve (a) or (c): E(t) − E(0) appears with (a), the work done by F with (c), and your own curves whenever you plot them.' }));
     },
 
     extraPlot(ctx, res) {
@@ -237,20 +315,34 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         if (k > 0) w += 0.5 * Ts * (pw(res.x[k - 1], res.uApplied[k - 1]) + pw(x, res.uApplied[k - 1]));
         W[k] = w * 1000;
       }
-      return {
-        opts: { title: 'energy balance', yLabel: 'energy [mJ]', unit: 'mJ' },
-        data: { series: [
-          { label: 'work done by F', y: W, color: '--series-2', dash: [5, 4], width: 2 },
-          { label: 'E(t) − E(0) = ΔK + ΔP', y: En, color: '--series-1' },
-        ] },
-      };
+      // In Work mode E(t) − E(0) uses the answers to E.2(a) and E.3(a), and the work
+      // curve the forces of E.3(c): each waits for its part (P alone for the energy, so
+      // the chapter stands on its own). Until then the plot is empty; the
+      // student's own "Plot my P" / "Plot my forces" curves show whenever plotted.
+      const id = ctx.sys.problems.ch3.id;
+      const showE = showsAnswer(ctx, `${id}/a`), showW = showsAnswer(ctx, `${id}/c`);
+      const yP = Y.data(ctx, 'ch3.a'), yF = Y.data(ctx, 'ch3.c');
+      const series = [
+        ...(showW ? [{ label: 'work done by F', y: W, color: '--series-2', dash: [5, 4], width: 2 }] : []),
+        ...(showE ? [{ label: 'E(t) − E(0) = ΔK + ΔP', y: En, color: '--series-1' }] : []),
+      ];
+      // E.3(a): the energy with the student's P (the workbench's K); E.3(c): the work of their forces.
+      if (yP) {
+        const K0 = sys.kinetic(res.x[0], pModel);
+        const mineE = res.x.map((x, k) => (sys.kinetic(x, pModel) - K0 + yP.P[k] - yP.P[0]) * 1000);
+        series.push(ser('ΔK + ΔP with your P', mineE, showE ? En : mineE));
+      }
+      if (yF) series.push(ser('work done by your τ − Bq̇', yF.W, showW ? W : yF.W, { dash: [1, 3] }));
+      return { opts: { title: 'energy balance', yLabel: 'energy [mJ]', unit: 'mJ' }, data: { series } };
     },
 
     // E.3(e): the student's f, simulated with the same input as the system above.
+    // E.3(d): the student's accelerations from the same initial state and input.
     outputSeries(ctx, res, sc, oi) {
-      const m = mine.ch3;
-      if (!m || m.sig !== simSig(ctx, res)) return [];
-      return [{ label: 'your f (Python)', y: sc(oi === 0 ? m.z : m.theta), color: '--series-2', dash: [5, 4], width: 2 }];
+      const out = [], m = mine.ch3, y = Y.data(ctx, 'ch3.d');
+      if (m && m.sig === simSig(ctx, res)) out.push({ label: 'your f (Python)', y: sc(oi === 0 ? m.z : m.theta), color: '--series-2', dash: [5, 4], width: 2 });
+      if (y) out.push(ser('your equations of motion', sc(oi === 0 ? y.z : y.theta), sc(res.yAll[oi])));
+      return out;
     },
 
     math(ctx) {
@@ -286,9 +378,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         {
           id: 'a', title: '(a) Potential energy',
           html: 'Write P as a function of z and θ. Any constant P<sub>0</sub> is accepted.',
-          code: pyPart(ctx, {
+          code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'potential', args: ['z', 'theta'], compare: 'offset', truth: (p, a) => ctx.sys.potential([a.z, a.theta, 0, 0], p) }],
-          }, 'def potential(z, theta):\n    # potential energy of the system\n    return ...\n'),
+          }, 'def potential(z, theta):\n    # potential energy of the system\n    return ...\n'), {
+            actions: [{ label: 'Plot my P', run: (code) => Y.plot(ctx, 'ch3.a', code, runPotential, () => 'Dotted on the energy plot: the change in K + P along the simulated motion with your P (and the workbench\'s K). With F doing the only work, it should follow the work done by F.') }],
+          }),
           solution: () => [
             { tex: 'P = P_0 + m_1 g z\\sin\\theta + m_2 g\\tfrac{\\ell}{2}\\sin\\theta \\quad(\\text{heights } z\\sin\\theta \\text{ and } \\tfrac{\\ell}{2}\\sin\\theta)' },
             { code: 'def potential(z, theta):\n    return (P.m1 * P.g * z\n            + P.m2 * P.g * P.ell / 2) * np.sin(theta)' },
@@ -323,6 +417,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               return '';
             },
           }, 'def generalized_force(z, theta, zdot,\n                      thetadot, F):\n    # applied forces along (z, theta)\n    return np.array([..., ...])\n\ndef damping_force(z, theta, zdot,\n                  thetadot, F):\n    # damping forces, -B*q_dot\n    return np.array([..., ...])\n'),
+          actions: [{ label: 'Plot my forces', run: (code) => Y.plot(ctx, 'ch3.c', code, runForces, () => 'Dotted on the energy plot: the work your generalized and damping forces do along the simulated motion, ∫(τ − Bq̇)·q̇ dt. It should follow the change in energy.') }],
           solution: () => [
             { tex: '\\tau = \\begin{bmatrix}0\\\\ F\\ell\\cos\\theta\\end{bmatrix},\\quad -B\\dot q = \\begin{bmatrix}0\\\\0\\end{bmatrix}' },
             { html: 'F acts at the tip, at height ℓ sin θ, so its virtual work is F δ(ℓ sin θ) = Fℓ cos θ δθ. Nothing does work along z. The problem models no friction, so B = 0.' },
@@ -342,6 +437,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
             ],
             items: [{ fn: 'accelerations', args: [...ARG4, 'F'], label: '(z̈, θ̈)', truth: (p, a) => accel(ctx, p, a) }],
           }, 'def accelerations(z, theta, zdot,\n                  thetadot, F):\n    # from the equations of motion\n    zddot = ...\n    thetaddot = ...\n    return zddot, thetaddot\n'),
+          actions: [{ label: 'Simulate my EOM', run: (code) => Y.plot(ctx, 'ch3.d', code, runAccel, () => 'Your equations of motion, run with RK4 from the same initial state and force (true-plant parameters), are dotted on the z and θ plots.') }],
           solution: () => [
             { tex: 'L = \\tfrac12 m_1(\\dot z^2 + z^2\\dot\\theta^2) + \\tfrac{m_2\\ell^2}{6}\\dot\\theta^2 - P_0 - (m_1 g z + m_2 g\\tfrac{\\ell}{2})\\sin\\theta' },
             { tex: 'z:\\; m_1\\ddot z - m_1 z\\dot\\theta^2 + m_1 g\\sin\\theta = 0' },
@@ -404,19 +500,85 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     return { ok: true, msg: `Consistent with the block and beam, and F_fl holds the beam at every block position, at ${sets.length} parameter sets.` };
   }
 
+  // E.4(a): the student's x_e(z_e) and F_e(z_e) at the current z_e become the
+  // Work-mode start state (plus the offsets) and the "your F_e" force, as D.4(a).
+  async function useMyEquilibrium(ctx, code) {
+    const zE = ctx.st.zE;
+    const out = await WB.py.evaluate(code, [{ params: withLength(ctx.pModel), calls: [{ name: 'x_e', args: [zE] }, { name: 'F_e', args: [zE] }] }]);
+    if (out.error) return Y.pyError(out);
+    const xe = Y.asMat(out.rows[0].calls[0], 4, 1), Fe = num(out.rows[0].calls[1]);
+    if (!xe) return { ok: false, msg: 'x_e should return four numbers (z, θ, ż, θ̇).' };
+    if (!Number.isFinite(Fe)) return { ok: false, msg: 'F_e should return one number.' };
+    Object.assign(ctx.st, { FeW: Fe, xeW: xe.map((r) => r[0]), method: 'jacobian' });
+    ctx.update();
+    const head = `Your x_e(${fmt(zE, 3)} m) = (${ctx.st.xeW.map((v) => fmt(v, 4)).join(', ')}), F_e = ${fmt(Fe, 4)} N.`;
+    if (ctx.S.mode !== 'work') return { info: true, msg: `${head} Explore mode applies the workbench's; switch to Work mode to apply yours.` };
+    return { info: true, msg: `${head} The run on the right now starts at your x_e (plus δz(0), δθ(0)) with F = your F_e + F̃. With δz(0) = δθ(0) = 0, no input and the right answers, the block and beam stay at rest. Click again after moving zₑ.` };
+  }
+
+  // E.4(b): the student's A_jac, B_jac at the current z_e.
+  async function runJacobian(ctx, code) {
+    const zE = ctx.st.zE;
+    const out = await WB.py.evaluate(code, [{ params: withLength(ctx.pModel), calls: [{ name: 'A_jac', args: [zE] }, { name: 'B_jac', args: [zE] }] }]);
+    if (out.error) return Y.pyError(out);
+    const A = Y.asMat(out.rows[0].calls[0], 4, 4), B = Y.asMat(out.rows[0].calls[1], 4, 1);
+    if (!A) return { ok: false, msg: 'A_jac should return a 4×4 array of numbers.' };
+    if (!B) return { ok: false, msg: 'B_jac should return a 4×1 array of numbers.' };
+    return { A, B };
+  }
+
+  // E.4(c): the true block and beam with the student's F = F_fl(x) + F̃ (simulated in
+  // Python like the workbench's own run: same input, disturbance and saturation), and
+  // their thetaddot_fl model driven by F̃. thetaddot_fl gives only θ̈, so the model
+  // takes z̈ from the plant's own z equation. The eigenvalues are those of that model
+  // linearized at (z_e, 0, 0, 0) (central differences).
+  const PLANT_PY = 'def f(state, F):\n    z, theta, zdot, thetadot = state[:, 0].tolist()\n    zddot = (1.0 / P.m1) * (P.m1 * z * thetadot**2 - P.m1 * P.g * np.sin(theta))\n    thetaddot = (1.0 / ((P.m2 * P.ell**2) / 3.0 + P.m1 * z**2)) * (F * P.ell * np.cos(theta) - 2.0 * P.m1 * z * zdot * thetadot - P.m1 * P.g * z * np.cos(theta) - P.m2 * P.g * P.ell / 2.0 * np.cos(theta))\n    return np.array([[zdot], [thetadot], [zddot], [thetaddot]])\n';
+  const FL_MODEL_PY = '\n\ndef _wb_fl_model(state, F_tilde):\n    z, theta, zdot, thetadot = state[:, 0].tolist()\n    a = np.asarray(thetaddot_fl(z, theta, zdot, thetadot, F_tilde), dtype=float)\n    if a.size != 1:\n        raise ValueError(f"thetaddot_fl returned {a.size} values; expected one number")\n    return np.array([[zdot], [thetadot], [z * thetadot**2 - P.g * np.sin(theta)], [a.item()]])\n';
+  async function runFeedbackLin(ctx, code) {
+    const res = ctx.app.result(), Ts = ctx.S.sim.Ts, zE = ctx.st.zE;
+    const u = Array.from(res.t, fin(ctx));
+    const d = Array.from(res.uApplied, (v, k) => v - res.u[k]);
+    const plant = await WB.py.simulate(code, { plant: PLANT_PY, plantParams: withLength(ctx.pTrue), ctrl: 'F_fl', params: withLength(ctx.pModel), x0: res.x[0], u, d, uLimit: ctx.sys.uLimit(ctx.pTrue), Ts });
+    if (plant.error) return Y.pyError(plant);
+    const model = await WB.py.simulate(code + FL_MODEL_PY, { fn: '_wb_fl_model', params: withLength(ctx.pModel), x0: res.x[0], u, Ts });
+    if (model.error) return Y.pyError(model);
+    const h = 1e-5, x0 = [zE, 0, 0, 0, 0];
+    const pts = [0, 1, 2, 3].flatMap((i) => [1, -1].map((sg) => x0.map((v, j) => (j === i ? v + sg * h : v))));
+    const out = await WB.py.evaluate(code, [{ params: withLength(ctx.pModel), calls: pts.map((args) => ({ name: 'thetaddot_fl', args })) }]);
+    if (out.error) return Y.pyError(out);
+    const c = out.rows[0].calls.map(num);
+    const row = [0, 1, 2, 3].map((i) => (c[2 * i] - c[2 * i + 1]) / (2 * h));
+    const g = ctx.pModel.g;
+    return {
+      n: res.t.length,
+      z: plant.x.map((x) => x[0]), theta: plant.x.map((x) => x[1]),
+      zm: model.x.map((x) => x[0]), thm: model.x.map((x) => x[1]),
+      A: row.every(Number.isFinite) ? [[0, 0, 1, 0], [0, 0, 0, 1], [0, -g, 0, 0], row] : null,
+    };
+  }
+
   CH.ch4 = Object.assign({}, common, {
     id: 'ch4', num: 4, tab: 'Ch 4', title: 'Equilibria & linearization', pages: 'pp. 59–68',
-    defaults() { return { zE: 0.25, dz0: 0, dth0: 0.5, method: 'jacobian', comp: 'eq', inp: { shape: 'zero', amp: 0.05, freq: 1, width: 0.2 } }; },
+    defaults() { return { zE: 0.25, dz0: 0, dth0: 0.5, method: 'jacobian', comp: 'eq', FeW: 0, inp: { shape: 'zero', amp: 0.05, freq: 1, width: 0.2 } }; },
     simDefaults(sys) { return sys.problems.ch4.sim; },
     linearLabel: 'linearized model',
 
     lin(ctx) { return ctx.sys.linear(ctx.pModel, { z: ctx.st.zE, comp: ctx.st.method === 'fl' ? 'fl' : 'eq' }); },
     controller(ctx, o) { ctx.st.comp = ctx.st.method === 'fl' ? 'fl' : 'eq'; return openLoop(ctx, o); },
     x0(ctx) { return [ctx.st.zE + ctx.st.dz0, ctx.st.dth0 * M.DEG, 0, 0]; },
+    // Work mode, Jacobian: F = your F_e + F̃ (the "your F_e" slider, which "Use my
+    // x_e, F_e" sets), starting at your x_e (plus the offsets) once you have used it.
+    // Feedback: F_fl(z) is applied once E.4(c) is solved; until then F = F̃.
     simulate(ctx, c, plant) {
-      return WB.sim.simulate({ ...c, x0: this.x0(ctx), plant, controller: this.controller(ctx), reference: () => ctx.st.zE });
+      const work = ctx.S.mode === 'work' && ctx.st.method !== 'fl';
+      const xe = work ? ctx.st.xeW : null;
+      const x0 = xe ? xe.map((v, i) => v + [ctx.st.dz0, ctx.st.dth0 * M.DEG, 0, 0][i]) : this.x0(ctx);
+      const controller = this.controller(ctx, work ? { Fe: ctx.st.FeW || 0 } : {});
+      return WB.sim.simulate({ ...c, x0, plant, controller, reference: () => ctx.st.zE });
     },
+    // The feedback-linearized model answers E.4(c): no dashed trace for it before then.
     linearSim(ctx, c) {
+      if (ctx.st.method === 'fl' && !showsAnswer(ctx, E4C(ctx))) return null;
       const { A, B } = this.lin(ctx);
       return linearOpenLoop(ctx, { ...c, reference: () => ctx.st.zE }, A, B, this.x0(ctx), ctx.st.zE);
     },
@@ -434,17 +596,44 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const inp = section(parent, 'Input F̃(t)', 'p. 386');
       inputControls(inp, ctx);
       inp.append(el('p', { class: 'muted small', text: 'Start a hair off equilibrium and watch the linear model (dashed) and the nonlinear plant separate as the block slides. Once you have solved (b) and (c), the s-plane shows the eigenvalues of each linearization.' }));
+      if (ctx.S.mode === 'work') {
+        slider(sec, { label: 'your F<sub>e</sub>', unit: 'N', min: 0, max: 30, step: 0.01, sig: 4, ...bind(ctx, 'FeW'), disabled: () => ctx.st.method !== 'jacobian' });
+        sec.append(el('p', { class: 'muted small', text: 'Jacobian: Work mode applies your F_e. Use my x_e, F_e in (a) sets it and starts the run at your x_e (plus the offsets): with the right answers the block and beam stay at rest. Feedback: the feedback-linearizing force is applied once you solve (c); until then F = F̃.' }));
+      } else {
+        sec.append(el('p', { class: 'muted small', text: 'Explore applies the correct equilibrium or feedback-linearizing force.' }));
+      }
     },
 
     outputSeries(ctx, res, sc, oi) {
-      return oi === 0 ? [{ label: 'zₑ', y: Array.from(res.t, () => ctx.st.zE), color: '--ref', dash: [6, 4], width: 1.5 }] : [];
+      const out = oi === 0 ? [{ label: 'zₑ', y: Array.from(res.t, () => ctx.st.zE), color: '--ref', dash: [6, 4], width: 1.5 }] : [];
+      const ref = sc(res.yAll[oi]);
+      if (ctx.st.method === 'fl') {
+        const y = Y.data(ctx, 'ch4.c');
+        if (y) {
+          const pick = (a, b) => sc(oi === 0 ? a : b);
+          out.push(ser('block and beam with your F_fl', pick(y.z, y.theta), ref), ser('your thetaddot_fl model', pick(y.zm, y.thm), ref, { dash: [8, 3] }));
+        }
+      } else {
+        const y = Y.data(ctx, 'ch4.b');
+        if (y) {
+          const lr = Y.linResponse(ctx, { ...y, ...OUT2 }, [ctx.st.dz0, ctx.st.dth0 * M.DEG, 0, 0], fin(ctx));
+          out.push(ser('your A_jac, B_jac', outTrace(lr, oi, sc, ctx.st.zE), ref));
+        }
+      }
+      return out;
     },
 
     splane(ctx) {
-      const id = ctx.sys.problems.ch4.id;
-      if (!showsAnswer(ctx, ctx.st.method === 'fl' ? `${id}/c` : `${id}/b`)) return { markers: [], fitR: 2 };
-      const { A } = this.lin(ctx);
-      return { markers: L.eig(A).map((p) => ({ ...p, kind: 'ol', label: `eigenvalue of A (${ctx.st.method})` })), fitR: 2 };
+      const id = ctx.sys.problems.ch4.id, fl = ctx.st.method === 'fl';
+      let sp = { markers: [], fitR: 2 };
+      if (showsAnswer(ctx, fl ? `${id}/c` : `${id}/b`)) {
+        const { A } = this.lin(ctx);
+        sp = { markers: L.eig(A).map((p) => ({ ...p, kind: 'ol', label: `eigenvalue of A (${ctx.st.method})` })), fitR: 2 };
+      }
+      const y = Y.data(ctx, fl ? 'ch4.c' : 'ch4.b');
+      if (!y || !y.A) return sp;
+      return fl ? Y.withMarkers(sp, Y.eig(y.A, 'eigenvalue of your thetaddot_fl model at zₑ'), { obs: 'your F_fl model' })
+        : Y.withMarkers(sp, Y.eig(y.A, 'eigenvalue of your A_jac'), { obs: 'your A_jac' });
     },
 
     math(ctx) {
@@ -488,6 +677,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               return it.fn === 'x_e' && g.length === 4 && Math.abs(Math.abs(g[1]) - Math.PI) < 1e-6 ? 'θ = π also makes f(x, F) = 0, but that turns the beam around; use the configuration of Fig. 20-1.' : '';
             },
           }, 'def x_e(z_e):\n    # equilibrium state (z, theta, zdot,\n    # thetadot) with the block at z_e\n    return ...\n\ndef F_e(z_e):\n    # force that holds it there\n    return ...\n'),
+          actions: [{ label: 'Use my x_e, F_e', run: (code) => useMyEquilibrium(ctx, code) }],
           solution: () => [
             { html: 'ẋ = 0 needs ż = θ̇ = 0; then z̈ = 0 ⇒ sin θ = 0 ⇒ θ<sub>e</sub> = 0, and θ̈ = 0 ⇒ F<sub>e</sub>ℓ = m₁gz<sub>e</sub> + m₂gℓ/2. Any z<sub>e</sub> on the beam works.' },
             { tex: 'x_e = (z_e, 0, 0, 0)^\\top,\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2}' },
@@ -503,6 +693,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               { fn: 'B_jac', args: ['z_e'], truth: (p, a) => ctx.sys.linear(p, { z: a.z_e }).B },
             ],
           }, 'def A_jac(z_e):\n    return ...\n\ndef B_jac(z_e):\n    return ...\n'),
+          actions: [{ label: 'Plot my A, B', run: (code) => { ctx.st.method = 'jacobian'; ctx.update(); return Y.plot(ctx, 'ch4.b', code, runJacobian, () => 'Your eigenvalues are the × markers on the s-plane, and your linear model (from the same δz(0), δθ(0) and F̃) is dotted on the z and θ plots. They follow zₑ and the input.'); } }],
           solution: () => [
             { tex: 'J_e = \\frac{m_2\\ell^2}{3} + m_1z_e^2:\\quad \\ddot{\\tilde z} = -g\\tilde\\theta,\\quad J_e\\ddot{\\tilde\\theta} = \\ell\\tilde F - m_1 g\\tilde z' },
             { html: 'The zθ̇², 2m₁zżθ̇ and sin θ·(…) terms all vanish to first order at the equilibrium, because each is a product with a zero factor there. The θ̈ numerator is zero at the equilibrium, so only its derivatives divided by J<sub>e</sub> remain.' },
@@ -512,7 +703,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         {
           id: 'c', title: '(c) Feedback linearization, if possible',
           html: 'Choose F = F<sub>fl</sub>(z, θ, ż, θ̇) + F̃ so that, with F̃ = 0, the beam stays at rest for every block position and angle, and return the resulting θ̈. Any F<sub>fl</sub> that does this is accepted. Then ask yourself whether the z equation can be linearized the same way.',
-          code: { template: 'def F_fl(z, theta, zdot, thetadot):\n    return ...\n\ndef thetaddot_fl(z, theta, zdot,\n                 thetadot, F_tilde):\n    # theta_ddot when F = F_fl + F_tilde\n    return ...\n', check: (code) => checkFeedbackLin(ctx, code) },
+          code: { template: 'def F_fl(z, theta, zdot, thetadot):\n    return ...\n\ndef thetaddot_fl(z, theta, zdot,\n                 thetadot, F_tilde):\n    # theta_ddot when F = F_fl + F_tilde\n    return ...\n', check: (code) => checkFeedbackLin(ctx, code),
+            actions: [{ label: 'Simulate my F_fl', run: (code) => { ctx.st.method = 'fl'; ctx.update(); return Y.plot(ctx, 'ch4.c', code, runFeedbackLin, () => 'Dotted on the z and θ plots: the block and beam with your F = F_fl + F̃, and (long dashes) your thetaddot_fl model driven by F̃, with z̈ from the plant\'s z equation. With a correct answer they overlap. The × markers are the eigenvalues of that model linearized at zₑ.'); } }] },
           solution: () => [
             { tex: 'F = \\frac{m_1 g z}{\\ell} + \\frac{m_2 g}{2} + \\tilde F \\;\\Rightarrow\\; \\Big(\\frac{m_2\\ell^2}{3} + m_1z^2\\Big)\\ddot\\theta = \\ell\\cos\\theta\\,\\tilde F - 2m_1z\\dot z\\dot\\theta' },
             { html: 'Gravity on the block and the beam both enter the θ equation multiplied by cos θ, like F, so F<sub>fl</sub>(z) cancels them for every θ. The z equation, z̈ = zθ̇² − g sin θ, has no F in it, so it cannot be linearized this way: the system is only partly feedback-linearized. Near θ = 0 the θ equation becomes J<sub>e</sub>θ̈ = ℓF̃ with no m₁g z̃ term, the model E.5(c) uses, and E.8(e) uses this F<sub>fl</sub> with the measured z.' },
@@ -555,6 +747,66 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     return { thF: C.div(C.mul(b4, s2), den), zF: C.div(a32 * b4, den), zTh: C.div(a32, s2) };
   }
 
+  // E.5: the student's transfer functions, each fitted with the lowest-order proper
+  // rational function that matches it. For (a), Python solves their two transformed
+  // equations for Z̃ and Θ̃ with F̃ = 1 at each sample s. (b) also draws the cascade
+  // Z̃/Θ̃ · Θ̃/F̃. (a) and (b) go with the full Jacobian model, (c) with the E.5(c) one.
+  const LAP_PY = `
+
+def _wb_lap(s):
+    e = lambda Z, T, F: np.array([complex(z_equation(s, Z, T, F)), complex(theta_equation(s, Z, T, F))])
+    e0 = e(0, 0, 0)
+    M = np.column_stack([e(1, 0, 0) - e0, e(0, 1, 0) - e0])
+    if abs(np.linalg.det(M)) <= 1e-12 * max(1.0, np.abs(M).max()) ** 2:
+        raise ValueError('your two equations do not determine Z and Theta for a given F')
+    return np.linalg.solve(M, -(e(0, 0, 1) - e0))
+
+def _wb_lap_th(s):
+    return _wb_lap(s)[1]
+
+def _wb_lap_z(s):
+    return _wb_lap(s)[0]
+
+def _wb_casc(s):
+    return Z_over_Theta(s) * Theta_over_F(s)
+`;
+  const TF_PARTS = {
+    a: { fns: ['_wb_lap_th', '_wb_lap_z'], names: ['Θ̃/F̃ from your equations', 'Z̃/F̃ from your equations'] },
+    b: { fns: ['Theta_over_F', 'Z_over_F'], names: ['your Θ̃/F̃', 'your Z̃/F̃'], casc: true },
+    c: { fns: ['Theta_over_F', 'Z_over_F'], names: ['your simplified Θ̃/F̃', 'your simplified Z̃/F̃'] },
+  };
+  async function runTfs(ctx, code, part) {
+    const spec = TF_PARTS[part], src = code + LAP_PY;
+    const fit = async (fn, name) => {
+      const r = await Y.fitTf(ctx, src, fn, { params: withLength(ctx.pModel), maxN: 6 });
+      return r.ok === false && r.msg ? { ...r, msg: r.msg.split(fn).join(name) } : r;
+    };
+    const th = await fit(spec.fns[0], spec.names[0]);
+    if (th.ok === false) return th;
+    const z = await fit(spec.fns[1], spec.names[1]);
+    if (z.ok === false) return z;
+    const out = { thF: th.G, zF: z.G, names: spec.names };
+    if (spec.casc) {
+      const c = await fit('_wb_casc', 'Z_over_Theta(s) * Theta_over_F(s)');
+      if (c.ok === false) return c;
+      out.casc = c.G;
+    }
+    return out;
+  }
+  // The overlay that goes with the model chosen on the right: the last of (a), (b)
+  // plotted for the full model, (c) for the E.5(c) one.
+  const last5 = { full: 'ch5.b' };
+  const yours5 = (ctx) => Y.data(ctx, ctx.st.model === 'full' ? last5.full : 'ch5.c');
+  function plotTfs(ctx, code, part) {
+    ctx.st.model = part === 'c' ? 'simple' : 'full';
+    if (part !== 'c') last5.full = `ch5.${part}`;
+    ctx.update();
+    return Y.plot(ctx, `ch5.${part}`, code, (c2, cd) => runTfs(c2, cd, part), (d) => {
+      const n = d.thF.den.length - 1;
+      return `Your Θ̃/F̃ has ${n} pole${n === 1 ? '' : 's'} (× on the s-plane, with those of Z̃/F̃). Their responses to the same F̃, from rest, are dotted on the z and θ plots${d.casc ? ', and Z̃/Θ̃ · Θ̃/F̃ (long dashes) on the z plot' : ''}. The ${part === 'c' ? 'E.5(c)' : 'full Jacobian'} model is selected on the right.`;
+    });
+  }
+
   CH.ch5 = Object.assign({}, common, pulseSim(), {
     id: 'ch5', num: 5, tab: 'Ch 5', title: 'Transfer functions', pages: 'pp. 69–80',
     defaults() { return { comp: 'fl', model: 'simple', inp: { shape: 'pulse', amp: 0.05, freq: 1, width: 0.2 } }; },
@@ -563,13 +815,32 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const sec = section(parent, 'Input F̃(t)', 'p. 386 · E.5');
       modelToggle(sec, ctx);
       inputControls(sec, ctx);
+      WB.E.ffWorkControls(sec, ctx);
       sec.append(el('p', { class: 'muted small', text: 'A force pulse spins the beam up, and the tilt makes the block accelerate. The dashed trace is the linear model you choose above.' }));
     },
     splane(ctx) {
       const id = ctx.sys.problems.ch5.id, full = ctx.st.model === 'full';
-      if (!showsAnswer(ctx, full ? `${id}/b` : `${id}/c`)) return { markers: [], fitR: 2 };
-      const lin = ctx.sys.linear(ctx.pModel, { comp: full ? 'eq' : 'fl' });
-      return { markers: L.eig(lin.A).map((p) => ({ ...p, kind: 'ol', label: `pole (${full ? 'full' : 'E.5(c)'} model)` })), fitR: 2 };
+      let sp = { markers: [], fitR: 2 };
+      if (showsAnswer(ctx, full ? `${id}/b` : `${id}/c`)) {
+        const lin = ctx.sys.linear(ctx.pModel, { comp: full ? 'eq' : 'fl' });
+        sp = { markers: L.eig(lin.A).map((p) => ({ ...p, kind: 'ol', label: `pole (${full ? 'full' : 'E.5(c)'} model)` })), fitR: 2 };
+      }
+      const y = yours5(ctx);
+      if (!y) return sp;
+      return Y.withMarkers(sp, [
+        ...Y.poles(WB.tf.poles(y.thF), `pole of ${y.names[0]}`), ...Y.zeros(WB.tf.zeros(y.thF), `zero of ${y.names[0]}`),
+        ...Y.poles(WB.tf.poles(y.zF), `pole of ${y.names[1]}`),
+      ], { obs: 'pole of your transfer functions', zero: `zero of ${y.names[0]}` });
+    },
+    // Your transfer functions driven by the same F̃ from rest, about z_e.
+    outputSeries(ctx, res, sc, oi) {
+      const y = yours5(ctx);
+      if (!y) return [];
+      const ref = sc(res.yAll[oi]), tr = (G) => Y.tfResponse(ctx, G, fin(ctx)), ze = ctx.sys.ze(ctx.pModel);
+      if (oi === 1) return [ser(y.names[0], sc(tr(y.thF)), ref)];
+      const out = [ser(y.names[1], Array.from(tr(y.zF), (v) => v + ze), ref)];
+      if (y.casc) out.push(ser('your Z̃/Θ̃ · Θ̃/F̃', Array.from(tr(y.casc), (v) => v + ze), ref, { dash: [8, 3] }));
+      return out;
     },
     math(ctx) {
       const lin = ctx.sys.linear(ctx.pModel, { comp: 'eq' });
@@ -607,6 +878,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               { fn: 'theta_equation', args: ['s', 'Z', 'Theta', 'Fs'], compare: 'scale', truth: (p, a) => { const { A, B } = ctx.sys.linear(p), X = cx(); return X.add(X.add(X.mul(X.mul(a.s, a.s), a.Theta), X.mul(-A[3][0], a.Z)), X.mul(-B[3][0], a.Fs)); } },
             ],
           }, 'def z_equation(s, Z, Theta, F):\n    # (left - right) of the z equation\n    return ...\n\ndef theta_equation(s, Z, Theta, F):\n    # (left - right) of the theta equation\n    return ...\n'),
+          actions: [{ label: 'Plot my equations', run: (code) => plotTfs(ctx, code, 'a') }],
           solution: () => [
             { tex: 's^2\\tilde Z(s) + g\\tilde\\Theta(s) = 0,\\quad J_e s^2\\tilde\\Theta(s) + m_1 g\\tilde Z(s) - \\ell\\tilde F(s) = 0,\\quad J_e = \\frac{m_2\\ell^2}{3} + m_1\\frac{\\ell^2}{4}' },
             { code: `${JE}\ndef z_equation(s, Z, Theta, F):\n    return s**2 * Z + P.g * Theta\n\ndef theta_equation(s, Z, Theta, F):\n    return (Je * s**2 * Theta\n            + P.m1 * P.g * Z - P.ell * F)` },
@@ -622,6 +894,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               { fn: 'Z_over_Theta', args: s, truth: (p, a) => tfs(ctx, p, a.s).zTh },
             ],
           }, 'def Theta_over_F(s):\n    return ...\n\ndef Z_over_F(s):\n    return ...\n\ndef Z_over_Theta(s):\n    return ...\n'),
+          actions: [{ label: 'Plot my transfer functions', run: (code) => plotTfs(ctx, code, 'b') }],
           solution: () => [
             { tex: '\\tilde Z = -\\frac{g}{s^2}\\tilde\\Theta \\Rightarrow J_e s^2\\tilde\\Theta = \\ell\\tilde F + \\frac{m_1 g^2}{s^2}\\tilde\\Theta \\Rightarrow \\frac{\\tilde\\Theta}{\\tilde F} = \\frac{(\\ell/J_e)s^2}{s^4 - m_1g^2/J_e},\\quad \\frac{\\tilde Z}{\\tilde F} = \\frac{-g\\ell/J_e}{s^4 - m_1g^2/J_e}' },
             { code: `${JE}den = lambda s: s**4 - P.m1 * P.g**2 / Je\n\ndef Theta_over_F(s):\n    return P.ell / Je * s**2 / den(s)\n\ndef Z_over_F(s):\n    return -P.g * P.ell / Je / den(s)\n\ndef Z_over_Theta(s):\n    return -P.g / s**2` },
@@ -636,6 +909,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               { fn: 'Z_over_F', args: s, truth: (p, a) => tfs(ctx, p, a.s, 'fl').zF },
             ],
           }, 'def Theta_over_F(s):\n    return ...\n\ndef Z_over_F(s):\n    return ...\n'),
+          actions: [{ label: 'Plot my simplified model', run: (code) => plotTfs(ctx, code, 'c') }],
           solution: () => [
             { tex: '\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{b_0}{s^2},\\; b_0 = \\frac{\\ell}{\\frac{m_2\\ell^2}{3} + m_1 z_e^2},\\quad \\frac{\\tilde Z}{\\tilde\\Theta} = -\\frac{g}{s^2}\\;(\\text{unchanged}),\\quad \\frac{\\tilde Z}{\\tilde F} = -\\frac{g b_0}{s^4}' },
             { code: `${JE}b0 = P.ell / Je\n\ndef Theta_over_F(s):\n    return b0 / s**2\n\ndef Z_over_F(s):\n    return -P.g * b0 / s**4` },
@@ -651,6 +925,17 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     },
   });
 
+  // E.6: the student's A, B, C, D.
+  async function runSS(ctx, code) {
+    const out = await WB.py.evaluate(code, [{ params: withLength(ctx.pModel), vars: ['A', 'B', 'C', 'D'] }]);
+    if (out.error) return Y.pyError(out);
+    const v = out.rows[0].vars;
+    const A = Y.asMat(v.A, 4, 4), B = Y.asMat(v.B, 4, 1), C = Y.asMat(v.C, 2, 4), D = Y.asMat(v.D, 2, 1);
+    const bad = [[A, 'A', '4×4'], [B, 'B', '4×1'], [C, 'C', '2×4'], [D, 'D', '2×1']].find(([m]) => !m);
+    if (bad) return { ok: false, msg: `${bad[1]} should be a ${bad[2]} array of numbers (x̃ = (z̃, θ̃, z̃̇, θ̃̇), ũ = F̃, ỹ = (z̃, θ̃)).` };
+    return { A, B, C, D };
+  }
+
   CH.ch6 = Object.assign({}, common, pulseSim(), {
     id: 'ch6', num: 6, tab: 'Ch 6', title: 'State-space models', pages: 'pp. 81–93',
     defaults() { return { comp: 'eq', model: 'full', inp: { shape: 'pulse', amp: 0.05, freq: 1, width: 0.2 } }; },
@@ -659,11 +944,26 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const sec = section(parent, 'Input ũ = F̃(t)', 'p. 387 · E.6');
       modelToggle(sec, ctx);
       inputControls(sec, ctx);
+      WB.E.ffWorkControls(sec, ctx);
     },
     splane(ctx) {
-      if (!showsAnswer(ctx, `${ctx.sys.problems.ch6.id}/a`)) return { markers: [], fitR: 2 };
-      const lin = ctx.sys.linear(ctx.pModel, { comp: ctx.st.model === 'full' ? 'eq' : 'fl' });
-      return { markers: L.eig(lin.A).map((p, i) => ({ ...p, kind: 'ol', label: `eigenvalue of A ${i + 1}` })), fitR: 2 };
+      let sp = { markers: [], fitR: 2 };
+      // The E.5(c) model's eigenvalues also answer E.5(c).
+      if (showsAnswer(ctx, `${ctx.sys.problems.ch6.id}/a`) && (ctx.st.model === 'full' || showsAnswer(ctx, `${ctx.sys.problems.ch5.id}/c`))) {
+        const lin = ctx.sys.linear(ctx.pModel, { comp: ctx.st.model === 'full' ? 'eq' : 'fl' });
+        sp = { markers: L.eig(lin.A).map((p, i) => ({ ...p, kind: 'ol', label: `eigenvalue of A ${i + 1}` })), fitR: 2 };
+      }
+      const y = Y.data(ctx, 'ch6.a');
+      return y ? Y.withMarkers(sp, Y.eig(y.A, 'eigenvalue of your A'), { obs: 'eigenvalue of your A' }) : sp;
+    },
+    // Your model from the simulation's initial state (as a deviation from x_e = (ℓ/2, 0, 0, 0)),
+    // driven by the same F̃. Its outputs cover both channels, so the velocity plot is left alone.
+    outputSeries(ctx, res, sc, oi) {
+      const y = Y.data(ctx, 'ch6.a');
+      if (!y) return [];
+      const ze = ctx.sys.ze(ctx.pModel);
+      const r = Y.linResponse(ctx, y, res.x[0].map((v, i) => (i === 0 ? v - ze : v)), fin(ctx));
+      return [ser('your A, B, C, D', outTrace(r, oi, sc, ze), sc(res.yAll[oi]))];
     },
     extraPlot(ctx, res) {
       const k = 180 / Math.PI;
@@ -693,6 +993,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         code: pyPart(ctx, {
           items: ['A', 'B', 'C', 'D'].map((k) => ({ var: k, truth: (p) => ss(p)[k] })),
         }, '# x = (z, theta, zdot, thetadot),\n# u = F_tilde, y = (z, theta)\nA = ...\nB = ...\nC = ...\nD = ...\n'),
+        actions: [{ label: 'Plot my model', run: (code) => { ctx.st.model = 'full'; ctx.update(); return Y.plot(ctx, 'ch6.a', code, runSS, () => 'Your eigenvalues of A are the × markers on the s-plane; your model\'s z and θ, from the same initial state and F̃, are dotted on the output plots (next to the full Jacobian model, now selected on the right).'); } }],
         solution: () => { const { A, B } = ss(ctx.pModel); return [
           { tex: `J_e = \\frac{m_2\\ell^2}{3} + m_1\\frac{\\ell^2}{4}:\\quad A = \\begin{bmatrix}0&0&1&0\\\\0&0&0&1\\\\0&-g&0&0\\\\-\\frac{m_1g}{J_e}&0&0&0\\end{bmatrix} = ${texMat(A)},\\quad B = \\begin{bmatrix}0\\\\0\\\\0\\\\ \\frac{\\ell}{J_e}\\end{bmatrix} = ${texMat(B)}` },
           { tex: 'C = \\begin{bmatrix}1&0&0&0\\\\0&1&0&0\\end{bmatrix},\\quad D = \\begin{bmatrix}0\\\\0\\end{bmatrix}' },

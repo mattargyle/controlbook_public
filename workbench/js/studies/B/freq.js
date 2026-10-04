@@ -70,26 +70,57 @@
     const g = lib().slcGains(p, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaZ: pr.zetaZ, formula: 'book' });
     return { kPth: g.kPth, kDth: g.kDth, kPz: g.kPz, kDz: g.kDz, kIz: pr.ki, sigma: pr.sigma };
   }
-  const pidDefaults = (sys) => ({ ...b10(sys), loop: 'inner' });
+  // The B.10 gains answer B.10(c), so Work mode starts from placeholder gains in
+  // st.w (the Ch 10 tab's starting values, not the answer) and offers the student's
+  // own Ch 10 gains; the workbench's B.10 gains only once B.10(c) is solved.
+  const W_PID = { kPth: -60, kDth: -8, kPz: -0.1, kDz: -0.2, kIz: 0, sigma: 0.05 };
+  const pidDefaults = (sys) => ({ ...b10(sys), loop: 'inner', w: { ...W_PID } });
+  const shows = (ctx, key) => !ctx.S || ctx.S.mode === 'explore' || ctx.app.isSolved(key);
+  // Gains in use: Explore (and tools/regress_B.py, which passes no S) reads st itself.
+  const gainsOf = (ctx) => (!ctx.S || ctx.S.mode === 'explore' ? ctx.st : ctx.st.w);
+  function gainButtons(sec, ctx) {
+    const row = el('div', { class: 'btn-row' });
+    if (ctx.S.mode === 'work') {
+      row.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Use my Ch 10 gains', title: 'Copy the Work-mode gains and σ from the Ch 10 tab', onclick: () => {
+        const c = ctx.S.ch.ch10;
+        if (c && c.w) Object.assign(ctx.st.w, { kPth: c.w.kPth, kDth: c.w.kDth, kPz: c.w.kPz, kDz: c.w.kDz, kIz: c.w.kIz ?? 0, sigma: c.sigma });
+        ctx.update();
+      } }));
+    }
+    if (shows(ctx, 'B.10/c1')) {
+      row.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'B.10 gains', onclick: () => {
+        const g = b10(ctx.sys);
+        // the listing's k_Iz is the B.10(c) tuning answer
+        if (!shows(ctx, 'B.10/c3')) delete g.kIz;
+        Object.assign(gainsOf(ctx), g);
+        ctx.update();
+      } }));
+    }
+    sec.append(row);
+  }
   function gainControls(parent, ctx) {
-    const sec = section(parent, 'B.10 gains (hw16.py transfer functions)', 'p. 163–164, p. 297');
-    const sl = (k, label, min, max) => slider(sec, { label, min, max, step: (max - min) / 2000, sig: 4, ...bind(ctx, k) });
+    const sec = section(parent, ctx.S.mode === 'work' ? 'Your B.10 gains (hw16.py transfer functions)' : 'B.10 gains (hw16.py transfer functions)', 'p. 163–164, p. 297');
+    const obj = () => gainsOf(ctx);
+    const sl = (k, label, min, max) => slider(sec, { label, min, max, step: (max - min) / 2000, sig: 4, ...bind(ctx, k, obj) });
     sl('kPth', 'k<sub>Pθ</sub>', -300, 0); sl('kDth', 'k<sub>Dθ</sub>', -40, 0);
     sl('kPz', 'k<sub>Pz</sub>', -1, 0.5); sl('kIz', 'k<sub>Iz</sub>', -0.5, 0.2); sl('kDz', 'k<sub>Dz</sub>', -1.5, 0.5);
-    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma') });
-    sec.append(el('div', { class: 'btn-row' }, el('button', { type: 'button', class: 'btn btn-quiet', text: 'B.10 gains', onclick: () => { Object.assign(ctx.st, b10(ctx.sys)); ctx.update(); } })));
+    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma', obj) });
+    gainButtons(sec, ctx);
   }
   function loopToggle(parent, ctx, options) {
     segmented(parent, { label: 'Loop', options, ...bind(ctx, 'loop') });
   }
   // The time simulation runs the B.10 controller with these gains.
   function pidController(ctx, { linear = false } = {}) {
-    const st = ctx.st, p = ctx.pModel;
+    const st = gainsOf(ctx), p = ctx.pModel;
     const g = { kPth: st.kPth, kDth: st.kDth, kPz: st.kPz, kDz: st.kDz, kIz: st.kIz, kDC: lib().dcGain(p, st.kPth) };
     return lib().slcPID({ g, p, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(p), sigma: st.sigma, linear });
   }
+  // The open-loop poles include the plant's, which answer B.5(b) (inner) and
+  // B.5(c) (outer): Work mode shows them once that part is solved.
   function clMarkers(ctx, Lg, label) {
-    const mk = L.roots(Lg.den).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 60 }));
+    const ol = shows(ctx, label === 'inner' ? 'B.5/b' : 'B.5/c');
+    const mk = ol ? L.roots(Lg.den).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 60 })) : [];
     L.roots(L.polyAdd(Lg.den, Lg.num)).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `${label} closed-loop pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 60 }));
     return { markers: mk, fitR: 12 };
   }
@@ -105,7 +136,12 @@
       const sec = section(parent, 'Plant transfer functions', 'p. 277–278 · Eq. 15.16, 15.18');
       loopToggle(sec, ctx, [{ value: 'inner', label: 'P_in: F → θ' }, { value: 'outer', label: 'P_out: θ → z' }]);
       segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'asym') });
-      sec.append(el('p', { class: 'muted small', text: 'The time plots below run the B.10 controller, since the open-loop pendulum just falls over. In Work mode each Bode plot appears once you have drawn it by hand (problem panel).' }));
+      if (ctx.S.mode === 'work') {
+        sec.append(el('p', { class: 'muted small', text: 'The time plots below run the B.10 controller with your gains (Use my Ch 10 gains), since the open-loop pendulum just falls over. Each Bode plot appears once you have drawn it by hand (problem panel).' }));
+        gainButtons(sec, ctx);
+      } else {
+        sec.append(el('p', { class: 'muted small', text: 'The time plots below run the B.10 controller, since the open-loop pendulum just falls over. In Work mode each Bode plot appears once you have drawn it by hand (problem panel).' }));
+      }
     },
     // B.15 is drawn by hand: in Work mode each loop's Bode plot (and its poles and
     // zeros) appears once that part is marked done.
@@ -195,7 +231,7 @@
     simDefaults(sys) { return sys.problems.ch16.sim; },
     controller: pidController,
     specs(ctx) {
-      const p = ctx.pModel, pr = ctx.sys.problems.ch16, g = ctx.st;
+      const p = ctx.pModel, pr = ctx.sys.problems.ch16, g = gainsOf(ctx);
       const Li = T.mul(Pin(p), Cin(g)), Lo = T.mul(Pout(p), Cout(g));
       const BrIn = db(T.mag(Li, pr.wrIn)), BnIn = -db(T.mag(Li, pr.wnoIn));
       const BrOut = db(T.mag(Lo, pr.wrOut));
@@ -224,14 +260,15 @@
       if (inner) {
         return {
           title: 'Inner loop: P_in and P_in·C_in', w: W,
-          lines: [{ label: 'P_in(jω)', ...bodeB(Pin(p)), color: '--text-muted', width: 1.5 }, { label: 'P_in C_in(jω)', ...bodeB(s.Li), color: '--series-1' }],
+          // the plant's own Bode plot answers B.15(a), (b)
+          lines: [...(shows(ctx, 'B.15/a') ? [{ label: 'P_in(jω)', ...bodeB(Pin(p)), color: '--text-muted', width: 1.5 }] : []), { label: 'P_in C_in(jω)', ...bodeB(s.Li), color: '--series-1' }],
           specs: show ? [{ w0: 1e-4, w1: s.pr.wrIn, db: s.BrIn, keep: 'above', color: '--series-3', label: `B_r = ${fmt(s.BrIn, 3)} dB` }, { w0: s.pr.wnoIn, w1: 1e5, db: -s.BnIn, keep: 'below', color: '--series-3', label: `${fmt(-s.BnIn, 3)} dB` }] : [],
           marks: [{ w: s.pr.wrIn, label: 'ω_r = 1' }, { w: s.pr.wnoIn, label: 'ω_no = 200' }],
         };
       }
       return {
         title: 'Outer loop: P_out and P_out·C_out', w: W,
-        lines: [{ label: 'P_out(jω)', ...bodeB(Pout(p)), color: '--text-muted', width: 1.5 }, { label: 'P_out C_out(jω)', ...bodeB(s.Lo), color: '--series-1' }],
+        lines: [...(shows(ctx, 'B.15/b') ? [{ label: 'P_out(jω)', ...bodeB(Pout(p)), color: '--text-muted', width: 1.5 }] : []), { label: 'P_out C_out(jω)', ...bodeB(s.Lo), color: '--series-1' }],
         specs: show ? [{ w0: 1e-4, w1: s.pr.wrOut, db: s.BrOut, keep: 'above', color: '--series-3', label: `B_r = ${fmt(s.BrOut, 4)} dB` }] : [],
         marks: [{ w: s.pr.wrOut, label: 'ω_r = 0.001' }],
       };
@@ -242,7 +279,7 @@
       return [
         { title: 'Controllers (dirty derivative)', page: 'p. 297, hw16.py',
           theory: 'C_{in}(s) = \\frac{(k_{D\\theta} + \\sigma k_{P\\theta})s + k_{P\\theta}}{\\sigma s + 1},\\quad C_{out}(s) = \\frac{(k_{Dz} + \\sigma k_{Pz})s^2 + (k_{Pz} + \\sigma k_{Iz})s + k_{Iz}}{s(\\sigma s + 1)}',
-          numbers: `C_{in} = ${T.texTf(Cin(ctx.st))},\\quad C_{out} = ${T.texTf(Cout(ctx.st))}` },
+          numbers: `C_{in} = ${T.texTf(Cin(gainsOf(ctx)))},\\quad C_{out} = ${T.texTf(Cout(gainsOf(ctx)))}` },
         { title: 'Tracking', page: 'p. 286 · Eq. 16.4–16.5',
           theory: '|e| \\le \\gamma_r|r| \\text{ for } \\omega \\le \\omega_r \\text{ when } 20\\log|PC| \\ge B_r,\\quad \\gamma_r = 10^{-B_r/20}',
           numbers: `\\text{inner: } B_r = ${tex(s.BrIn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s.grIn)}\\%,\\quad \\text{outer: } B_r = ${tex(s.BrOut)}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(s.grOut)}`, spoiler: true,
@@ -256,7 +293,7 @@
       const s = () => this.specs(ctx);
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
         { id: 'in', title: 'Inner loop: Bode plots of the plant and of the plant under PD control',
-          html: 'Use the B.10 gains (hw16.py). In your code: bode(P_in) and bode(P_in·C_in) on one graph. Here: Loop = inner, and the gains on the right (B.10 button).' },
+          html: 'Use the B.10 gains (hw16.py). In your code: bode(P_in) and bode(P_in·C_in) on one graph. Here: Loop = inner, and the gains on the right (in Work mode, Use my Ch 10 gains).' },
         { id: 'a', title: '(a) Inner-loop tracking error below 1 rad/s', inputs: { v: '%' },
           check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().grIn }, { v: 'percent' }),
           solution: () => [{ tex: `B_r = ${tex(s().BrIn)}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().grIn)}\\%` }, { html: 'The book reads 6.5 dB → 47% from Fig. 16-10 (p. 297), which matches t<sub>r,θ</sub> = 0.5 s (B.8) gains, not the B.10 listing\'s 0.2 s.' }] },
@@ -282,7 +319,7 @@
     // Outer loop gain. 'book': P_out·C_out as hw17.py. 'impl': what the B.10 code
     // closes, C_out · filter · (inner closed loop θ_r → θ) · P_out.
     outerLoop(ctx) {
-      const p = ctx.pModel, g = ctx.st;
+      const p = ctx.pModel, g = gainsOf(ctx);
       if (ctx.st.outerModel === 'book') return T.mul(Pout(p), Cout(g));
       const P = Pin(p), Ci = Cin(g);
       // θ/θ_r with k_Pθ on the error and the D term on θ: P k_Pθ / (1 + P C_in)
@@ -291,7 +328,7 @@
       return T.mul(Cout(g), T.tf([zf.a], [1, zf.b]), Tin, Pout(p));
     },
     loops(ctx) {
-      const p = ctx.pModel, g = ctx.st;
+      const p = ctx.pModel, g = gainsOf(ctx);
       const Li = T.mul(Pin(p), Cin(g)), Lo = this.outerLoop(ctx);
       const Ti = T.feedback(Li), To = T.feedback(Lo);
       return { Li, Lo, Ti, To, mi: marginsB(Li), mo: marginsB(Lo), bwi: bandwidth(Ti), bwo: bandwidth(To) };
@@ -428,10 +465,17 @@
 
     buildControls(parent, ctx) {
       const pre = section(parent, 'Start from', 'p. 349–360');
-      pre.append(el('div', { class: 'btn-row' },
-        el('button', { type: 'button', class: 'btn', text: 'First try', onclick: () => { Object.assign(ctx.st, presetNone()); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn', text: 'Repo (Listings 18.5–18.6)', title: 'C_in = −800·lead(40, 15); C_out = 0.1·lead(1, 20)·lag(0.04, 10)·lpf(50); F = lpf(2)', onclick: () => { Object.assign(ctx.st, presetRepo()); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn', text: 'Book text', title: 'C_in = −155.12(s/10.72+1)/(s/120+1); C_out = 0.469 lead · lag · 100/(s+100); F = 2/(s+2)', onclick: () => { Object.assign(ctx.st, presetBook()); ctx.update(); } })));
+      const row = el('div', { class: 'btn-row' },
+        el('button', { type: 'button', class: 'btn', text: 'First try', onclick: () => { Object.assign(ctx.st, presetNone()); ctx.update(); } }));
+      pre.append(row);
+      // the repo and book designs answer B.18(a) and (b): Work mode offers them once both are solved
+      if (shows(ctx, 'B.18/a') && shows(ctx, 'B.18/b')) {
+        row.append(
+          el('button', { type: 'button', class: 'btn', text: 'Repo (Listings 18.5–18.6)', title: 'C_in = −800·lead(40, 15); C_out = 0.1·lead(1, 20)·lag(0.04, 10)·lpf(50); F = lpf(2)', onclick: () => { Object.assign(ctx.st, presetRepo()); ctx.update(); } }),
+          el('button', { type: 'button', class: 'btn', text: 'Book text', title: 'C_in = −155.12(s/10.72+1)/(s/120+1); C_out = 0.469 lead · lag · 100/(s+100); F = 2/(s+2)', onclick: () => { Object.assign(ctx.st, presetBook()); ctx.update(); } }));
+      } else {
+        pre.append(el('p', { class: 'muted small', text: 'The repo\'s and the book\'s designs appear here once (a) and (b) are solved.' }));
+      }
       const view = section(parent, 'Bode view');
       segmented(view, { options: [{ value: 'inner', label: 'inner: P_in C_in' }, { value: 'outer', label: 'outer: P C_out' }], ...bind(ctx, 'loop') });
       segmented(view, { label: 'Closed loop on the Bode plot', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT') });
@@ -483,7 +527,7 @@
     bode(ctx) {
       const d = this.design(ctx), pr = ctx.sys.problems.ch18, p = ctx.pModel;
       if (ctx.st.loop === 'inner') {
-        const lines = [{ label: 'P_in', ...bodeB(Pin(p)), color: '--text-muted', dash: [5, 4], width: 1.5 }, { label: 'P_in C_in', ...bodeB(d.Li), color: '--series-1' }];
+        const lines = [...(shows(ctx, 'B.15/a') ? [{ label: 'P_in', ...bodeB(Pin(p)), color: '--text-muted', dash: [5, 4], width: 1.5 }] : []), { label: 'P_in C_in', ...bodeB(d.Li), color: '--series-1' }];
         if (ctx.st.showT) lines.push({ label: 'closed loop T_in', mag: T.bode(d.Ti, W).mag, color: '--series-3', width: 1.5 });
         return { title: 'Inner loop', w: W, lines, specs: [{ w0: pr.inner.wno, w1: 1e5, db: db(pr.inner.gn), keep: 'below', color: '--critical', label: 'noise spec' }],
           marks: d.mi.pms.map((c) => ({ w: c.w, label: `PM ${fmt(c.pm, 3)}° at ${fmt(c.w, 3)}`, color: '--series-1' })) };
