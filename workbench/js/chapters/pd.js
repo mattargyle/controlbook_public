@@ -84,7 +84,9 @@ WB.chapters = WB.chapters || {};
     const { kP, kD } = ctx.gains;
     const ol = M.roots2(model.a1, model.a0);
     const cl = clPoles(model, kP, kD);
-    const markers = ol.map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` }));
+    // In Work mode the open-loop poles answer A.7(a) until it is solved.
+    const showOl = ctx.S.mode === 'explore' || ctx.app.isSolved(`${ctx.sys.problems.ch7.id}/a`);
+    const markers = showOl ? ol.map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` })) : [];
     cl.forEach((p, i) => markers.push({ ...p, kind: 'cl', label: `closed-loop pole p${i + 1}`, dragId: draggable ? i : undefined }));
     if (ctx.st.arch === 'error' && kD > 1e-9) markers.push({ re: -kP / kD, im: 0, kind: 'zero', label: 'zero z = −kP/kD' });
     return markers;
@@ -93,7 +95,7 @@ WB.chapters = WB.chapters || {};
   function plantCard(ctx) {
     const { model, sys } = ctx;
     return {
-      title: 'Plant (design model)', page: 'p. 99 · Eq. 7.1 · A.7 p. 102',
+      title: 'Plant (design model)', page: 'p. 99 · Eq. 7.1 · A.7 p. 102', answers: `${sys.problems.ch5.id}/a`,
       theory: `P(s) = \\frac{b_0}{s^2 + a_1 s + a_0},\\quad b_0 = ${model.tex.b0},\\; a_1 = ${model.tex.a1},\\; a_0 = ${model.tex.a0}`,
       numbers: `P(s) = \\frac{${tex(model.b0)}}{s^2 + ${tex(model.a1)}\\,s ${model.a0 ? '+ ' + tex(model.a0) : ''}}`,
       spoiler: true,
@@ -128,7 +130,7 @@ WB.chapters = WB.chapters || {};
       numbers: `\\frac{${sym.y}(s)}{${sym.y}_r(s)} = \\frac{${num}}{s^2 + ${tex(c1)}\\,s + ${tex(c0)}},\\quad p_{cl} = ${texPole(cl[0])},\\; ${texPole(cl[1])}`
         + (err && kD > 0 ? `,\\quad z_{cl} = -\\tfrac{k_P}{k_D} = ${tex(-kP / kD)}` : ''),
       spoiler: true,
-      spoilerKey: 'symbolic',
+      answers: `${ctx.sys.problems.ch7.id}/b`,
     };
   }
 
@@ -138,6 +140,7 @@ WB.chapters = WB.chapters || {};
     const tauE = sys.equilibriumInput(0, pModel);
     return {
       title: 'Gravity compensation', page: 'p. 104 · Listing 7.1',
+      answers: comp === 'none' ? undefined : `${sys.problems.ch4.id}/c`,
       theory: comp === 'fl'
         ? `${sys.sym.u} = ${sys.sym.ff} + \\tilde{${sys.sym.u}},\\quad ${sys.sym.ff} = ${sys.ffTex}`
         : comp === 'eq'
@@ -152,7 +155,8 @@ WB.chapters = WB.chapters || {};
     const { alpha1, alpha0 } = M.polyFromPoles(desired[0], desired[1]);
     return {
       title, page,
-      theory: 'k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
+      theory: '\\Delta^d_{cl}(s) = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad \\text{set } \\Delta_{cl}(s) = \\Delta^d_{cl}(s) \\text{ and match coefficients}',
+      symbolic: 'k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
       numbers: `\\Delta_{cl}^d = s^2 + ${tex(alpha1)}\\,s + ${tex(alpha0)} \\quad \\Rightarrow k_P = ${tex((alpha0 - model.a0) / model.b0)},\\; k_D = ${tex((alpha1 - model.a1) / model.b0)}`,
       spoiler: true,
     };
@@ -176,6 +180,14 @@ WB.chapters = WB.chapters || {};
 
   // ----------------------------------------------------- problem-panel kit --
   // Each part: inputs (name -> label), check(values) -> {ok, msg}, solution() -> text.
+  // A part with `code: {template, check(code) -> Promise<{ok, msg, detail?}>, actions?}`
+  // gets a Python editor instead (WB.py). A part with neither inputs, code nor
+  // check is a step that is done outside the workbench; it shows its html only,
+  // plus a button that marks it done when it has `done: 'button label'` (e.g. a
+  // plot drawn by hand). `after: 'a'` keeps a part hidden in Work mode until part
+  // (a) is solved or done.
+  // Passing a check marks the part solved, which unlocks live-math cards that
+  // answer it (card.answers, see app.js).
   function problemPanel(parent, ctx, prob, parts) {
     const key = `wb.${ctx.sys.id}.${prob.id}.answers`;
     const saved = WB.ui.store.get(key, {});
@@ -187,6 +199,12 @@ WB.chapters = WB.chapters || {};
     parent.append(head, stmt);
     const note = el('p', { class: 'muted small', text: 'Answers are checked against the current nominal parameters (left panel).' });
     parent.append(note);
+    if (parts.some((p) => p.code)) {
+      const pn = el('p', { class: 'muted small' });
+      pn.innerHTML = 'Python answers run in your browser (Python 3.14 + numpy, loaded on the first Check). <code>np</code> is imported, and <code>P</code> holds the parameters like <code>armParam.py</code>: '
+        + Object.keys(ctx.pModel).map((k) => `<code>P.${k}</code>`).join(', ') + '. Write answers with these, not numbers: they are checked with other parameter values too.';
+      parent.append(pn);
+    }
 
     for (const part of parts) {
       const box = el('div', { class: 'part' });
@@ -214,26 +232,63 @@ WB.chapters = WB.chapters || {};
         WB.ui.linkifyNode(p);
         box.append(p);
       }
+      let editor = null;
+      if (part.code) {
+        editor = codeEditor(saved[`${part.id}.code`] ?? part.code.template, (v) => { saved[`${part.id}.code`] = v; WB.ui.store.set(key, saved); });
+        box.append(editor);
+      }
       const result = el('div', { class: 'part-result', 'aria-live': 'polite' });
       const sol = el('div', { class: 'part-solution', hidden: '' });
       const btns = el('div', { class: 'part-buttons' });
-      if (part.check) {
-        btns.append(el('button', {
-          type: 'button', class: 'btn', text: 'Check',
-          onclick: () => {
-            const vals = Object.fromEntries(Object.entries(inputs).map(([n, i]) => [n, i.value]));
-            showResult(result, part.check(vals));
-          },
-        }));
+      const values = () => Object.fromEntries(Object.entries(inputs).map(([n, i]) => [n, i.value]));
+      const solvedKey = `${prob.id}/${part.id}`;
+      if (part.after) {
+        const gate = `${prob.id}/${part.after}`;
+        WB.ui.addRefresher(() => { box.hidden = ctx.S.mode === 'work' && !ctx.app.isSolved(gate); });
       }
-      for (const extra of part.actions || []) {
+      if (part.done) {
+        const b = el('button', { type: 'button', class: 'btn', text: part.done });
+        b.addEventListener('click', () => { ctx.app.markSolved(solvedKey); ctx.update(); });
+        WB.ui.addRefresher(() => { b.disabled = ctx.app.isSolved(solvedKey); });
+        btns.append(b);
+      }
+      // Results may be a Promise (Python); show progress meanwhile.
+      const report = (r, button) => {
+        if (!r || typeof r.then !== 'function') {
+          if (!r) return;
+          showResult(result, r);
+          if (r.ok && button && button.dataset.check) ctx.app.markSolved(solvedKey);
+          return;
+        }
+        const starting = WB.py && WB.py.status() !== 'ready';
+        result.replaceChildren(el('span', { class: 'status-msg', text: starting ? 'Starting Python (the first time downloads about 15 MB)…' : 'Running…' }));
+        if (button) button.disabled = true;
+        r.then((res) => {
+          showResult(result, res);
+          if (res && res.ok && button && button.dataset.check) ctx.app.markSolved(solvedKey);
+        }, (e) => showResult(result, { ok: false, msg: String(e.message || e) }))
+          .finally(() => { if (button) button.disabled = false; });
+      };
+      if (part.check || (part.code && part.code.check)) {
+        const b = el('button', { type: 'button', class: 'btn', text: 'Check', 'data-check': '1' });
+        b.addEventListener('click', () => {
+          if (part.code) report(part.code.check(editor.value()), b);
+          else report(part.check(values()), b);
+        });
+        btns.append(b);
+      }
+      for (const extra of [...(part.actions || []), ...((part.code && part.code.actions) || [])]) {
+        const b = el('button', { type: 'button', class: 'btn', text: extra.label });
+        b.addEventListener('click', () => {
+          const r = extra.run(part.code ? editor.value() : values());
+          if (r) report(r, b);
+        });
+        btns.append(b);
+      }
+      if (part.code) {
         btns.append(el('button', {
-          type: 'button', class: 'btn', text: extra.label,
-          onclick: () => {
-            const vals = Object.fromEntries(Object.entries(inputs).map(([n, i]) => [n, i.value]));
-            const r = extra.run(vals);
-            if (r) showResult(result, r);
-          },
+          type: 'button', class: 'btn btn-quiet', text: 'Reset code',
+          onclick: () => { if (window.confirm('Replace your code with the starting template?')) editor.setValue(part.code.template); },
         }));
       }
       if (part.solution) {
@@ -247,9 +302,37 @@ WB.chapters = WB.chapters || {};
         }));
         WB.ui.addRefresher(() => { if (!sol.hidden) renderSolution(sol, part.solution()); });
       }
-      box.append(btns, result, sol);
+      if (btns.children.length) box.append(btns);
+      box.append(result, sol);
       parent.append(box);
     }
+  }
+
+  // Plain textarea editor: Tab indents four spaces, Enter keeps the indent.
+  function codeEditor(initial, onChange) {
+    const ta = el('textarea', { class: 'code-editor', spellcheck: 'false', autocomplete: 'off', autocapitalize: 'off', 'aria-label': 'Python code' });
+    ta.value = initial;
+    const fit = () => { ta.rows = Math.max(4, ta.value.split('\n').length + 1); };
+    const insert = (text) => {
+      const { selectionStart: a, selectionEnd: b } = ta;
+      ta.setRangeText(text, a, b, 'end');
+      onChange(ta.value); fit();
+    };
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); insert('    '); }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const line = ta.value.slice(0, ta.selectionStart).split('\n').pop();
+        let indent = line.match(/^\s*/)[0];
+        if (/:\s*$/.test(line)) indent += '    ';
+        e.preventDefault(); insert('\n' + indent);
+      }
+    });
+    ta.addEventListener('input', () => { onChange(ta.value); fit(); });
+    fit();
+    const wrap = el('div', { class: 'code-wrap' }, ta);
+    wrap.value = () => ta.value;
+    wrap.setValue = (v) => { ta.value = v; onChange(v); fit(); };
+    return wrap;
   }
 
   function renderSolution(node, s) {
@@ -259,6 +342,8 @@ WB.chapters = WB.chapters || {};
         const d = el('div', { class: 'sol-tex' });
         WB.ui.renderTex(d, line.tex, true);
         node.append(d);
+      } else if (line.code) {
+        node.append(el('pre', { class: 'sol-code', text: line.code }));
       } else {
         const p = el('p', {});
         p.innerHTML = line.html;
@@ -272,6 +357,7 @@ WB.chapters = WB.chapters || {};
     node.replaceChildren(el('span', { class: r.ok ? 'status good' : 'status bad' },
       el('span', { class: 'status-icon', 'aria-hidden': 'true', text: r.ok ? '✓' : '✗' }),
       el('span', { text: r.ok ? 'Correct' : 'Not yet' })), el('span', { class: 'status-msg', text: r.msg || '' }));
+    if (r.detail) node.append(el('pre', { class: 'py-detail', text: r.detail }));
   }
 
   const num = (s) => {
@@ -386,7 +472,7 @@ WB.chapters = WB.chapters || {};
           check: (v) => {
             const g = [M.parseComplex(v.p1), M.parseComplex(v.p2)];
             if (!g[0] || !g[1]) return { ok: false, msg: 'Enter both poles.' };
-            return M.polesMatch(g, M.roots2(model().a1, model().a0)) ? { ok: true, msg: '' } : { ok: false, msg: 'Roots of s² + a₁s + a₀?' };
+            return M.polesMatch(g, M.roots2(model().a1, model().a0)) ? { ok: true, msg: '' } : { ok: false, msg: 'The open-loop poles are the roots of the denominator of P(s).' };
           },
           solution: () => {
             const ol = M.roots2(model().a1, model().a0);
@@ -394,13 +480,26 @@ WB.chapters = WB.chapters || {};
           },
         },
         {
-          id: 'b', title: '(b) Closed-loop characteristic polynomial',
-          html: 'Δ<sub>cl</sub>(s) = s² + (c<sub>1</sub> + d<sub>1</sub>·k<sub>D</sub>) s + (c<sub>0</sub> + d<sub>0</sub>·k<sub>P</sub>)',
-          inputs: { c1: 'c<sub>1</sub>', d1: 'd<sub>1</sub>', c0: 'c<sub>0</sub>', d0: 'd<sub>0</sub>' },
-          check: (v) => checkNumbers(v, { c1: model().a1, d1: model().b0, c0: model().a0, d0: model().b0 }, {}),
+          id: 'b', title: '(b) Closed-loop transfer function and characteristic polynomial',
+          html: 'Derivative on the output (Fig. 7-2). Write both in terms of k<sub>P</sub> and k<sub>D</sub>; the check calls them at complex s. Any nonzero multiple of Δ<sub>cl</sub> is accepted.',
+          code: {
+            template: 'def closed_loop(s, kP, kD):\n    # Theta(s)/Theta_r(s)\n    return ...\n\ndef char_poly(s, kP, kD):\n    # Delta_cl(s)\n    return ...\n',
+            check: (code) => {
+              const cx = WB.py.cx;
+              const den = (p, a) => { const m = ctx.sys.secondOrderModel(p); return cx.poly([1, m.a1 + m.b0 * a.kD, m.a0 + m.b0 * a.kP], a.s); };
+              return WB.py.check(ctx, {
+                args: { s: { label: 's', complex: true, re: [-6, 3], im: [0.3, 12] }, kP: { label: 'kP', lo: 0.02, hi: 2 }, kD: { label: 'kD', lo: 0.01, hi: 0.5 } },
+                items: [
+                  { fn: 'closed_loop', args: ['s', 'kP', 'kD'], truth: (p, a) => cx.div(ctx.sys.secondOrderModel(p).b0 * a.kP, den(p, a)) },
+                  { fn: 'char_poly', args: ['s', 'kP', 'kD'], compare: 'scale', truth: den },
+                ],
+              }, code);
+            },
+          },
           solution: () => [
             { tex: `\\frac{${ctx.sys.sym.y}(s)}{${ctx.sys.sym.y}_r(s)} = \\frac{b_0 k_P}{s^2 + (a_1 + b_0 k_D)s + (a_0 + b_0 k_P)}` },
             { tex: `\\Delta_{cl}(s) = s^2 + (${tex(model().a1)} + ${tex(model().b0)}\\,k_D)\\,s + (${tex(model().a0)} + ${tex(model().b0)}\\,k_P)` },
+            { code: 'b0 = 3 / (P.m * P.ell**2)\na1 = 3 * P.b / (P.m * P.ell**2)\n\ndef char_poly(s, kP, kD):\n    return s**2 + (a1 + b0 * kD) * s + b0 * kP\n\ndef closed_loop(s, kP, kD):\n    return b0 * kP / char_poly(s, kP, kD)' },
             { html: 'Book: Eq. 7.5 (p. 101) and the A.7 solution (pp. 102–103).' },
           ],
         },

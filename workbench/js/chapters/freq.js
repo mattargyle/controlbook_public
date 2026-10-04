@@ -88,7 +88,10 @@ WB.chapters = WB.chapters || {};
       segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'asym') });
       sec.append(el('p', { class: 'muted small', text: 'Feedback linearization is on, so θ follows P(s). After the transient, θ is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀), plus a constant offset from the free integrator.' }));
     },
+    // A.15(a) is drawn by hand: in Work mode the plot (and P's poles) appear once it is done.
+    drawn: (ctx) => ctx.S.mode === 'explore' || ctx.app.isSolved(`${ctx.sys.problems.ch15.id}/a`),
     bode(ctx) {
+      if (!this.drawn(ctx)) return null;
       const P = plantTf(ctx), { mag, phase } = T.bode(P, W);
       const lines = [{ label: 'P(jω)', mag, phase, color: '--series-1' }];
       if (ctx.st.asym) {
@@ -100,13 +103,15 @@ WB.chapters = WB.chapters || {};
       const g = T.at(P, ctx.st.w0);
       return { title: 'Bode plot of P(s)', w: W, lines, marks: [{ w: ctx.st.w0, label: `ω₀: ${fmt(db(L.C.abs(g)), 3)} dB, ${fmt(L.C.arg(g) * 180 / Math.PI, 3)}°`, color: '--series-3' }] };
     },
-    splane(ctx) { return { markers: L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` })) }; },
+    splane(ctx) { return { markers: this.drawn(ctx) ? L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` })) : [] }; },
     math(ctx) {
       const m = ctx.model, K = m.b0 / m.a1;
       return [
         { title: 'Frequency response', page: 'p. 264 · Eq. 15.4',
           theory: 'u = A\\sin\\omega_0 t \\;\\Rightarrow\\; y_{ss} = A|P(j\\omega_0)|\\sin\\big(\\omega_0 t + \\angle P(j\\omega_0)\\big)' },
         { title: 'Bode canonical form', page: 'p. 266 · Eq. 15.5–15.7',
+          theory: 'P(j\\omega) = K\\,\\frac{\\prod (1 + j\\omega/z_i)}{(j\\omega)^q \\prod (1 + j\\omega/p_i)}:\\quad 20\\log|P| = 20\\log K + \\textstyle\\sum 20\\log|1 + j\\omega/z_i| - 20q\\log\\omega - \\sum 20\\log|1 + j\\omega/p_i|' },
+        { title: 'Bode form of the arm', page: 'p. 275', answers: `${ctx.sys.problems.ch15.id}/a`,
           theory: 'P(j\\omega) = \\frac{b_0/a_1}{j\\omega\\,(1 + j\\omega/a_1)},\\quad 20\\log|P| = 20\\log\\tfrac{b_0}{a_1} - 20\\log|j\\omega| - 20\\log|1 + j\\omega/a_1|',
           numbers: `P(j\\omega) = \\frac{${tex(K)}}{j\\omega\\,(1 + j\\omega/${tex(m.a1)})}`, spoiler: true,
           note: 'The A.15 solution (p. 275) writes 44.44/(s(s+0.4444)), which does not match the book\'s own parameters. With m = 0.5, ℓ = 0.3, b = 0.01 the plant is 66.67/(s(s+0.6667)). The Bode constant is 100 either way.' },
@@ -121,13 +126,13 @@ WB.chapters = WB.chapters || {};
       const magDb = (w) => db(T.mag(P(), w));
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch15, [
         {
-          id: 'a', title: 'Straight-line pieces',
-          inputs: { K: 'Bode constant', wp: 'corner [rad/s]', s1: 'slope below [dB/dec]', s2: 'slope above [dB/dec]' },
-          check: (v) => PD().checkNumbers(v, { K: m().b0 / m().a1, wp: m().a1, s1: -20, s2: -40 }, {}),
+          id: 'a', title: '(a) Draw the Bode plot by hand',
+          html: 'On paper: put P(s) in Bode canonical form and sketch the straight-line magnitude and phase. When you are done, click the button to see part (b) and the workbench\'s Bode plot to compare against.',
+          done: 'I\'ve drawn it: next',
           solution: () => [{ tex: `P(j\\omega) = \\frac{${tex(m().b0 / m().a1)}}{j\\omega(1 + j\\omega/${tex(m().a1)})}\\;\\Rightarrow\\; -20 \\text{ then } -40\\text{ dB/dec, phase } -90^\\circ \\to -180^\\circ` }],
         },
         {
-          id: 'b', title: 'Magnitudes (hw15.py prints these)',
+          id: 'b', title: '(b) Compare with bode (hw15.py prints these)', after: 'a',
           inputs: { m1: '|P(j0.3)| [dB]', m2: '|P(j10)| [dB]', m3: '|P(j1000)| [dB]' },
           check: (v) => PD().checkNumbers(v, { m1: magDb(0.3), m2: magDb(10), m3: magDb(1000) }, {}),
           solution: () => [{ tex: `${tex(magDb(0.3))},\\; ${tex(magDb(10))},\\; ${tex(magDb(1000))}\\;\\text{dB}` }],
@@ -470,6 +475,10 @@ WB.chapters = WB.chapters || {};
         { id: 'a', title: '(a) Meet all three specs',
           check: () => { const d = this.design(ctx); const ok = d.lowOk && d.highOk && d.pmOk; return { ok, msg: `low ${d.lowOk ? '✓' : '✗'}, high ${d.highOk ? '✓' : '✗'}, PM ${fmt(d.mg.pm, 3)}° ${d.pmOk ? '✓' : '✗'}` }; },
           solution: () => [{ html: 'Book text design (p. 341–345): lag z = 1.5, M = 40 (PM drops to 41°), lead at 40 rad/s with M = 10, then low-pass filters at 50 and 150 rad/s. Its figures give PM 59.7° at 14.2 rad/s. The printed final C also includes an unexplained (s+0.7)/(s+0.07); the figures were made without it. The repo (Listing 18.4) is a different design: try both presets.' }] },
+        { id: 'b', title: '(b) Add measurement noise',
+          html: 'Set noise σ in the left panel. The chapter starts with σ = 0.573° (0.01 rad).' },
+        { id: 'c', title: '(c) Implement C(s) in state-space form',
+          html: 'The simulation runs your C(s) as ż<sub>C</sub> = A<sub>C</sub>z<sub>C</sub> + B<sub>C</sub>e, u = C<sub>C</sub>z<sub>C</sub> + D<sub>C</sub>e (Eq. 18.3–18.4). In your code, <code>control.tf2ss</code> gives the matrices.' },
         { id: 'd', title: '(d) Prefilter removes the overshoot',
           html: 'Checks the first step of the current simulation: overshoot under 5%.',
           check: () => {

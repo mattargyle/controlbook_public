@@ -80,8 +80,8 @@ Required:
 | `simDefaults(sys)` | See above |
 | `controller(ctx, {linear})` | Returns `{update(r, x, yMeas, t)}`. Inputs and return value are described below |
 | `buildControls(parent, ctx)` | Right-panel controls via `WB.ui.section/slider/segmented` (see `js/core/ui.js`). Every control re-renders through `ctx.update()` |
-| `math(ctx)` | Live-math cards: `[{title, page, theory, symbolic?, numbers?, spoiler?, note?}]`. TeX strings; `\\quad` splits lines. `spoiler: true` hides `symbolic`/`numbers` in Work mode until Reveal |
-| `buildProblem(parent, ctx)` | `WB.design.problemPanel(parent, ctx, prob, parts)`. Each part is `{id, title, inputs: {name: label}, html?, check(vals) -> {ok, msg}, actions?: [{label, run(vals)}], solution() -> [{tex} \| {html}]}`. `WB.design.checkNumbers(vals, truth, labels)` gives a 1% / 1e-3 check |
+| `math(ctx)` | Live-math cards: `[{title, page, theory, symbolic?, numbers?, spoiler?, answers?, note?}]`. TeX strings; `\\quad` splits lines. `theory` is always shown, so it must be a general equation from the book, never this study's result. `spoiler: true` hides `symbolic`/`numbers` (and `note`) in Work mode until Reveal. `answers: 'A.3/d'` (or a list) marks a card that gives away that problem part, from this chapter or an earlier one: in Work mode the whole card stays locked until the part is solved (a passing Check) or revealed |
+| `buildProblem(parent, ctx)` | `WB.design.problemPanel(parent, ctx, prob, parts)`. Each part is `{id, title, inputs: {name: label}, html?, check(vals) -> {ok, msg}, actions?: [{label, run(vals)}], solution() -> [{tex} \| {html} \| {code}]}`. `WB.design.checkNumbers(vals, truth, labels)` gives a 1% / 1e-3 check. A part with `code: {template, check(code) -> Promise, actions?}` gets a Python editor instead (see "Python answers" below). A part with no inputs, code or check is a step done outside the workbench and shows only its html; add `done: 'button label'` when the student should say they finished it (e.g. a Bode plot drawn by hand, A.15(a)). `after: 'a'` hides a part in Work mode until part (a) is solved or done, and anything the hidden step would give away (plots, markers) should check `ctx.app.isSolved('A.15/a')` too. Give every lettered part of the book's problem its own part, in order |
 
 `controller.update(r, x, yMeas, t)`:
 - `r` is a number when there is one reference, otherwise an array.
@@ -121,7 +121,8 @@ The result object has a scalar channel 0 (`y, r, u, uDemand, uApplied, yMeas`), 
 
 - **Page numbers** are controlbook.pdf pages (book page + 8). `book_and_notes/INDEX.md` maps every problem to its page. Take equations and numbers from the PDF images, never from `controlbook.txt`, whose math is scrambled.
 - **Work vs. Explore.**
-  - Work mode: the user sets gains; anything that answers a problem is hidden (`spoiler`, Reveal buttons, Show solution).
+  - Work mode: the user sets gains; anything that answers a problem is hidden (`spoiler`, `answers`, Reveal buttons, Show solution). That includes the *form* of a result: part titles use the book's wording and never state the equation (no "P = P₀ + c sin θ, enter c"), control-panel text and plot labels don't state it either, and s-plane markers that answer a part stay off until it is solved.
+  - Derivation parts (energies, equations of motion, linearizations, transfer functions, state-space matrices, Evans form) are Python answers checked at random arguments and parameters, so the student has to produce the whole expression. Numeric entry is for computed quantities (gains, poles, margins).
   - Explore mode: design from knobs (poles, t_r/ζ, compensator blocks), with all math shown.
 - **Successive loop closure (B, C, E, F).** Show both loops' poles (inner/outer). Give the outer loop the inner loop's DC gain, as the book does. Show the bandwidth separation (`M = t_r,outer / t_r,inner`) as a control.
 - **Simulation semantics** match `hwNN_*Sim.py`: the controller saturates its output, then `u + d` is saturated again by the plant, then RK4 at Ts.
@@ -131,9 +132,18 @@ The result object has a scalar channel 0 (`y, r, u, uDemand, uApplied, yMeas`), 
 - **Studies B and C have full worked solutions** in `_B_pendulum/python` and `_C_satellite/python`. Your JS controllers should match their `ctrl*.py` to machine precision. Use `tools/js_eval.py`, as `tools/regress_A.py` does.
 - **D, E, F have no book solutions.** The repo only has templates plus `testDynamics.py` (expected f(x, u) values). Your `f` must reproduce those values exactly. Derive every answer from the PDF, and document derivations in the solution text.
 
+## Python answers (`WB.py`, `js/core/py.js`)
+
+Student code runs in Pyodide (Python 3.14 + numpy) in a sandboxed module worker, loaded on the first Check. `P` is a namespace of the parameters (`P.m`, `P.ell`, ... like `<sys>Param.py`) and `np` is imported.
+
+- `WB.py.check(ctx, spec, code)` evaluates the student's functions (`items: [{fn, args, truth(p, a), compare?}]`) or variables (`{var, truth(p)}`) at random arguments (`args`) for the nominal parameters and four random parameter sets, and compares them with `truth`. `compare: 'offset'` ignores an additive constant (potential energy), `'scale'` accepts any nonzero multiple (characteristic polynomials). `cases: [{label, fix}]` groups points so a failure says which physics is wrong ("only gravity acts"). Complex arguments (`{complex: true, re, im}`) test transfer functions; `WB.py.cx` does the complex arithmetic in `truth`.
+- `WB.py.evaluate(code, samples)` and `WB.py.simulate(code, {fn, params, x0, u, Ts})` are the lower-level calls (see A.4(c) and A.3(e) in `js/chapters/models.js`).
+- Arm examples: `js/chapters/models.js` (A.2–A.6), `pd.js` (A.7(b)), `pid.js` (A.P.6(a)).
+
 ## Checks before you finish
 
 1. `python3 workbench/tools/smoke_test.py --study X` reports 0 errors.
 2. Screenshot every chapter (`--shots DIR`) and look at them. No overlapping labels, empty plots or NaN readouts.
 3. Numerical checks as described above (B, C: vs. `ctrl*.py`; D, E, F: vs. `testDynamics.py`), recorded in `tools/regress_X.py` or your report.
 4. `python3 workbench/tools/smoke_test.py --study A` still reports 0 errors (you shouldn't have touched shared code).
+5. If the study has Python parts: `python3 workbench/tools/py_test.py --study X` (needs network) reports 0 failures: templates fail, solutions pass, locked cards unlock.

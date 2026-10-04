@@ -216,7 +216,7 @@ WB.chapters = WB.chapters || {};
   function ssCard(ctx) {
     const { A, B } = ctx.ss;
     return {
-      title: 'State-space model (feedback linearized)', page: 'p. 88 · Eq. 6.16, p. 187',
+      title: 'State-space model (feedback linearized)', page: 'p. 88 · Eq. 6.16, p. 187', answers: `${ctx.sys.problems.ch6.id}/a`,
       theory: '\\dot x = Ax + B\\tilde\\tau,\\quad y = Cx,\\quad A = \\begin{bmatrix}0 & 1\\\\ 0 & -\\frac{3b}{m\\ell^2}\\end{bmatrix},\\quad B = \\begin{bmatrix}0\\\\ \\frac{3}{m\\ell^2}\\end{bmatrix},\\quad C = \\begin{bmatrix}1 & 0\\end{bmatrix}',
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
     };
@@ -298,7 +298,22 @@ WB.chapters = WB.chapters || {};
       const ref = () => design(ctx, { ...ctx.st, tr: prob.tr, zeta: prob.zeta, rule: '2.2' }, 'sf');
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'c', title: '(c) Controllability matrix 𝒞<sub>A,B</sub> = [B, AB]',
+          id: 'a', title: `(a) Desired closed-loop poles (t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta})`,
+          inputs: { p1: 'p<sub>1</sub>', p2: 'p<sub>2</sub>' },
+          html: 'Use ω<sub>n</sub> = 2.2/t<sub>r</sub>. Complex values are fine: <code>-1+2j</code>.',
+          check: (v) => {
+            const g = [M.parseComplex(v.p1), M.parseComplex(v.p2)];
+            if (!g[0] || !g[1]) return { ok: false, msg: 'Enter both poles.' };
+            return M.polesMatch(g, ref().poles) ? { ok: true, msg: '' } : { ok: false, msg: 'Roots of s² + 2ζωₙs + ωₙ²?' };
+          },
+          solution: () => [{ tex: `\\omega_n = 2.2/${prob.tr} = ${tex(2.2 / prob.tr)},\\quad p = ${ref().poles.map((q) => texPole(q)).join(',\\;')}` }],
+        },
+        {
+          id: 'b', title: '(b) State-space model',
+          html: 'Use your A, B, C, D from A.6 (the Ch 6 tab). The model card in the live math unlocks once A.6 is solved.',
+        },
+        {
+          id: 'c', title: '(c) Controllability',
           inputs: { c11: 'c<sub>11</sub>', c12: 'c<sub>12</sub>', c21: 'c<sub>21</sub>', c22: 'c<sub>22</sub>', rank: 'rank' },
           check: (v) => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return PD().checkNumbers(v, { c11: Cm[0][0], c12: Cm[0][1], c21: Cm[1][0], c22: Cm[1][1], rank: L.rank(Cm) }, {}); },
           solution: () => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return [{ tex: `\\mathcal{C}_{A,B} = ${texMat(Cm)},\\; \\det = ${tex(Cm[0][0] * Cm[1][1] - Cm[0][1] * Cm[1][0])} \\ne 0` }]; },
@@ -319,6 +334,10 @@ WB.chapters = WB.chapters || {};
               { html: 'Why K = (k<sub>P</sub>, k<sub>D</sub>) for the same poles: with x = (θ, θ̇), −Kx is −k<sub>P</sub>θ − k<sub>D</sub>θ̇, and k<sub>r</sub>θ<sub>r</sub> = k<sub>P</sub>θ<sub>r</sub>. That is exactly PD with the derivative on the output (Fig. 7-2). Book: p. 187.' },
             ];
           },
+        },
+        {
+          id: 'e', title: '(e) Implement with a digital differentiator',
+          html: 'In your <code>ctrlStateFeedback.py</code>, estimate θ̇ from θ with the dirty derivative (Eq. 10.4). The simulation here applies your K and k<sub>r</sub> from the gain sliders.',
         },
       ]);
     },
@@ -379,7 +398,15 @@ WB.chapters = WB.chapters || {};
           },
         },
         {
-          id: 'c', title: '(b, c) Tracking with d and 20% uncertainty',
+          id: 'b', title: '(b) Disturbance and 20% uncertainty',
+          html: 'Set an input disturbance d and the true-plant mismatch in the left panel (the chapter starts with d = 0.25 N·m and a 20% draw).',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch).some((v) => Math.abs(v) > 0);
+            return Math.abs(S.sim.dist) > 0 && mis ? { ok: true, msg: `d = ${fmt(S.sim.dist, 3)} N·m with plant mismatch.` } : { ok: false, msg: 'Set both d ≠ 0 and a plant mismatch.' };
+          },
+        },
+        {
+          id: 'c', title: '(c) Tune for good tracking',
           html: 'Passes when the error just before the first reference switch is under 0.1° with the current disturbance and mismatch.',
           check: () => {
             const res = ctx.app.result(), S = ctx.S;
@@ -446,6 +473,10 @@ WB.chapters = WB.chapters || {};
       const ref = () => design(ctx, { ...ctx.st, tr: prob.tr, zeta: prob.zeta, pI: prob.pI, rule: '2.2', wnObs: 2.2 / (prob.tr / prob.trObsFactor), zetaObs: prob.zetaObs }, 'obs');
       PD().problemPanel(parent, ctx, prob, [
         {
+          id: 'a', title: '(a) Exact parameters, no disturbance',
+          html: 'The chapter starts with α = 0 and d = 0. <em>Exact model</em> in the left panel restores them.',
+        },
+        {
           id: 'b', title: '(b) Observability',
           inputs: { rank: 'rank 𝒪<sub>A,C</sub>' },
           check: (v) => PD().checkNumbers(v, { rank: L.rank(L.obsv(ctx.ss.A, ctx.ss.C)) }, {}),
@@ -457,6 +488,10 @@ WB.chapters = WB.chapters || {};
           inputs: { L1: 'L<sub>1</sub>', L2: 'L<sub>2</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { L1: r.L[0], L2: r.L[1] }, {}); },
           solution: () => { const r = ref(); return [{ tex: `L = ${texMat(r.L)},\\quad K = ${texMat([r.K])},\\; k_I = ${tex(r.ki)}` }]; },
+        },
+        {
+          id: 'd', title: '(d) Plot the state and the estimate',
+          html: 'The θ plot shows the estimate θ̂ with the true θ; the extra plot shows θ̇ and its estimate.',
         },
         {
           id: 'e', title: '(e) Add d = 0.01 N·m',
@@ -527,6 +562,10 @@ WB.chapters = WB.chapters || {};
       const prob = ctx.sys.problems.ch14;
       const ref = () => design(ctx, { ...ctx.st, tr: prob.tr, zeta: prob.zeta, rule: 'tp', pI: prob.pI, wnObs: prob.wnObs, zetaObs: prob.zetaObs, pD: prob.pD }, 'dobs');
       PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a', title: '(a) Large disturbance, noise, 20% uncertainty',
+          html: 'The chapter starts with α = 0.2, d = 0.5 N·m and noise σ = 0.001 rad (0.0573°). Turn the disturbance observer off to see the controller fail to reject d.',
+        },
         {
           id: 'b1', title: `(b) Observer gains for ω<sub>n,obs</sub> = ${prob.wnObs}, ζ<sub>obs</sub> = ${prob.zetaObs}, p<sub>d</sub> = ${prob.pD}`,
           inputs: { L1: 'L<sub>1</sub>', L2: 'L<sub>2</sub>', Ld: 'L<sub>d</sub>' },

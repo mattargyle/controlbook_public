@@ -12,8 +12,21 @@ All six design studies (A–F) have a tab for every problem. Issues found in the
 
 ## Modes
 
-- **Work it**: you set the gains. Problem parts have answer boxes with **Check** and **Show solution**. Live-math cards that would give away an answer stay hidden until you click **Reveal**. Answers are saved in the browser's localStorage.
+- **Work it**: you set the gains. Every lettered part of the book's problem has its own panel with **Check** and **Show solution**. Derivations (energies, equations of motion, linearizations, transfer functions, state-space models) are answered in Python, so you derive the whole expression rather than fill in constants. Live math shows general equations from the book; a card that gives away an answer stays locked until you solve that part (or click **Reveal anyway**). Answers and solved parts are saved in the browser's localStorage. *(Study A so far; B–F still use numeric answer boxes.)*
 - **Explore**: gains are designed from the chapter's knobs (pole locations in Ch 7, t_r and ζ in Ch 8). Drag the closed-loop poles in the s-plane.
+
+## Python answers
+
+Python parts run [Pyodide](https://pyodide.org) 314.0.7 (Python 3.14 + numpy) in your browser. It downloads from cdn.jsdelivr.net on the first **Check** (about 15 MB, cached afterwards), so it needs a connection the first time. Your code is checked at random states and with randomly changed parameters, which is why answers must use `P.m`, `P.ell`, ... instead of numbers.
+
+How it's contained (`js/core/py.js`):
+- It runs in a Web Worker, so code can't touch the page, its saved answers, or cookies.
+- Every downloaded file is pinned with a subresource-integrity hash (loader, core module, wasm, stdlib, lock file); numpy is checked against the lock file's sha256.
+- After numpy loads, the worker deletes its network APIs (`fetch`, XHR, WebSocket, `importScripts`, ...).
+- Each run is stopped after 5 s (15 s for a simulation), and the worker is restarted.
+- Code runs only when you click a button. Nothing runs from a URL or a shared link.
+
+The checking happens in the browser, and the reference answers are in the page's JavaScript, so this is for practice, not graded work.
 
 ## Layout
 
@@ -25,6 +38,7 @@ js/core/tf.js          transfer functions: products, feedback, Bode, margins, ba
 js/core/ui.js          sliders/toggles bound to state, KaTeX helper, PDF page links, storage
 js/core/plot.js        TimePlot, SPlane (draggable poles, root-locus branches), BodePlot (spec regions)
 js/core/sim.js         closed-loop loop matching hwNN_*Sim.py (controller sat → +d → plant sat → RK4), noise
+js/core/py.js          Pyodide worker for Python answers: sandbox, pinned downloads, timeouts, random-point checking
 js/systems/arm.js      Design Study A: dynamics, linear models, energies, drawing, problem data for every chapter
 js/chapters/models.js  Ch 2–6   kinetic energy, Euler-Lagrange (energy check), linearization, TF, state space
 js/chapters/pd.js      Ch 7–8   PD pole placement, t_r/ζ design, saturation limit
@@ -56,6 +70,7 @@ See [STUDY_GUIDE.md](STUDY_GUIDE.md): each study lives in `js/studies/<X>/` (sys
 
 ```
 python3 workbench/tools/smoke_test.py [--study X] [--shots DIR]   every tab × mode, buttons clicked, JS errors reported
+python3 workbench/tools/py_test.py [--study X] [--chapters ch3,..]  Python parts end to end (needs network): templates fail, solutions pass, cards unlock
 .venv/bin/python workbench/tools/regress_A.py                     JS vs _A_arm/python controllers (machine precision)
 tools/js_eval.py                                                   run a JS snippet with all workbench scripts loaded
 ```

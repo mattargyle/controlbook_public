@@ -209,10 +209,11 @@ WB.chapters = WB.chapters || {};
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a1', title: '(a) PD only: set k<sub>I</sub> = 0',
-          html: 'Answers use the current k<sub>P</sub>, k<sub>D</sub>. Errors are for a unit input, in rad.',
-          inputs: { type: 'type', step: 'e<sub>step</sub>', ramp: 'e<sub>ramp</sub>' },
+          inputs: { type: 'type', step: 'e<sub>step</sub>', ramp: 'e<sub>ramp</sub>', parab: 'e<sub>parab</sub>' },
+          html: 'Answers use the current k<sub>P</sub>, k<sub>D</sub>. Errors are for a unit input, in rad. Enter <code>inf</code> for an unbounded error.',
           check: (v) => {
             if (g().kI > 0) return { ok: false, msg: 'Set kI = 0 first.' };
+            if (!/^\s*(inf|infinity|∞)\s*$/i.test(v.parab || '')) return { ok: false, msg: 'Check e_parab.' };
             return PD().checkNumbers(v, { type: 1, step: 0, ramp: 1 / a().Mv }, { ramp: 'e_ramp' });
           },
           solution: () => [
@@ -323,7 +324,7 @@ WB.chapters = WB.chapters || {};
           spoiler: true },
         { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
           theory: '\\text{(1) integrate only when } |\\dot y| < \\bar v,\\quad \\text{(2) } u_I^+ = u_I + \\frac{1}{k_I}\\big(u_{sat} - u_{unsat}\\big)' },
-        { title: 'Gains from t_r, ζ (Listing 10.2)', page: 'p. 161',
+        { title: 'Gains from t_r, ζ (Listing 10.2)', page: 'p. 161', answers: `${ctx.sys.problems.ch8.id}/a`,
           theory: (st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2 t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}') + ',\\quad k_P = \\frac{\\omega_n^2 - a_0}{b_0},\\quad k_D = \\frac{2\\zeta\\omega_n - a_1}{b_0}',
           numbers: `\\omega_n = ${tex(dg.wn)},\\quad k_P = ${tex(dg.kP)},\\quad k_D = ${tex(dg.kD)},\\quad k_I = ${tex(dg.kI)}`,
           spoiler: true,
@@ -340,6 +341,18 @@ WB.chapters = WB.chapters || {};
         return { wn, ...PD().gainsFromPoles(ctx.model, PD().polesFromWnZeta(wn, prob.zeta)) };
       };
       PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a', title: '(a) Parameters vary by up to 20%',
+          html: 'Set the true plant in the left panel (<em>Randomize ±α</em> with α = 0.2). The chapter starts with a fixed 20% draw so the page is repeatable.',
+          check: () => {
+            const mis = Object.values(ctx.S.mismatch);
+            return mis.some((v) => Math.abs(v) > 0) ? { ok: true, msg: `Mismatch: ${Object.entries(ctx.S.mismatch).map(([k, v]) => `${k} ${fmt(v, 3)}%`).join(', ')}.` } : { ok: false, msg: 'The true plant equals the model. Randomize it.' };
+          },
+        },
+        {
+          id: 'b', title: '(b) Use only the measured θ and θ<sub>r</sub>',
+          html: 'The PID here gets only the (noisy) measurement and the reference; θ̇ comes from the dirty derivative in (c). In your <code>ctrlPID.py</code>, <code>update(r, y)</code> receives y, not the state.',
+        },
         {
           id: 'c1', title: `(c) PD gains for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,
           html: 'Use the A.10 rule ω<sub>n</sub> = π / (2 t<sub>r</sub>√(1−ζ²)).',
@@ -435,10 +448,12 @@ WB.chapters = WB.chapters || {};
     math(ctx) {
       const ev = this.evans(ctx);
       return [
-        { title: 'Closed loop with PID (derivative on output)', page: 'p. 470',
+        { title: 'Closed loop with PID (derivative on output)', page: 'p. 470', answers: `${ctx.sys.problems.p6.id}/a`,
           theory: '\\Delta_{cl}(s) = s^3 + \\frac{3b + 3k_D}{m\\ell^2}s^2 + \\frac{3k_P}{m\\ell^2}s + \\frac{3k_I}{m\\ell^2}',
           numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(pidCharPoly(ctx.model, ev.g))}`, spoiler: true },
-        { title: 'Evans form', page: 'p. 466, p. 470',
+        { title: 'Evans form', page: 'p. 466',
+          theory: '\\Delta_{cl}(s) = 0 \\iff 1 + k\\,L(s) = 0 \\quad(k \\text{ is the gain that varies along the locus})' },
+        { title: 'Evans form of the arm with PID', page: 'p. 470', answers: `${ctx.sys.problems.p6.id}/a`,
           theory: '1 + k_I\\,L(s) = 0,\\quad L(s) = \\frac{3/m\\ell^2}{s^3 + \\frac{3b+3k_D}{m\\ell^2}s^2 + \\frac{3k_P}{m\\ell^2}s}',
           numbers: `L(s) = \\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev.den)}},\\quad k_P = ${tex(ev.g.kP)},\\; k_D = ${tex(ev.g.kD)}`, spoiler: true },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
@@ -452,20 +467,32 @@ WB.chapters = WB.chapters || {};
       const prob = ctx.sys.problems.p6;
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: 'Evans form: L(s) = c / (s³ + d<sub>2</sub>s² + d<sub>1</sub>s)',
-          html: 'Uses the PD gains from the current t<sub>r</sub>, ζ (A.8: 0.8 s, 0.707).',
-          inputs: { c: 'c', d2: 'd<sub>2</sub>', d1: 'd<sub>1</sub>' },
-          check: (v) => { const ev = this.evans(ctx); return PD().checkNumbers(v, { c: ctx.model.b0, d2: ev.den[1], d1: ev.den[2] }, {}); },
-          solution: () => { const ev = this.evans(ctx); return [{ tex: `L(s) = \\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev.den)}}` }]; },
+          id: 'a', title: '(a) Evans form in k<sub>I</sub>',
+          html: 'Write L(s) for 1 + k<sub>I</sub>L(s) = 0 in terms of the PD gains k<sub>P</sub>, k<sub>D</sub>; the check calls it at complex s.',
+          code: {
+            template: 'def L(s, kP, kD):\n    return ...\n',
+            check: (code) => {
+              const cx = WB.py.cx;
+              return WB.py.check(ctx, {
+                args: { s: { label: 's', complex: true, re: [-6, 3], im: [0.3, 12] }, kP: { label: 'kP', lo: 0.02, hi: 2 }, kD: { label: 'kD', lo: 0.01, hi: 0.5 } },
+                items: [{ fn: 'L', args: ['s', 'kP', 'kD'], truth: (p, a) => { const m = ctx.sys.secondOrderModel(p); return cx.div(m.b0, cx.poly([1, m.a1 + m.b0 * a.kD, m.a0 + m.b0 * a.kP, 0], a.s)); } }],
+              }, code);
+            },
+          },
+          solution: () => { const ev = this.evans(ctx); return [
+            { tex: '\\Delta_{cl}(s) = s^3 + \\frac{3b + 3k_D}{m\\ell^2}s^2 + \\frac{3k_P}{m\\ell^2}s + \\frac{3k_I}{m\\ell^2} = 0 \\;\\Rightarrow\\; L(s) = \\frac{3/m\\ell^2}{s^3 + \\frac{3b+3k_D}{m\\ell^2}s^2 + \\frac{3k_P}{m\\ell^2}s}' },
+            { tex: `\\text{current PD gains: } L(s) = \\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev.den)}}` },
+            { code: 'def L(s, kP, kD):\n    J = P.m * P.ell**2\n    return (3 / J) / (s**3 + (3 * P.b + 3 * kD) / J * s**2 + 3 * kP / J * s)' },
+          ]; },
         },
         {
-          id: 'b', title: 'Largest stable k<sub>I</sub>',
+          id: 'b', title: '(b) Largest stable k<sub>I</sub>',
           inputs: { k: 'k<sub>I,crit</sub>' },
           check: (v) => PD().checkNumbers(v, { k: this.evans(ctx).kCrit }, { k: 'kI,crit' }),
           solution: () => [{ tex: `k_{I,crit} = ${tex(this.evans(ctx).kCrit)}` }],
         },
         {
-          id: 'c', title: 'Pick k<sub>I</sub> that barely moves the PD poles',
+          id: 'c', title: '(c) Pick k<sub>I</sub> that barely moves the PD poles',
           html: 'Checks the current k<sub>I</sub>: the complex pair must stay within 10% (in |p|) of the PD-only poles, and the new real pole must be slower than them.',
           check: () => {
             const ev = this.evans(ctx);

@@ -1,0 +1,439 @@
+// Student Python, run with Pyodide (CPython + numpy compiled to WebAssembly).
+//
+// Security model (see README "Python answers"):
+//   - Pyodide runs in a Web Worker built from a Blob, so student code has no
+//     access to the page, its DOM, or localStorage.
+//   - Every file Pyodide downloads is pinned: the loader, the core module, the
+//     wasm binary and the stdlib are fetched with subresource-integrity hashes,
+//     and the lock file (also pinned) carries the sha256 Pyodide checks numpy against.
+//   - Once numpy is loaded, the worker deletes its network APIs (fetch, XHR,
+//     WebSocket, importScripts, ...), so code can't reach the network.
+//   - Each run has a time limit; on timeout the worker is terminated and the next
+//     run starts a fresh one.
+//   - Code only runs when the student clicks a button; nothing runs from the URL.
+//
+// Pyodide loads on first use (about 15 MB, cached by the browser afterwards).
+window.WB = window.WB || {};
+
+WB.py = (function () {
+  const VERSION = '314.0.7';
+  const BASE = `https://cdn.jsdelivr.net/pyodide/v${VERSION}/full/`;
+  const HASH = {
+    'pyodide.mjs': 'sha384-Lp79fMwxa4n2BLtugpUAoQMlbxIdg8iCUiP1r3h7nJLkQjwlXT1JzZTeHVL+f4Dg',
+    'pyodide.asm.mjs': 'sha384-/2281iaC0Iimw0B3Kagy1DBfZcJG3W4KYW+EmOqhsdY3fR9BJ88FE2Zt6y0KQKpa',
+    'pyodide.asm.wasm': 'sha384-y++qrQ72KPA1fTjLIuGMP+jppgGxjbLCgfdb0zMrnNnQVhxRUXTOTF6rTxNzllSu',
+    'python_stdlib.zip': 'sha384-xW3A5jmenkrPXbsgrIaB1FCJh9OuLT7FRMagsJMgtlhVc19k/mSy3+7nMaF/d767',
+    'pyodide-lock.json': 'sha384-o8SQQvpVlZnOl04+3dFTJipKxul9GbViVusA379wlOrfHSgxbzt0yPiqCTxOiYES',
+  };
+
+  // Python side: evaluate student code at sample points, or simulate with RK4.
+  const HARNESS = String.raw`
+import io, json, linecache, math, sys, traceback, types
+import numpy as np
+
+FILE = '<your code>'
+
+def _out(v):
+    if v is None:
+        raise TypeError('returned None (missing return?)')
+    if isinstance(v, (bool, np.bool_)):
+        raise TypeError('returned True/False, not a number')
+    if isinstance(v, (complex, np.complexfloating)):
+        return {'re': float(v.real), 'im': float(v.imag)}
+    if isinstance(v, (int, float, np.integer, np.floating)):
+        return float(v)
+    if isinstance(v, np.ndarray):
+        return _out(v.item()) if v.ndim == 0 else [_out(x) for x in v]
+    if isinstance(v, (list, tuple)):
+        return [_out(x) for x in v]
+    try:
+        return float(v)
+    except Exception:
+        raise TypeError(f'returned a {type(v).__name__}, not a number or numpy array')
+
+def _arg(a):
+    if isinstance(a, dict) and 're' in a:
+        return complex(a['re'], a['im'])
+    if isinstance(a, dict) and 'col' in a:
+        return np.array(a['col'], dtype=float).reshape(-1, 1)
+    return a
+
+def _err(e, extra=''):
+    frames = [f for f in traceback.extract_tb(e.__traceback__) if f.filename == FILE]
+    where = f'line {frames[-1].lineno}: {(frames[-1].line or "").strip()}' if frames else ''
+    if isinstance(e, SyntaxError) and e.filename == FILE:
+        where = f'line {e.lineno}: {(e.text or "").strip()}'
+        return {'error': f'SyntaxError: {e.msg}', 'where': where}
+    return {'error': f'{type(e).__name__}: {e}' + extra, 'where': where}
+
+def _compile(src):
+    linecache.cache[FILE] = (len(src), None, src.splitlines(True), FILE)  # so tracebacks show the line
+    return compile(src, FILE, 'exec')
+
+def _namespace(code, params):
+    ns = {'__name__': '__student__', 'np': np, 'math': math, 'P': types.SimpleNamespace(**params)}
+    exec(code, ns)
+    return ns
+
+def _run(fn, payload):
+    buf = io.StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        out = fn(json.loads(payload))
+    except Exception as e:
+        out = _err(e)
+    finally:
+        sys.stdout = old
+    out['stdout'] = buf.getvalue()[-4000:]
+    return json.dumps(out)
+
+def _evaluate(a):
+    code = _compile(a['code'])
+    rows = []
+    for s in a['samples']:
+        ns = _namespace(code, s['params'])
+        row = {'vars': {}, 'calls': []}
+        for name in s.get('vars', []):
+            if name not in ns:
+                return {'error': f'NameError: define {name}', 'where': ''}
+            try:
+                row['vars'][name] = _out(ns[name])
+            except Exception as e:
+                return _err(e, f' ({name})')
+        for c in s.get('calls', []):
+            fn = ns.get(c['name'])
+            if not callable(fn):
+                return {'error': f"NameError: define a function named {c['name']}", 'where': ''}
+            try:
+                row['calls'].append(_out(fn(*[_arg(x) for x in c['args']])))
+            except Exception as e:
+                return _err(e, f" (in {c['name']})")
+        rows.append(row)
+    return {'rows': rows}
+
+def _simulate(a):
+    code = _compile(a['code'])
+    ns = _namespace(code, a['params'])
+    f = ns.get(a['fn'])
+    if not callable(f):
+        return {'error': f"NameError: define a function named {a['fn']}", 'where': ''}
+    x = np.array(a['x0'], dtype=float).reshape(-1, 1)
+    n, Ts = x.shape[0], a['Ts']
+    def F(xx, u):
+        v = np.asarray(f(xx, u), dtype=float)
+        if v.size != n:
+            raise ValueError(f'{a["fn"]} returned shape {v.shape}; expected ({n}, 1)')
+        return v.reshape(n, 1)
+    xs = []
+    for k, u in enumerate(a['u']):
+        xs.append(x[:, 0].tolist())
+        if k == len(a['u']) - 1:
+            break
+        try:
+            F1 = F(x, u); F2 = F(x + Ts / 2 * F1, u); F3 = F(x + Ts / 2 * F2, u); F4 = F(x + Ts * F3, u)
+        except Exception as e:
+            return _err(e, f' (at t = {k * Ts:.3g} s)')
+        x = x + Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        if not np.all(np.isfinite(x)):
+            return {'error': f'The state became inf/NaN at t = {(k + 1) * Ts:.3g} s', 'where': ''}
+    return {'x': xs}
+
+def wb_evaluate(payload):
+    return _run(_evaluate, payload)
+
+def wb_simulate(payload):
+    return _run(_simulate, payload)
+`;
+
+  // Runs inside the worker (stringified; it can't see this file's closure).
+  function workerMain(BASE, HASH, HARNESS) {
+    const realFetch = self.fetch.bind(self);
+    // The loader fetches the wasm and stdlib itself: add their pinned hashes.
+    self.fetch = (url, opts = {}) => {
+      const name = String(url && url.url ? url.url : url).replace(BASE, '');
+      return realFetch(url, HASH[name] ? { ...opts, integrity: HASH[name] } : opts);
+    };
+    const pinned = async (name) => {
+      const r = await realFetch(BASE + name, { integrity: HASH[name] });
+      if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
+      return r;
+    };
+    function lockDown() {
+      const names = ['fetch', 'XMLHttpRequest', 'WebSocket', 'WebSocketStream', 'EventSource', 'importScripts',
+        'indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'WebTransport', 'RTCPeerConnection'];
+      for (let o = self; o; o = Object.getPrototypeOf(o)) {
+        for (const n of names) {
+          try { if (Object.prototype.hasOwnProperty.call(o, n)) delete o[n]; } catch (e) { /* not configurable */ }
+          try { if (Object.prototype.hasOwnProperty.call(o, n)) o[n] = undefined; } catch (e) { /* read-only */ }
+        }
+      }
+    }
+    let py = null;
+    const ready = (async () => {
+      // Modules are imported from Blob URLs of pinned text (import() can't take an integrity hash).
+      const [lock, loader, asm] = await Promise.all(['pyodide-lock.json', 'pyodide.mjs', 'pyodide.asm.mjs'].map((n) => pinned(n)))
+        .then(([a, b, c]) => Promise.all([a.json(), b.text(), c.text()]));
+      const blobUrl = (text) => URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+      const { loadPyodide } = await import(blobUrl(loader));
+      const createPyodideModule = (await import(blobUrl(asm))).default;
+      py = await loadPyodide({ indexURL: BASE, packageBaseUrl: BASE, lockFileContents: lock, createPyodideModule, stdout: () => {}, stderr: () => {} });
+      await py.loadPackage('numpy', { messageCallback: () => {}, errorCallback: () => {} });
+      py.runPython(HARNESS);
+      lockDown();
+      self.postMessage({ type: 'ready' });
+    })().catch((e) => self.postMessage({ type: 'failed', msg: String(e && e.message || e) }));
+    self.onmessage = async (ev) => {
+      const { id, op, payload } = ev.data;
+      try {
+        await ready;
+        const out = py.globals.get(`wb_${op}`)(payload);
+        self.postMessage({ id, out });
+      } catch (e) {
+        self.postMessage({ id, out: JSON.stringify({ error: String(e && e.message || e), where: '' }) });
+      }
+    };
+  }
+
+  let worker = null, readyP = null, state = 'idle', failMsg = '';
+  let seq = 0;
+  const pending = new Map();
+  const listeners = new Set();
+  const setState = (s) => { state = s; for (const fn of listeners) fn(s); };
+
+  function start() {
+    if (readyP) return readyP;
+    setState('loading');
+    readyP = (async () => {
+      // Pyodide needs a module worker.
+      const src = `(${workerMain.toString()})(${JSON.stringify(BASE)}, ${JSON.stringify(HASH)}, ${JSON.stringify(HARNESS)});`;
+      const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      worker = new Worker(url, { type: 'module' });
+      await new Promise((resolve, reject) => {
+        // A blocked download can leave Pyodide waiting forever.
+        setTimeout(() => reject(new Error('timed out while loading')), 120000);
+        worker.onmessage = (ev) => {
+          const m = ev.data || {};
+          if (m.type === 'ready') { resolve(); return; }
+          if (m.type === 'failed') { reject(new Error(m.msg)); return; }
+          const p = pending.get(m.id);
+          if (p) { pending.delete(m.id); p.resolve(m.out); }
+        };
+        worker.onerror = (e) => reject(new Error(e.message || 'worker error'));
+      });
+      setState('ready');
+    })().catch((e) => {
+      failMsg = String(e.message || e);
+      stop();
+      setState('error');
+      throw new Error(`Python could not start (${failMsg}). It downloads from cdn.jsdelivr.net, so check your connection.`);
+    });
+    return readyP;
+  }
+
+  function stop() {
+    if (worker) worker.terminate();
+    worker = null; readyP = null;
+    for (const p of pending.values()) p.reject(new Error('stopped'));
+    pending.clear();
+  }
+
+  // Send one request; resolves with the parsed JSON reply. The timer starts once
+  // Pyodide is ready, so the first download doesn't count against the limit.
+  async function call(op, payload, timeoutMs) {
+    await start();
+    const id = ++seq;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        stop();
+        setState('idle');
+        resolve({ error: `Stopped after ${timeoutMs / 1000} s. Is there an infinite loop?`, where: '', timeout: true });
+      }, timeoutMs);
+      pending.set(id, {
+        resolve: (out) => { clearTimeout(timer); try { resolve(JSON.parse(out)); } catch (e) { reject(e); } },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+      worker.postMessage({ id, op, payload: JSON.stringify(payload) });
+    });
+  }
+
+  const evaluate = (code, samples, timeoutMs = 5000) => call('evaluate', { code, samples }, timeoutMs);
+  const simulate = (code, opts, timeoutMs = 15000) => call('simulate', { code, ...opts }, timeoutMs);
+
+  // ------------------------------------------------------------ checking --
+  // Deterministic pseudo-random numbers, so a failing case repeats.
+  function rng(seed) {
+    let s = seed >>> 0;
+    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  }
+  const flat = (v) => (Array.isArray(v) ? v.flatMap(flat) : [v]);
+  const cplx = (v) => (v && typeof v === 'object' ? [v.re, v.im] : [v, 0]);
+  const shapeOf = (v) => (Array.isArray(v) ? [v.length, ...shapeOf(v[0])] : []);
+  const fmtV = (v) => {
+    const [re, im] = cplx(v);
+    if (Math.abs(im) < 1e-12 * Math.max(1, Math.abs(re))) return WB.math.fmt(re, 4);
+    return `${WB.math.fmt(re, 4)}${im < 0 ? '−' : '+'}${WB.math.fmt(Math.abs(im), 4)}j`;
+  };
+  const fmtArr = (v) => (Array.isArray(v) ? `[${v.map(fmtArr).join(', ')}]` : fmtV(v));
+
+  // Parameter sets for a check: the nominal (left-panel) values first, then
+  // `sets` random ones with each `vary` parameter scaled by 0.5–1.5.
+  function paramSets(ctx, { sets = 4, vary, params, seed = 12345 } = {}) {
+    const sys = ctx.sys, rand = rng(seed);
+    vary = vary || [...(sys.uncertain || []), ...Object.keys(sys.constants || {})];
+    const base = { ...ctx.pModel };
+    const out = [{ p: base, nominal: true }];
+    for (let i = 0; i < sets; i++) {
+      const p = { ...base };
+      for (const k of vary) p[k] = base[k] * (0.5 + rand());
+      out.push({ p, nominal: false });
+    }
+    for (const s of out) if (params) s.p = params(s.p);
+    out.vary = vary;
+    out.text = (s) => (s.nominal ? 'the nominal parameters' : vary.map((k) => `${k} = ${WB.math.fmt(s.p[k], 3)}`).join(', '));
+    return out;
+  }
+
+  // spec = {
+  //   args: { name: {label, lo, hi} | {label, complex: true, re: [lo, hi], im: [lo, hi]} | {col: [names]} },
+  //   vary: ['m', ...]       parameters to randomize (default: sys.uncertain + constants)
+  //   params: (p) => p       optional: add derived entries to each parameter set
+  //   cases: [{label, fix: {name: value}}]   argument groups (default: one random group)
+  //   items: [{fn, args: [names], truth(p, a), compare?: 'equal'|'offset'|'scale', label?}
+  //           | {var, truth(p), label?}]
+  //   perCase: points per case (default 4), sets: random parameter sets (default 4)
+  //   explain?(item, failure) -> string   extra hint appended to a mismatch message (failure.e = {got, want, a})
+  // }
+  // Resolves to {ok, msg, detail?}.
+  async function check(ctx, spec, code) {
+    if (!code.trim()) return { ok: false, msg: 'Write your code first.' };
+    const rand = rng(777);
+    const paramSetsList = paramSets(ctx, spec);
+    const vary = paramSetsList.vary;
+    const draw = (def) => {
+      if (def.complex) return { re: def.re[0] + rand() * (def.re[1] - def.re[0]), im: def.im[0] + rand() * (def.im[1] - def.im[0]) };
+      return def.lo + rand() * (def.hi - def.lo);
+    };
+    const cases = spec.cases || [{ label: '' }];
+    const n = spec.perCase ?? 4;
+    // points[s] = [{caseIdx, a: {name: value}}]
+    const points = paramSetsList.map(() => {
+      const pts = [];
+      cases.forEach((c, ci) => {
+        for (let k = 0; k < n; k++) {
+          const a = {};
+          for (const [name, def] of Object.entries(spec.args || {})) if (!def.col) a[name] = name in (c.fix || {}) ? c.fix[name] : draw(def);
+          pts.push({ ci, a });
+        }
+      });
+      return pts;
+    });
+    const fns = spec.items.filter((it) => it.fn), vars = spec.items.filter((it) => it.var);
+    const argVal = (name, a) => {
+      const def = spec.args[name];
+      if (def && def.col) return { col: def.col.map((c) => a[c]) };
+      return a[name];
+    };
+    const samples = paramSetsList.map((s, si) => ({
+      params: s.p,
+      vars: vars.map((it) => it.var),
+      calls: fns.length ? points[si].flatMap(({ a }) => fns.map((it) => ({ name: it.fn, args: it.args.map((nm) => argVal(nm, a)) }))) : [],
+    }));
+    const out = await evaluate(code, samples);
+    const detail = (out.stdout || '').trim() ? `print output:\n${out.stdout.trim()}` : '';
+    if (out.error) return { ok: false, msg: out.timeout ? out.error : 'Python raised an error.', detail: [out.error, out.where].filter(Boolean).join('\n') + (detail ? `\n\n${detail}` : '') };
+
+    const paramText = paramSetsList.text;
+    const argText = (it, a) => it.args.map((nm) => {
+      const def = spec.args[nm];
+      if (def.col) return `${nm} = [${def.col.map((c) => `${spec.args[c].label || c} ${fmtV(a[c])}`).join(', ')}]`;
+      return `${def.label || nm} = ${fmtV(a[nm])}`;
+    }).join(', ');
+
+    // Gather (yours, expected) per item per parameter set.
+    const failures = [];
+    spec.items.forEach((it) => {
+      paramSetsList.forEach((s, si) => {
+        const row = out.rows[si];
+        let entries;
+        if (it.var) entries = [{ got: row.vars[it.var], want: it.truth(s.p), a: null, ci: -1 }];
+        else {
+          const fi = fns.indexOf(it);
+          entries = points[si].map((pt, k) => ({ got: row.calls[k * fns.length + fi], want: it.truth(s.p, pt.a), a: pt.a, ci: pt.ci }));
+        }
+        const wantShape = shapeOf(entries[0].want), gotShape = shapeOf(entries[0].got);
+        const nW = flat(entries[0].want).length, nG = flat(entries[0].got).length;
+        if (nW !== nG) {
+          failures.push({ it, s, kind: 'shape', msg: `${it.label || it.fn || it.var} has ${nG} value${nG === 1 ? '' : 's'}${gotShape.length ? ` (shape ${gotShape.join('×')})` : ''}; expected ${nW}${wantShape.length ? ` (shape ${wantShape.join('×')})` : ''}.` });
+          return;
+        }
+        const G = entries.map((e) => flat(e.got).map(cplx)), W = entries.map((e) => flat(e.want).map(cplx));
+        let scale = 0;
+        for (const w of W) for (const [re, im] of w) scale = Math.max(scale, Math.hypot(re, im));
+        const tol = 1e-6 * Math.max(scale, 1e-9) + 1e-12;
+        let c = [1, 0];
+        const mode = it.compare || 'equal';
+        if (mode === 'offset') {
+          const g0 = G[0], w0 = W[0];
+          for (let k = 0; k < G.length; k++) { G[k] = G[k].map(([re, im], j) => [re - g0[j][0], im - g0[j][1]]); W[k] = W[k].map(([re, im], j) => [re - w0[j][0], im - w0[j][1]]); }
+        } else if (mode === 'scale') {
+          // least-squares complex ratio c = <w, g> / <w, w>
+          let nr = 0, ni = 0, dd = 0;
+          for (let k = 0; k < G.length; k++) for (let j = 0; j < G[k].length; j++) {
+            const [gr, gi] = G[k][j], [wr, wi] = W[k][j];
+            nr += wr * gr + wi * gi; ni += wr * gi - wi * gr; dd += wr * wr + wi * wi;
+          }
+          c = dd > 0 ? [nr / dd, ni / dd] : [0, 0];
+          if (Math.hypot(c[0], c[1]) < 1e-9) c = [1, 0];
+        }
+        for (let k = 0; k < G.length; k++) {
+          for (let j = 0; j < G[k].length; j++) {
+            const [gr, gi] = G[k][j], [wr, wi] = W[k][j];
+            const er = gr - (c[0] * wr - c[1] * wi), ei = gi - (c[0] * wi + c[1] * wr);
+            if (!(Math.hypot(er, ei) <= tol * Math.max(1, Math.hypot(c[0], c[1])))) {
+              failures.push({ it, s, e: entries[k], j, kind: 'value' });
+              return;
+            }
+          }
+        }
+      });
+    });
+    if (!failures.length) {
+      const nPts = spec.items.some((it) => it.fn) ? `${cases.length * n} points × ` : '';
+      return { ok: true, msg: `Matches at ${nPts}${paramSetsList.length} parameter sets.`, detail };
+    }
+    const f = failures.find((x) => x.s.nominal) || failures[0];
+    const nominalOk = !failures.some((x) => x.s.nominal);
+    if (f.kind === 'shape') return { ok: false, msg: f.msg, detail };
+    const name = f.it.label || f.it.fn || f.it.var;
+    let msg;
+    if (nominalOk && vary.length) {
+      msg = `${name} matches at the nominal parameters but not with ${paramText(f.s)}. Write it with ${vary.map((k) => `P.${k}`).join(', ')} rather than numbers.`;
+    } else {
+      const where = f.e.a ? `${f.it.fn}(${argText(f.it, f.e.a)})` : name;
+      const cs = f.e.ci >= 0 && cases[f.e.ci].label ? ` ${cases[f.e.ci].label}` : '';
+      const one = flat(f.e.want).length === 1;
+      const vals = one
+        ? `yours ${fmtV(flat(f.e.got)[0])}, expected ${fmtV(flat(f.e.want)[0])}`
+        : `yours ${fmtArr(f.e.got)}, expected ${fmtArr(f.e.want)}`;
+      msg = `${where}${cs}, with ${paramText(f.s)}: ${vals}.`;
+      if (f.it.compare === 'offset') msg += ' (Compared up to a constant.)';
+      if (f.it.compare === 'scale') msg += ' (Any nonzero multiple is accepted.)';
+      if (spec.explain) { const h = spec.explain(f.it, f); if (h) msg += ` ${h}`; }
+    }
+    return { ok: false, msg, detail };
+  }
+
+  // Complex arithmetic for truth functions of s ({re, im} objects; numbers are real).
+  const cx = {
+    of: (v) => (typeof v === 'number' ? { re: v, im: 0 } : v),
+    add: (a, b) => { a = cx.of(a); b = cx.of(b); return { re: a.re + b.re, im: a.im + b.im }; },
+    mul: (a, b) => { a = cx.of(a); b = cx.of(b); return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re }; },
+    div: (a, b) => { a = cx.of(a); b = cx.of(b); const d = b.re * b.re + b.im * b.im; return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }; },
+    // coefficients highest power first, like numpy.polyval
+    poly: (c, s) => c.reduce((acc, ci) => cx.add(cx.mul(acc, s), ci), { re: 0, im: 0 }),
+  };
+
+  return { start, stop, evaluate, simulate, check, paramSets, cx, status: () => state, onStatus: (fn) => listeners.add(fn), BASE, VERSION };
+})();

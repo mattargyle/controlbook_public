@@ -531,15 +531,32 @@ window.WB = window.WB || {};
   }
 
   // ------------------------------------------------------------ live math --
+  // Card fields (see STUDY_GUIDE.md):
+  //   theory    always shown: general equations from the book.
+  //   symbolic/numbers + spoiler: hidden in Work mode until Reveal (the note too).
+  //   answers: 'A.3/d' (or a list): the card gives away that problem part (this
+  //     chapter's or an earlier one's). In Work mode the whole card stays locked
+  //     until those parts are solved here (a passing Check) or it is revealed.
+  const answersOf = (c) => (c.answers ? [].concat(c.answers) : []);
+  const partLabel = (k) => { const [prob, part] = k.split('/'); return `${prob} (${part.replace(/\d+$/, '')})`; };
   function drawMath() {
     const root = document.getElementById('math');
     root.replaceChildren();
     const cards = chapter().math(ctx);
     for (const c of cards) {
       const key = `${S.sysId}:${S.chapter}:${c.title}`;
-      const hide = S.mode === 'work' && c.spoiler && !revealed.has(key);
       const card = el('article', { class: 'math-card' });
       card.append(el('header', {}, el('h4', { text: c.title }), WB.ui.pageChip(c.page || '')));
+      const need = answersOf(c).filter((k) => !isSolved(k));
+      if (S.mode === 'work' && need.length && !revealed.has(key)) {
+        card.classList.add('locked');
+        const labels = [...new Set(need.map(partLabel))];
+        card.append(el('p', { class: 'muted small locked-text', text: `This is part of the answer to ${labels.join(' and ')}. Solve it in the problem panel to unlock it.` }));
+        card.append(el('button', { type: 'button', class: 'btn btn-quiet reveal', text: 'Reveal anyway', onclick: () => { revealed.add(key); drawMath(); } }));
+        root.append(card);
+        continue;
+      }
+      const hide = S.mode === 'work' && c.spoiler && !revealed.has(key);
       // Long equations are written with \\quad between parts; give each part its own line.
       const lines = (src) => src.split(/,?\\quad/).map((x) => x.trim()).filter(Boolean);
       if (c.theory) for (const line of lines(c.theory)) { const d = el('div', { class: 'tex' }); renderTex(d, line); card.append(d); }
@@ -556,10 +573,16 @@ window.WB = window.WB || {};
           card.append(nums);
         }
       }
-      if (c.note) card.append(el('p', { class: 'muted small', text: c.note }));
+      if (c.note && !(hide && answerLines.length)) card.append(el('p', { class: 'muted small', text: c.note }));
       root.append(card);
     }
   }
+
+  // Problem parts solved in this browser: {'A:A.3/d': true}. Keys passed around
+  // are 'A.3/d'; the study prefix keeps studies apart.
+  const SOLVED_KEY = 'wb.solved';
+  const solved = store.get(SOLVED_KEY, {});
+  const isSolved = (k) => !!solved[`${S.sysId}:${k}`];
 
   // ------------------------------------------------------------ top level --
   function update() {
@@ -661,6 +684,13 @@ window.WB = window.WB || {};
     result: () => result,
     isRevealed: (key) => revealed.has(key),
     reveal: (key) => revealed.add(key),
+    isSolved,
+    markSolved(k) {
+      if (isSolved(k)) return;
+      solved[`${S.sysId}:${k}`] = true;
+      store.set(SOLVED_KEY, solved);
+      drawMath();
+    },
     setMode(m) {
       if (S.mode === m) return;
       // Work mode always keeps the user's own gains: explored (designed) gains

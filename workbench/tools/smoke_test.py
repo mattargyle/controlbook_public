@@ -40,7 +40,8 @@ window.addEventListener('load', () => setTimeout(() => {
         try {
           const b = document.querySelector(`#tabs .tab[data-ch="${ch}"]`); b.click();
           [...document.querySelectorAll('#mode button')].find(x => x.textContent === mode).click();
-          document.querySelectorAll('#problem .part-buttons button').forEach(x => { if (x.textContent === 'Check' || x.textContent === 'Show solution') x.click(); });
+          // Python parts (.code-wrap) need the network; tools/py_test.py covers them.
+          document.querySelectorAll('#problem .part-buttons button').forEach(x => { if ((x.textContent === 'Check' && !x.closest('.part').querySelector('.code-wrap')) || x.textContent === 'Show solution') x.click(); });
           document.querySelectorAll('.reveal').forEach(x => x.click());
           document.querySelectorAll('#right .btn').forEach(x => { if (/^Reveal/.test(x.textContent)) x.click(); });
         } catch (e) { window.__smokeErrs.push(`EXC ${sid}/${ch}/${mode}: ${e.message}`); }

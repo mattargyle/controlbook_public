@@ -287,3 +287,18 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-width: 0; }
 .tex-numbers .katex { color: var(--series-1); }
 .tex-fallback { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; color: var(--text-secondary); }
 .reveal { margin-top: 6px; }
+
+/* ------------------------------------------------------- python answers */
+.code-wrap { margin: 6px 0; }
+.code-editor {
+  width: 100%; box-sizing: border-box; resize: vertical; tab-size: 4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.45;
+  color: var(--text-primary); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  white-space: pre; overflow-x: auto;
+}
+.code-editor:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
+.py-detail, .sol-code {
+  flex-basis: 100%; margin: 4px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--page); border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; overflow-x: auto;
+}
+.math-card.locked .locked-text { margin: 6px 0 0; }
