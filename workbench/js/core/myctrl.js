@@ -12,7 +12,9 @@
 // the plots never show a working controller the student didn't write.
 //
 // Chapter side:
-//   implement: { feed: 'state' | 'y', params(ctx) -> extra P entries }
+//   implement: { feed: 'state' | 'y', params(ctx) -> extra P entries for the student,
+//                plantParams(ctx) -> extra entries for the plant (e.g. wind; the plant's
+//                Python also gets P.t, the time of the current step) }
 //   parts: WB.myCtrl.part(ctx, { id, title, html, seed, check(code), solution })
 //   checks: WB.myCtrl.scenario / run / reference / maxDiff (below)
 window.WB = window.WB || {};
@@ -44,7 +46,7 @@ WB.myCtrl = (function () {
   function displayScenario(ctx, common) {
     const imp = implementOf(ctx);
     return {
-      params: ctx.pModel, plantParams: ctx.pTrue, x0: common.x0, Ts: common.Ts, tEnd: common.tEnd,
+      params: ctx.pModel, plantParams: { ...ctx.pTrue, ...(imp.plantParams ? imp.plantParams(ctx) : {}) }, x0: common.x0, Ts: common.Ts, tEnd: common.tEnd,
       reference: common.reference, disturbance: common.disturbance, noise: common.noise,
       feed: imp.feed || 'y', extraP: imp.params ? imp.params(ctx) : {},
     };
@@ -72,12 +74,14 @@ WB.myCtrl = (function () {
   // nominal), mismatch: {key: %}, ref (channel 0) / refs: [per reference channel]
   // ({type, amplitude in display units, frequency, tStep}), y0 (scalar form) /
   // init: {key: display value}, dist (input-disturbance channel 0, SI) / dists: [...],
-  // tDist, noise: σ (SI, output 0) / noises: [...], seed, tEnd, Ts, feed, extraP }.
+  // tDist, noise: σ (SI, output 0) / noises: [...], seed, tEnd, Ts, feed, extraP,
+  // plantExtra: entries added to the true plant's parameters (non-input disturbances) }.
   function scenario(ctx, o = {}) {
     const sys = ctx.sys, imp = implementOf(ctx), v = chan(sys);
     const params = { ...(o.params || ctx.pModel) };
     const plantParams = { ...params };
     for (const [k, val] of Object.entries(o.mismatch || {})) plantParams[k] = params[k] * (1 + val / 100);
+    Object.assign(plantParams, o.plantExtra || {});
     const x0 = initialState(sys, params, o.init, o.y0);
     // each reference starts from its output's initial value, as app.js does
     const y0s = sys.h(x0, plantParams);

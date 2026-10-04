@@ -209,7 +209,7 @@ WB.F = (function () {
   const GAIN_SPEC = {
     kPh: ['k<sub>P<sub>h</sub></sub>', 0, 3], kDh: ['k<sub>D<sub>h</sub></sub>', 0, 3], kIh: ['k<sub>I<sub>h</sub></sub>', 0, 0.2],
     kPth: ['k<sub>P<sub>θ</sub></sub>', 0, 3], kDth: ['k<sub>D<sub>θ</sub></sub>', 0, 1],
-    kPz: ['k<sub>P<sub>z</sub></sub>', -0.1, 0], kDz: ['k<sub>D<sub>z</sub></sub>', -0.3, 0], kIz: ['k<sub>I<sub>z</sub></sub>', -0.01, 0],
+    kPz: ['k<sub>P<sub>z</sub></sub>', -0.1, 0.1], kDz: ['k<sub>D<sub>z</sub></sub>', -0.3, 0.3], kIz: ['k<sub>I<sub>z</sub></sub>', -0.01, 0.01],
   };
   const gainSliders = (parent, ctx, keys, obj = () => ctx.st.w) => WB.ui.gainSliders(parent, ctx, GAIN_SPEC, keys, { obj });
   function readout(parent, ctx, keys, get = () => ctx.gains) {
@@ -350,6 +350,77 @@ WB.F = (function () {
     return res.rAll[ri][i] - res.yAll[oi][i];
   }
 
+  // ------------------------------------------------- student controllers --
+  // Non-input disturbances as Python plant parameters (system.js plantPy).
+  const extParams = (e = {}, tDist = 0) => ({
+    wb_dF: e.dF || 0, wb_dtau: e.dtau || 0, wb_Fwind: e.Fwind || 0, wb_wind: e.wind || 0, wb_ah: e.ah || 0, wb_tDist: tDist,
+  });
+  // The left panel's disturbances for the Python plant in Work-mode display runs
+  // (implement.plantParams).
+  const plantExtras = (ctx) => extParams(distValues(ctx), ctx.S.sim.tDist);
+
+  // A check run (WB.myCtrl.scenario) plus F's extras: o.hOff, o.zOff reference
+  // offsets (F.8(e)'s 3 ± 2.5 m) and o.ext = {dF, dtau, Fwind, wind, ah} (SI, from t = 0).
+  function scenario(ctx, o = {}) {
+    const sc = WB.myCtrl.scenario(ctx, { ...o, plantExtra: extParams(o.ext, 0) });
+    const base = sc.reference, hOff = o.hOff || 0, zOff = o.zOff || 0;
+    if (hOff || zOff) sc.reference = (t) => { const r = base(t); return [r[0] + hOff, r[1] + zOff]; };
+    return sc;
+  }
+
+  // WB.myCtrl.matchCheck on several outputs: tol = {output index: tolerance (SI)}.
+  // cases: [{sc, ref: () -> WB.sim result, label}], the first with the nominal parameters.
+  async function matchAll(ctx, code, cases, { tol, what = 'the design' }) {
+    const outs = ctx.sys.outputs;
+    const f = (i, v) => `${fmt(v * outs[i].scale, 3)}${outs[i].unit === '°' ? '°' : ` ${outs[i].unit}`}`;
+    const worst = {};
+    for (let ci = 0; ci < cases.length; ci++) {
+      const c = cases[ci];
+      const mine = await WB.myCtrl.run(ctx, code, c.sc);
+      if (mine.ok === false) return mine;
+      const ref = c.ref();
+      const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
+      for (const [oi, tl] of Object.entries(tol)) {
+        const d = WB.myCtrl.maxDiff(mine, ref, { output: +oi });
+        if (!(d.e <= tl)) {
+          if (ci > 0) {
+            const keys = ctx.sys.uncertain.map((q) => `P.${q}`).join(', ');
+            return { ok: false, msg: `Matches ${what} with the nominal parameters but not with ${c.label} (${outs[oi].label} off by ${f(oi, d.e)}). Compute the gains from ${keys} rather than numbers.`, detail };
+          }
+          return { ok: false, msg: `Your ${outs[oi].label} differs from ${what} by ${f(oi, d.e)} at t = ${fmt(d.t, 3)} s.`, detail };
+        }
+        worst[oi] = Math.max(worst[oi] || 0, d.e);
+      }
+    }
+    const names = Object.keys(tol).map((oi) => `${outs[oi].label}(t)`);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    return { ok: true, msg: `Your ${list} match${names.length > 1 ? '' : 'es'} ${what} to within ${Object.entries(worst).map(([oi, e]) => f(oi, e)).join(', ')} (${cases.map((c) => c.label).join('; ')}).` };
+  }
+
+  // Estimates: update returns (u, x_hat) with x_hat the whole state (z, h, θ, ż, ḣ, θ̇).
+  function needXhat(res) {
+    const ok = [0, 1, 2, 3, 4, 5].every((i) => res.extras[`xhat${i}`] && !Array.prototype.some.call(res.extras[`xhat${i}`], (v) => !Number.isFinite(v)));
+    return ok ? null : { ok: false, msg: 'Return (u, x_hat) from update, with x_hat = [z, h, θ, ż, ḣ, θ̇] (your estimate of the whole state, in that order), so the check can see it.' };
+  }
+  // Largest |x_i − x̂_i| per state over the time windows [[t0, t1], ...].
+  function estErr(res, windows) {
+    const e = new Array(6).fill(0);
+    res.t.forEach((t, k) => {
+      if (!windows.some(([a, b]) => t >= a - 1e-9 && t <= b + 1e-9)) return;
+      for (let i = 0; i < 6; i++) e[i] = Math.max(e[i], Math.abs(res.x[k][i] - res.extras[`xhat${i}`][k]));
+    });
+    return e;
+  }
+  // Mean of x_i − x̂_i over [t0, t1].
+  const bias = (res, i, t0, t1) => WB.myCtrl.mean(res, t0, t1, (k) => res.x[k][i] - res.extras[`xhat${i}`][k]);
+  // Output i minus its reference at the last sample (outputs (z, h, θ); refs (h_r, z_r)).
+  const endErr = (res, oi) => { const n = res.t.length - 1; return res.yAll[oi][n] - res.rAll[oi === 1 ? 0 : 1][n]; };
+
+  // Work-mode control panel of an implementation chapter: what the plots show.
+  function workBanner(parent, ctx, partLabel) {
+    WB.myCtrl.banner(section(parent, 'Your controller'), ctx, partLabel);
+  }
+
   // ------------------------------------------------------ chapter factory --
   // Adds the study's simulate/reference/linear hooks and the shared controls.
   // opts.lateral: show the z metrics; opts.offsets: show the offset controls.
@@ -361,10 +432,15 @@ WB.F = (function () {
     if (def.linear !== false && !def.openLoop && !def.linearSim) {
       ch.linearSim = function (ctx, common) { ctx.chapter = this; return linearSim(ctx, common); };
     }
+    // Implementation chapters: Work mode runs the student's Python controller on
+    // the Python plant, which gets the left panel's disturbances as parameters.
+    if (def.implement && !def.implement.plantParams) ch.implement = { ...def.implement, plantParams: plantExtras };
     const userBuild = def.buildControls;
     ch.buildControls = function (parent, ctx) {
       ctx.chapter = this;
-      if (def.usesFe !== false) feSection(parent, ctx, { disabled: def.feDisabled ? () => def.feDisabled(ctx) : undefined });
+      // the student's own controller supplies F_e in Work mode
+      const mine = def.implement && ctx.S.mode === 'work';
+      if (def.usesFe !== false && !mine) feSection(parent, ctx, { disabled: def.feDisabled ? () => def.feDisabled(ctx) : undefined });
       userBuild.call(this, parent, ctx);
       if (def.lateralMetrics !== false && !def.openLoop) zMetricsSection(parent, ctx);
       if (!def.openLoop) offsetControls(parent, ctx);
@@ -374,8 +450,10 @@ WB.F = (function () {
       ch.outputSeries = function (ctx, res, sc, oi) {
         const out = [];
         if (oi === 2 && res.extras.thetaD) out.push({ label: 'θ_d (outer-loop command)', y: sc(res.extras.thetaD), color: '--ref', dash: [3, 3], width: 1.5 });
+        // the workbench's observer (Explore) or the student's x_hat = (z, h, θ, ...) (Work)
         const key = ['zhat', 'hhat', 'thhat'][oi];
-        if (res.extras[key]) out.push({ label: `${['ẑ', 'ĥ', 'θ̂'][oi]} (observer)`, y: sc(res.extras[key]), color: '--series-3', dash: [3, 3], width: 2 });
+        const est = res.extras[key] || res.extras[`xhat${oi}`];
+        if (est) out.push({ label: `${['ẑ', 'ĥ', 'θ̂'][oi]} (${res.extras[key] ? 'observer' : 'your estimate'})`, y: sc(est), color: '--series-3', dash: [3, 3], width: 2 });
         return out;
       };
     }
@@ -404,6 +482,7 @@ WB.F = (function () {
     makePID, pidSplane, pidDrag, W0, gainSliders, readout, metricRow,
     offsetControls, zMetrics, zMetricsSection, separationRows, viewControl,
     useGains, errorBefore, chapter, register, refF8, refF10,
+    plantExtras, scenario, matchAll, needXhat, estErr, bias, endErr, workBanner,
     showsAnswer, feShown, feOf, compOf, forceLawControl, VARY, ARGS, pyPart, pyError, negated,
     tex, texPole, fmt, fmtPole,
   };

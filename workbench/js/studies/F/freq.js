@@ -5,6 +5,12 @@
 // Plants: P_lon = (1/M)/s², P_in = (1/J)/s², P_out = −g/(s(s + μ/M)) (inner loop as
 // its DC gain, as in F.8). Ch 18 designs the outer loop on P_out·T_in instead,
 // with the current inner design, so the loops really are designed in succession.
+//
+// Ch 18 Work mode: the student gives each compensator (and prefilter) as Python
+// coefficient lists (F.18(a–c), "Use my …"); the Bode plot, s-plane and spec
+// readouts use them, and the block menu (gain, PI, lead, lag, LPF), whose size
+// and order mirror the solution, stays in Explore. F.18(d) is the student's own
+// state-space implementation (WB.myCtrl), given the designed lists in P.
 (function () {
   const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
@@ -500,16 +506,31 @@
     for (const key of Object.keys(BLK)) if (c[key].on) C = T.mul(C, BLK[key](c[key]));
     return C;
   }
-  function design18(ctx, st = ctx.st) {
+  // mine: the student's lists from F.18(a–c) (Work mode), {lon: {C, F}, inner: {C},
+  // outer: {C, F}} as {num, den}; a loop without them uses the block chain in st.
+  function design18(ctx, st = ctx.st, mine = ctx.S.mode === 'work' && st === ctx.st ? st.mine : null) {
     const P = plants(ctx.pModel);
-    const Cl = compOf(st.lon), Ci = compOf(st.inner), Co = compOf(st.outer, -1);
+    const my = (loop, key) => (mine && mine[loop] && mine[loop][key] ? T.tf(mine[loop][key].num, mine[loop][key].den) : null);
+    const Cl = my('lon', 'C') || compOf(st.lon), Ci = my('inner', 'C') || compOf(st.inner), Co = my('outer', 'C') || compOf(st.outer, -1);
     const Ll = T.mul(P.lon, Cl), Li = T.mul(P.inner, Ci);
     const Ti = T.feedback(Li);
     const Pout = T.mul(P.outer, Ti);
     const Lo = T.mul(Pout, Co);
     const pf = (c) => (c.pf.on ? T.lpf(c.pf.p) : T.gain(1));
-    return { P, Cl, Ci, Co, Ll, Li, Ti, Pout, Lo, Fl: pf(st.lon), Fo: pf(st.outer), mgl: T.margins(Ll), mgi: T.margins(Li), mgo: T.margins(Lo) };
+    const stable = (Lg) => L.roots(L.polyAdd(Lg.den, Lg.num)).every((q) => q.re < 0);
+    return {
+      P, Cl, Ci, Co, Ll, Li, Ti, Pout, Lo, Fl: my('lon', 'F') || pf(st.lon), Fo: my('outer', 'F') || pf(st.outer),
+      mgl: T.margins(Ll), mgi: T.margins(Li), mgo: T.margins(Lo),
+      stable: { lon: stable(Ll), inner: stable(Li), outer: stable(Lo) },
+    };
   }
+  // Structure read from the transfer functions (so it works for the block chain
+  // and for a student's lists alike): an integrator in C, a strictly proper C
+  // (roll-off: a low-pass filter), a prefilter with unity DC gain.
+  const lead0 = (c) => L.trimLeading(c.map((v) => (Math.abs(v) < 1e-300 ? 0 : v)));
+  const hasIntegrator = (C) => { const d = lead0(C.den); return d.length > 1 && Math.abs(d[d.length - 1]) <= 1e-12 * Math.max(...d.map(Math.abs)); };
+  const strictlyProper = (C) => lead0(C.num).length < lead0(C.den).length;
+  const isPrefilter = (Fp) => { const d = lead0(Fp.den), n = lead0(Fp.num); return d.length > 1 && n.length < d.length && Math.abs(n[n.length - 1] / d[d.length - 1] - 1) < 1e-6; };
   // k so that |L(j wco)| = 1 for one loop
   function autoK(ctx, which) {
     const st = ctx.st, c = st[which];
@@ -534,16 +555,149 @@
     }
     const bwi = bandwidth(d.Ti);
     return {
-      lon: { integ: st.lon.pi.on, track: lo >= 1 / pr.lon.gr * 0.999, lo, noise: hiL <= pr.lon.gn * 1.001, hiL, pm: Math.abs(d.mgl.pm - pr.lon.pm) <= 5, pf: st.lon.pf.on },
-      inner: { pm: Math.abs(d.mgi.pm - pr.inner.pm) <= 5, wco: Math.abs(d.mgi.wc / pr.inner.wco - 1) <= 0.2, bw: bwi, lpf: st.inner.lpf1.on || st.inner.lpf2.on },
-      outer: { wco: Math.abs(d.mgo.wc / pr.outer.wco - 1) <= 0.2, integ: st.outer.pi.on, noise: hiO <= pr.outer.gno * 1.001, hiO, pm: Math.abs(d.mgo.pm - pr.outer.pm) <= 5, pf: st.outer.pf.on },
+      lon: { integ: hasIntegrator(d.Cl), track: lo >= 1 / pr.lon.gr * 0.999, lo, noise: hiL <= pr.lon.gn * 1.001, hiL, pm: Math.abs(d.mgl.pm - pr.lon.pm) <= 5, pf: isPrefilter(d.Fl), stable: d.stable.lon },
+      inner: { pm: Math.abs(d.mgi.pm - pr.inner.pm) <= 5, wco: Math.abs(d.mgi.wc / pr.inner.wco - 1) <= 0.2, bw: bwi, lpf: strictlyProper(d.Ci), stable: d.stable.inner },
+      outer: { wco: Math.abs(d.mgo.wc / pr.outer.wco - 1) <= 0.2, integ: hasIntegrator(d.Co), noise: hiO <= pr.outer.gno * 1.001, hiO, pm: Math.abs(d.mgo.pm - pr.outer.pm) <= 5, pf: isPrefilter(d.Fo), stable: d.stable.outer },
     };
   }
+
+  // The student's lists for one loop (F.18(a–c)): evaluate, check, and keep them
+  // in the chapter state. Resolves to {ok: true} or {ok: false, msg}.
+  const MINE_VARS = {
+    lon: { C: ['C_lon_num', 'C_lon_den'], F: ['F_lon_num', 'F_lon_den'] },
+    inner: { C: ['C_in_num', 'C_in_den'] },
+    outer: { C: ['C_out_num', 'C_out_den'], F: ['F_out_num', 'F_out_den'] },
+  };
+  async function loadMine(ctx, loop, code) {
+    const spec = MINE_VARS[loop];
+    const names = Object.values(spec).flat();
+    const out = await WB.py.evaluate(code, [{ params: ctx.pModel, vars: names }]);
+    if (out.error) return WB.yours.pyError(out);
+    const v = out.rows[0].vars, got = {};
+    for (const [key, [nn, dn]] of Object.entries(spec)) {
+      const num = L.trimLeading([v[nn]].flat(Infinity)), den = L.trimLeading([v[dn]].flat(Infinity));
+      if (![...num, ...den].every((x) => typeof x === 'number' && Number.isFinite(x))) return { ok: false, msg: `${nn} and ${dn} must be lists of real numbers.` };
+      if (!den.length || den[0] === 0) return { ok: false, msg: `${dn} must have a nonzero leading coefficient.` };
+      if (num.length > den.length) return { ok: false, msg: `${nn}/${dn} must be proper: the numerator degree can be at most the denominator degree.` };
+      got[key] = { num, den };
+    }
+    ctx.st.mine = { ...(ctx.st.mine || {}), [loop]: got };
+    ctx.st.loop = loop;
+    ctx.update();
+    return { ok: true };
+  }
+  const tick = (ok) => (ok ? '✓' : '✗');
+  const stableTxt = (ok) => (ok ? '' : ', closed loop unstable ✗');
+
+  // Solutions for F.18(a–c): the reference loopshapes as coefficient lists, with k
+  // set for crossover at the target frequency.
+  const LS_HELP = `def series(*parts):
+    # multiply transfer functions given as (num, den)
+    num, den = np.array([1.0]), np.array([1.0])
+    for n, d in parts:
+        num, den = np.convolve(num, n), np.convolve(den, d)
+    return num, den
+
+def lead(w, M):   # Eq. 18.2: M (s + w/sqrt(M)) / (s + w sqrt(M))
+    return [M, M * w / np.sqrt(M)], [1, w * np.sqrt(M)]
+
+lpf = lambda p: ([p], [1, p])
+at = lambda tf, w: np.polyval(tf[0], 1j * w) / np.polyval(tf[1], 1j * w)
+`;
+  const LS_INNER = `# inner loop: lead at 10 rad/s (M = 20) and a low-pass filter at 100 rad/s
+J = P.Jc + 2 * P.mr * P.d**2
+P_in = ([1 / J], [1, 0, 0])
+num, den = series(lead(10, 20), lpf(100))
+k = 1 / abs(at(series(P_in, (num, den)), 10))      # crossover at 10 rad/s
+C_in_num, C_in_den = k * num, den
+`;
+  const LS_SOL = {
+    a: `${LS_HELP}
+M = P.mc + 2 * P.mr
+P_lon = ([1 / M], [1, 0, 0])
+# PI zero at 0.23 (integrator for constant input disturbances), lead at
+# 1.5 rad/s (M = 35), two low-pass filters at 70 rad/s
+num, den = series(([1, 0.23], [1, 0]), lead(1.5, 35), lpf(70), lpf(70))
+k = 1 / abs(at(series(P_lon, (num, den)), 1.5))    # crossover at 1.5 rad/s
+C_lon_num, C_lon_den = k * num, den
+F_lon_num, F_lon_den = lpf(0.5)                     # prefilter
+`,
+    b: `${LS_HELP}
+${LS_INNER}`,
+    c: `${LS_HELP}
+${LS_INNER}
+# outer plant: P_out T_in with the inner design above (as in (b))
+M = P.mc + 2 * P.mr
+P_out = ([-P.g], [1, P.mu / M, 0])
+L_in = series(P_in, (C_in_num, C_in_den))
+T_in = (L_in[0], np.polyadd(L_in[1], L_in[0]))
+# PI zero at 0.1, lead at 1 rad/s (M = 20), low-pass filter at 30 rad/s; the
+# minus sign makes the loop gain positive (P_out has -g)
+num, den = series(([1, 0.1], [1, 0]), lead(1, 20), lpf(30))
+k = 1 / abs(at(series(P_out, T_in, (num, den)), 1))   # crossover at 1 rad/s
+C_out_num, C_out_den = -k * num, den
+F_out_num, F_out_den = lpf(0.3)                         # prefilter
+`,
+  };
+  // F.18(d) solution: the repo's transferFunction (controllable canonical form, RK4).
+  const LS_IMPL = `class TransferFunction:
+    def __init__(self, num, den):
+        num = np.array(num, dtype=float) / den[0]
+        den = np.array(den, dtype=float) / den[0]
+        n = len(den) - 1
+        num = np.concatenate([np.zeros(n + 1 - len(num)), num])   # pad to n + 1
+        self.A = np.zeros((n, n))
+        self.A[0, :] = -den[1:]
+        self.A[1:, :-1] = np.eye(n - 1)
+        self.B = np.zeros((n, 1))
+        self.B[0, 0] = 1.0
+        self.C = (num[1:] - num[0] * den[1:]).reshape(1, n)
+        self.D = num[0]
+        self.z = np.zeros((n, 1))
+
+    def update(self, u):
+        if self.z.size == 0:     # a pure gain (e.g. no prefilter)
+            return self.D * u
+        f = lambda z: self.A @ z + self.B * u
+        F1 = f(self.z); F2 = f(self.z + P.Ts / 2 * F1)
+        F3 = f(self.z + P.Ts / 2 * F2); F4 = f(self.z + P.Ts * F3)
+        self.z = self.z + P.Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        return (self.C @ self.z)[0, 0] + self.D * u
+
+
+class Controller:
+    def __init__(self):
+        TF = TransferFunction
+        self.C_lon, self.F_lon = TF(P.C_lon_num, P.C_lon_den), TF(P.F_lon_num, P.F_lon_den)
+        self.C_in = TF(P.C_in_num, P.C_in_den)
+        self.C_out, self.F_out = TF(P.C_out_num, P.C_out_den), TF(P.F_out_num, P.F_out_den)
+        self.Fe = (P.mc + 2 * P.mr) * P.g
+        self.unmix = np.linalg.inv(np.array([[1.0, 1.0], [P.d, -P.d]]))
+
+    def update(self, r, y):
+        h_r, z_r = r[0, 0], r[1, 0]
+        z, h, theta = y[:, 0]
+        F = self.Fe + self.C_lon.update(self.F_lon.update(h_r) - h)
+        theta_d = self.C_out.update(self.F_out.update(z_r) - z)
+        tau = self.C_in.update(theta_d - theta)
+        return np.clip(self.unmix @ np.array([F, tau]), 0, P.f_max)
+`;
 
   F.register({
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping', pages: 'pp. 323–374, F.18 pp. 403–404',
     linearLabel: 'linear loops (no saturation, d, noise)',
-    defaults() { return { view: 'lat', loop: 'lon', zOff: 3, hOff: 0, showT: true, lon: START.lon(), inner: START.inner(), outer: START.outer(), W: null, X: null }; },
+    // mine: the student's lists from F.18(a–c) (Work mode)
+    defaults() { return { view: 'lat', loop: 'lon', zOff: 3, hOff: 0, showT: true, lon: START.lon(), inner: START.inner(), outer: START.outer(), W: null, X: null, mine: null }; },
+    // Work mode simulates the student's F.18(d) controller, which gets the designed
+    // compensators and prefilters as coefficient lists in P.
+    implement: {
+      feed: 'y',
+      params(ctx) {
+        const d = design18(ctx), l = (G) => ({ num: G.num.slice(), den: G.den.slice() });
+        const c = { C_lon: l(d.Cl), F_lon: l(d.Fl), C_in: l(d.Ci), C_out: l(d.Co), F_out: l(d.Fo) };
+        return Object.fromEntries(Object.entries(c).flatMap(([k, G]) => [[`${k}_num`, G.num], [`${k}_den`, G.den]]));
+      },
+    },
     simDefaults(sys) { return { ...sys.problems.ch18.sim, refs: [{ type: 'square', amplitude: 2.5, frequency: 0.04 }] }; },
     gains(ctx) {
       const st = ctx.st;
@@ -578,6 +732,13 @@
       const st = ctx.st;
       const top = section(parent, 'Loop being shaped', 'F.18 p. 403');
       segmented(top, { options: Object.entries(LOOPS).map(([v, l]) => ({ value: v, label: l })), ...bind(ctx, 'loop', () => st) });
+      if (ctx.S.mode === 'work') {
+        // the compensators come from the student's Python in (a)–(c): no block menu here
+        top.append(el('p', { class: 'muted small', text: 'The Bode plot, s-plane and specs use your compensators from F.18(a)–(c) (Use my …). A loop you have not given yet uses a starting lead design.' }));
+        F.workBanner(parent, ctx, 'F.18(d)');
+        this.specSection(parent, ctx);
+        return;
+      }
       // The reference design answers F.18(a–c): Work mode offers it once all three are solved.
       const refBtn = F.showsAnswer(ctx, ['F.18/a', 'F.18/b', 'F.18/c'])
         ? [el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference design (reveals answer)', onclick: () => { const r = refState(ctx), A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; for (const w of ['lon', 'inner', 'outer']) A[w] = st[w] = r[w]; ctx.update(); } })]
@@ -613,18 +774,24 @@
         onOff(pf, 'pf');
         slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'p', () => c().pf), disabled: () => !c().pf.on });
       }
+      this.specSection(parent, ctx);
+    },
+
+    specSection(parent, ctx) {
       const sp = section(parent, 'F.18 specs (all loops)', 'p. 403–404');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
       WB.ui.addRefresher(() => {
         const d = design18(ctx), s = specs18(ctx, d);
         const row = WB.ui.specRow;
+        const unstable = ['lon', 'inner', 'outer'].filter((k) => !s[k].stable).map((k) => row(`${LOOPS[k]} closed loop stable`, false, 'unstable'));
         box.replaceChildren(
           row('(a) integrator (input d)', s.lon.integ), row('(a) |L| ≥ 40 dB below 0.1', s.lon.track, `${fmt(db(s.lon.lo), 3)} dB`),
           row('(a) |L| ≤ −80 dB above 200', s.lon.noise, `${fmt(db(s.lon.hiL), 3)} dB`), row('(a) PM ≈ 60°', s.lon.pm, `${fmt(d.mgl.pm, 3)}°`), row('(a) prefilter', s.lon.pf),
           row('(b) PM ≈ 60°', s.inner.pm, `${fmt(d.mgi.pm, 3)}°`), row('(b) ω_co ≈ 10', s.inner.wco, `${fmt(d.mgi.wc, 3)} (bw ${fmt(s.inner.bw, 3)})`), row('(b) low-pass filter', s.inner.lpf),
           row('(c) ω_co ≈ 1', s.outer.wco, `${fmt(d.mgo.wc, 3)}`), row('(c) integrator', s.outer.integ), row('(c) |L| ≤ −100 dB above 100', s.outer.noise, `${fmt(db(s.outer.hiO), 3)} dB`),
           row('(c) PM ≈ 60°', s.outer.pm, `${fmt(d.mgo.pm, 3)}°`), row('(c) prefilter', s.outer.pf),
+          ...unstable,
         );
       });
     },
@@ -670,10 +837,12 @@
       };
       const texC = (c, sign) => { const parts = [`${sign < 0 ? '-' : ''}${tex(c.k)}`]; for (const key of Object.keys(BLK)) if (c[key].on) parts.push(T.texTf(BLK[key](c[key]), 4)); return parts.join('\\cdot '); };
       return [
-        { title: 'Loops', page: 'F.18 p. 403',
+        { title: 'Loops', page: 'F.18 p. 403', answers: 'F.18/d',
           theory: 'F = F_e + C_{lon}(s)\\,(F_h h_r - h_m),\\quad \\theta_d = C_{out}(s)\\,(F_z z_r - z_m),\\quad \\tau = C_{in}(s)\\,(\\theta_d - \\theta_m)' },
         { title: `Your C for the ${LOOPS[st.loop]} loop`, page: 'p. 323',
-          theory: `C = ${texC(st[st.loop], st.loop === 'outer' ? -1 : 1)}` },
+          theory: ctx.S.mode !== 'work' ? `C = ${texC(st[st.loop], st.loop === 'outer' ? -1 : 1)}`
+            : st.mine && st.mine[st.loop] ? `C = ${T.texTf(st.loop === 'lon' ? d.Cl : st.loop === 'inner' ? d.Ci : d.Co, 4)}`
+              : 'C:\\ \\text{starting lead design (give yours in F.18(a–c))}' },
         { title: 'Margins (all loops)', page: 'p. 304–306',
           theory: `\\text{alt: } PM = ${tex(d.mgl.pm)}^\\circ @ ${tex(d.mgl.wc)},\\quad \\text{inner: } ${tex(d.mgi.pm)}^\\circ @ ${tex(d.mgi.wc)},\\quad \\text{outer: } ${tex(d.mgo.pm)}^\\circ @ ${tex(d.mgo.wc)}`,
           note: condNote(d, st) },
@@ -687,27 +856,78 @@
       const s = () => specs18(ctx);
       const refTxt = () => {
         const r = refState(ctx);
-        const dd = design18(ctx, { ...ctx.st, ...r });
+        const dd = design18(ctx, { ...ctx.st, ...r }, null);
         return { r, dd };
       };
+      const loaded = (loop, label) => ({ label, run: async (code) => { const r = await loadMine(ctx, loop, code); return r.ok === false ? r : { info: true, msg: `Your ${LOOPS[loop]} design is in the Bode plot, the s-plane and the spec readouts.` }; } });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch18, [
-        { id: 'a', title: '(a) Altitude loop meets every spec',
-          check: () => { const x = s().lon; const ok = x.integ && x.track && x.noise && x.pm && x.pf; return { ok, msg: `integrator ${x.integ ? '✓' : '✗'}, tracking ${x.track ? '✓' : '✗'}, noise ${x.noise ? '✓' : '✗'}, PM ${x.pm ? '✓' : '✗'}, prefilter ${x.pf ? '✓' : '✗'}` }; },
-          solution: () => { const { r, dd } = refTxt(); return [{ html: `PI zero at 0.23, lead at 1.5 rad/s with M = 35, two low-pass filters at 70 rad/s, k = ${fmt(r.lon.k, 4)} (crossover 1.5 rad/s): PM ${fmt(dd.mgl.pm, 3)}°. Prefilter p = 0.5 rad/s removes most of the ~23% overshoot.` }]; } },
-        { id: 'b', title: '(b) Inner loop: PM ≈ 60°, ω<sub>co</sub> ≈ 10 rad/s, low-pass filter',
-          check: () => { const x = s().inner; const ok = x.pm && x.wco && x.lpf; return { ok, msg: `PM ${x.pm ? '✓' : '✗'}, crossover ${x.wco ? '✓' : '✗'} (bandwidth ${fmt(x.bw, 3)} rad/s), LPF ${x.lpf ? '✓' : '✗'}` }; },
-          solution: () => { const { r, dd } = refTxt(); return [{ html: `Lead at 10 rad/s with M = 20 (≈ 65° max phase), LPF at 100 rad/s, k = ${fmt(r.inner.k, 4)}: PM ${fmt(dd.mgi.pm, 3)}° at ${fmt(dd.mgi.wc, 3)} rad/s. The closed-loop bandwidth is then about 1.7 ω<sub>co</sub>; read "bandwidth ≈ ω<sub>co</sub> = 10" as a crossover spec.` }]; } },
-        { id: 'c', title: '(c) Outer loop meets every spec',
-          check: () => { const x = s().outer; const ok = x.wco && x.integ && x.noise && x.pm && x.pf; return { ok, msg: `crossover ${x.wco ? '✓' : '✗'}, integrator ${x.integ ? '✓' : '✗'}, noise ${x.noise ? '✓' : '✗'}, PM ${x.pm ? '✓' : '✗'}, prefilter ${x.pf ? '✓' : '✗'}` }; },
-          solution: () => { const { r, dd } = refTxt(); return [{ html: `On P<sub>out</sub>·T<sub>in</sub> with the reference inner loop: −k·(s+0.1)/s · lead at 1 rad/s with M = 20 · LPF at 30 rad/s, k = ${fmt(r.outer.k, 4)}: PM ${fmt(dd.mgo.pm, 3)}° at ${fmt(dd.mgo.wc, 3)} rad/s. The inner loop's roll-off already meets the −100 dB noise spec. Prefilter p = 0.3 rad/s. Like the altitude loop it is conditionally stable (gain margins ${dd.mgo.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)} rad/s`).join(', ')}).` }]; } },
-        { id: 'd', title: '(d) Simulation tracks both references',
-          html: 'Passes when |h<sub>r</sub> − h| and |z<sub>r</sub> − z| are under 5 cm just before the first z<sub>r</sub> switch, with no runaway.',
-          check: () => {
-            const S = ctx.S, zc = S.sim.refs[0];
-            const tSw = zc.type === 'square' ? zc.tStep + 0.5 / zc.frequency : S.sim.tEnd;
-            const eh = Math.abs(F.errorBefore(ctx, tSw, 1, 0)), ez = Math.abs(F.errorBefore(ctx, tSw, 0, 1));
-            return { ok: eh < 0.05 && ez < 0.05, msg: `|e_h| = ${fmt(eh, 3)} m, |e_z| = ${fmt(ez, 3)} m at t = ${fmt(tSw - 0.05, 3)} s.` };
-          } },
+        { id: 'a', title: '(a) Altitude loop: design C<sub>lon</sub>(s) and a prefilter to meet the specs',
+          html: 'Give C<sub>lon</sub>(s) and the prefilter F<sub>lon</sub>(s) as coefficient lists, highest power of s first (<code>np.convolve</code> multiplies two factors). <em>Use my C_lon</em> draws P·C<sub>lon</sub> in the Bode plot, the s-plane and the spec readouts (altitude loop selected). The check also requires a stable closed loop and a prefilter with unity DC gain.',
+          code: {
+            template: 'C_lon_num = [1.0]\nC_lon_den = [1.0]\nF_lon_num = [1.0]\nF_lon_den = [1.0]\n',
+            check: async (code) => {
+              const r = await loadMine(ctx, 'lon', code);
+              if (r.ok === false) return r;
+              const x = s().lon;
+              const ok = x.integ && x.track && x.noise && x.pm && x.pf && x.stable;
+              return { ok, msg: `integrator ${tick(x.integ)}, tracking ${tick(x.track)}, noise ${tick(x.noise)}, PM ${tick(x.pm)}, prefilter ${tick(x.pf)}${stableTxt(x.stable)}` };
+            },
+            actions: [loaded('lon', 'Use my C_lon')],
+          },
+          solution: () => { const { r, dd } = refTxt(); return [{ code: LS_SOL.a }, { html: `PI zero at 0.23, lead at 1.5 rad/s with M = 35, two low-pass filters at 70 rad/s, k = ${fmt(r.lon.k, 4)} (crossover 1.5 rad/s): PM ${fmt(dd.mgl.pm, 3)}°. Prefilter p = 0.5 rad/s removes most of the ~23% overshoot.` }]; } },
+        { id: 'b', title: '(b) Inner loop: C<sub>in</sub>(s) with PM ≈ 60°, ω<sub>co</sub> ≈ 10 rad/s and a low-pass filter',
+          html: 'Give C<sub>in</sub>(s) as coefficient lists. <em>Use my C_in</em> draws it (inner loop selected); the outer loop in (c) is shaped on P<sub>out</sub>·T<sub>in</sub> with this inner loop. The check also requires a stable closed loop.',
+          code: {
+            template: 'C_in_num = [1.0]\nC_in_den = [1.0]\n',
+            check: async (code) => {
+              const r = await loadMine(ctx, 'inner', code);
+              if (r.ok === false) return r;
+              const x = s().inner;
+              const ok = x.pm && x.wco && x.lpf && x.stable;
+              return { ok, msg: `PM ${tick(x.pm)}, crossover ${tick(x.wco)} (bandwidth ${fmt(x.bw, 3)} rad/s), low-pass filter ${tick(x.lpf)}${stableTxt(x.stable)}` };
+            },
+            actions: [loaded('inner', 'Use my C_in')],
+          },
+          solution: () => { const { r, dd } = refTxt(); return [{ code: LS_SOL.b }, { html: `Lead at 10 rad/s with M = 20 (≈ 65° max phase), LPF at 100 rad/s, k = ${fmt(r.inner.k, 4)}: PM ${fmt(dd.mgi.pm, 3)}° at ${fmt(dd.mgi.wc, 3)} rad/s. The closed-loop bandwidth is then about 1.7 ω<sub>co</sub>; read "bandwidth ≈ ω<sub>co</sub> = 10" as a crossover spec.` }]; } },
+        { id: 'c', title: '(c) Outer loop: design C<sub>out</sub>(s) and a prefilter to meet the specs',
+          html: 'Give C<sub>out</sub>(s) and the prefilter F<sub>out</sub>(s) as coefficient lists. The outer plant is P<sub>out</sub>·T<sub>in</sub> with your inner loop from (b), so load that first. <em>Use my C_out</em> draws it (outer loop selected). The check also requires a stable closed loop and a prefilter with unity DC gain.',
+          code: {
+            template: 'C_out_num = [1.0]\nC_out_den = [1.0]\nF_out_num = [1.0]\nF_out_den = [1.0]\n',
+            check: async (code) => {
+              if (!(ctx.st.mine && ctx.st.mine.inner)) return { ok: false, msg: 'Load your inner loop first: press Use my C_in (or Check) in (b). The outer plant includes it.' };
+              const r = await loadMine(ctx, 'outer', code);
+              if (r.ok === false) return r;
+              const x = s().outer;
+              const ok = x.wco && x.integ && x.noise && x.pm && x.pf && x.stable;
+              return { ok, msg: `crossover ${tick(x.wco)}, integrator ${tick(x.integ)}, noise ${tick(x.noise)}, PM ${tick(x.pm)}, prefilter ${tick(x.pf)}${stableTxt(x.stable)}` };
+            },
+            actions: [loaded('outer', 'Use my C_out')],
+          },
+          solution: () => { const { r, dd } = refTxt(); return [{ code: LS_SOL.c }, { html: `On P<sub>out</sub>·T<sub>in</sub> with the reference inner loop: −k·(s+0.1)/s · lead at 1 rad/s with M = 20 · LPF at 30 rad/s, k = ${fmt(r.outer.k, 4)}: PM ${fmt(dd.mgo.pm, 3)}° at ${fmt(dd.mgo.wc, 3)} rad/s. The inner loop's roll-off already meets the −100 dB noise spec. Prefilter p = 0.3 rad/s. Like the altitude loop it is conditionally stable (gain margins ${dd.mgo.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)} rad/s`).join(', ')}).` }]; } },
+        WB.myCtrl.part(ctx, {
+          id: 'd', title: '(d) Implement C(s) and F(s) in simulation',
+          html: 'Your designs from (a)–(c) are in <code>P.C_lon_num</code>, <code>P.C_lon_den</code>, <code>P.F_lon_num</code>, <code>P.F_lon_den</code>, <code>P.C_in_num</code>, …, <code>P.F_out_den</code> (coefficient lists, highest power of s first; a loop you have not given uses the starting lead design). Realize each in state-space form (Eq. 18.3–18.4) or as a digital filter, and close the loops as in F.18 from the measured y = [[z], [h], [θ]]. The check runs a 2 m altitude step and z<sub>r</sub> = 3 ± 2.5 m (0.04 Hz) for 20 s with exact parameters and compares z(t) and h(t) with the workbench running the same C and F (within 3%).',
+          check: async (code) => {
+            const sc = F.scenario(ctx, { refs: [{ type: 'step', amplitude: 2, tStep: 0 }, { type: 'square', amplitude: 2.5, frequency: 0.04, tStep: 0 }], zOff: 3, tEnd: 20 });
+            const mine = await WB.myCtrl.run(ctx, code, sc);
+            if (mine.ok === false) return mine;
+            const d = design18(ctx), p = ctx.pModel, Fe = ctx.sys.models(p).Fe;
+            // The repo's transferFunction updates the state, then outputs; a filter that outputs first is fine too.
+            const refFor = (make) => {
+              const [Cl, Fl, Ci, Co, Fo] = [d.Cl, d.Fl, d.Ci, d.Co, d.Fo].map((G) => { const f = make(G, sc.Ts); return (u) => (f.update ? f.update(u) : f.step(u)); });
+              return WB.myCtrl.reference(ctx, sc, { update: (r, x, y) => {
+                const Ft = Cl(Fl(r[0]) - y[1]), thD = Co(Fo(r[1]) - y[0]), tau = Ci(thD - y[2]);
+                return ctx.sys.mix(Fe + Ft, tau, p);
+              } });
+            };
+            const err = (ref) => ({ z: WB.myCtrl.maxDiff(mine, ref, { output: 0 }).e, h: WB.myCtrl.maxDiff(mine, ref, { output: 1 }).e });
+            const es = [err(refFor(T.repoFilter)), err(refFor(T.filter))];
+            const best = es.reduce((a, b) => (Math.max(b.z / 5, b.h / 2) < Math.max(a.z / 5, a.h / 2) ? b : a));
+            const ok = best.z <= 0.03 * 5 && best.h <= 0.03 * 2;
+            return { ok, msg: `Your z(t) and h(t) ${ok ? 'match' : 'differ from'} the workbench running the same C and F ${ok ? 'to within' : 'by'} ${fmt(best.z, 3)} m and ${fmt(best.h, 3)} m.` };
+          },
+          solution: () => [{ code: LS_IMPL }, { html: 'The repo\'s loopshape_tools.py transferFunction: controllable canonical form, one RK4 step per T<sub>s</sub>. F = F<sub>e</sub> + C<sub>lon</sub>(F<sub>lon</sub>h<sub>r</sub> − h), θ<sub>d</sub> = C<sub>out</sub>(F<sub>out</sub>z<sub>r</sub> − z), τ = C<sub>in</sub>(θ<sub>d</sub> − θ), then the rotor forces from [[1, 1], [d, −d]].' }],
+        }),
       ]);
     },
   });

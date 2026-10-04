@@ -2,8 +2,10 @@
 // successive loop closure for the lateral dynamics, system type, root locus
 // versus the integrator gains, and the digital nested PID from measured outputs.
 //
-// Work mode: you set the loop gains; the s-plane shows target rings from the
-// specs, and every derived number is behind Reveal / Show solution.
+// Work mode: the time plots run the student's own Python controller (F.7(d),
+// F.8(e, f), F.10(b); WB.myCtrl). Gain sliders only move the s-plane poles, the
+// s-plane shows target rings from the specs, and every derived number is behind
+// Reveal / Show solution.
 // Explore mode: gains come from the specs (t_r, ζ, separation M); drag the poles.
 (function () {
   const { el, slider, segmented, section, bind } = WB.ui;
@@ -36,19 +38,141 @@
   }
 
   // ------------------------------------------------------- controls --
-  function workSections(parent, ctx, { lon = true, lat = true, kI = false } = {}) {
+  // Work-mode gain sliders. In the implementation chapters (`part` given, e.g.
+  // 'F.8(e)') they only place the closed-loop × in the s-plane, and the time plots
+  // show the student's own controller (WB.myCtrl); in F.9 they drive the simulation.
+  const S_PLANE_NOTE = 'These place the closed-loop × in the s-plane. They do not drive the simulation.';
+  function workSections(parent, ctx, part, { lon = true, lat = true, kI = false } = {}) {
+    const tag = part ? ' gains (s-plane)' : ' gains';
     if (lon) {
-      const s1 = section(parent, 'Altitude loop gains', 'p. 101 · Fig. 7-2');
+      const s1 = section(parent, `Altitude loop${tag}`, 'p. 101 · Fig. 7-2');
       F.gainSliders(s1, ctx, kI ? ['kPh', 'kDh', 'kIh'] : ['kPh', 'kDh']);
+      if (part && !lat) s1.append(el('p', { class: 'muted small', text: S_PLANE_NOTE }));
     }
     if (lat) {
-      const s2 = section(parent, 'Lateral: inner θ loop (PD)', 'p. 118 · Fig. 8-10');
+      const s2 = section(parent, `Lateral: inner θ loop${tag}`, 'p. 118 · Fig. 8-10');
       F.gainSliders(s2, ctx, ['kPth', 'kDth']);
-      const s3 = section(parent, 'Lateral: outer z loop', 'p. 118 · Fig. 8-11');
+      const s3 = section(parent, `Lateral: outer z loop${tag}`, 'p. 118 · Fig. 8-11');
       F.gainSliders(s3, ctx, kI ? ['kPz', 'kDz', 'kIz'] : ['kPz', 'kDz']);
-      s3.append(el('p', { class: 'muted small', text: 'Mind the sign of Z/Θ (F.5) when you pick the outer gains.' }));
+      if (part) s3.append(el('p', { class: 'muted small', text: S_PLANE_NOTE }));
     }
+    if (part) F.workBanner(parent, ctx, part);
   }
+
+  // The workbench's nested PD/PID (F.makePID) with `gains` on a check run, with
+  // the true rates as in F.7/F.8 (the reference for WB.myCtrl checks).
+  function refPID(ctx, sc, gains, st = {}) {
+    const rc = WB.myCtrl.refCtx(ctx, sc);
+    rc.gains = { ...pick({}, ALL), ...gains };
+    rc.st = { ...ctx.st, deriv: 'state', lat: 'on', comp: 'eq', antiwindup: 'none', ...st };
+    return WB.myCtrl.reference(ctx, sc, F.makePID(rc));
+  }
+  const STEP = (amplitude) => ({ type: 'step', amplitude, tStep: 0 });
+  const SQUARE_Z = { type: 'square', amplitude: 2.5, frequency: 0.08, tStep: 0 };   // F.8(e), with a 3 m offset
+
+  // Solution controllers. F.8: successive loop closure with the true rates, as the
+  // F.7–F.9 code does; F.10: PID from the measured outputs only.
+  const SOL = {
+    f7: `class Controller:
+    def __init__(self):
+        M = P.mc + 2 * P.mr          # total mass: H/F~ = (1/M)/s^2
+        # Delta_cl^d = (s + 0.2)(s + 0.3) = s^2 + 0.5 s + 0.06 = s^2 + (kD/M) s + kP/M
+        self.kp = 0.06 * M
+        self.kd = 0.5 * M
+        self.Fe = M * P.g            # hover force (F.4)
+
+    def update(self, r, x):
+        h_r = r[0, 0]
+        h = x[1, 0]
+        hdot = x[4, 0]
+        F = self.Fe + self.kp * (h_r - h) - self.kd * hdot
+        # lateral loop off (tau = 0): each rotor carries F/2
+        return np.array([F / 2, F / 2])
+`,
+    f8: (trh, sat) => `class Controller:
+    def __init__(self):
+        M = P.mc + 2 * P.mr              # total mass
+        J = P.Jc + 2 * P.mr * P.d**2     # roll inertia
+        a = P.mu / M
+        zeta = 0.707
+        # (a) altitude, H/F~ = (1/M)/s^2
+        tr_h = ${trh}
+        wn_h = 2.2 / tr_h
+        self.kp_h = M * wn_h**2
+        self.kd_h = M * 2 * zeta * wn_h
+        # (b) inner loop, Theta/tau = (1/J)/s^2
+        tr_th = 0.8
+        wn_th = 2.2 / tr_th
+        self.kp_th = J * wn_th**2
+        self.kd_th = J * 2 * zeta * wn_th
+        # (d) outer loop, Z/Theta = -g/(s^2 + a s), with the inner loop as its DC gain 1
+        tr_z = 10 * tr_th
+        wn_z = 2.2 / tr_z
+        self.kp_z = -wn_z**2 / P.g
+        self.kd_z = (a - 2 * zeta * wn_z) / P.g
+        self.Fe = M * P.g
+        # (F, tau) = [[1, 1], [d, -d]] (f_r, f_l)
+        self.unmix = np.linalg.inv(np.array([[1.0, 1.0], [P.d, -P.d]]))
+
+    def update(self, r, x):
+        h_r, z_r = r[0, 0], r[1, 0]
+        z, h, theta, zdot, hdot, thetadot = x[:, 0]
+        F = self.Fe + self.kp_h * (h_r - h) - self.kd_h * hdot
+        theta_d = self.kp_z * (z_r - z) - self.kd_z * zdot
+        tau = self.kp_th * (theta_d - theta) - self.kd_th * thetadot
+        ${sat ? 'u = self.unmix @ np.array([F, tau])\n        return np.clip(u, 0, P.f_max)     # 0 <= f_r, f_l <= f_max' : 'return self.unmix @ np.array([F, tau])'}
+`,
+    f10: `class PID:
+    # One loop from its measured output only: dirty derivative of y (Eq. 10.4),
+    # trapezoidal integrator, and anti-windup by integrating only while
+    # |ydot| < vbar (Sec. 10.1.1).
+    def __init__(self, kp, ki, kd, vbar=np.inf, sigma=0.05):
+        self.kp, self.ki, self.kd, self.vbar = kp, ki, kd, vbar
+        self.beta = (2 * sigma - P.Ts) / (2 * sigma + P.Ts)
+        self.gamma = 2 / (2 * sigma + P.Ts)
+        self.ydot = 0.0
+        self.y_prev = None
+        self.error_prev = 0.0
+        self.integrator = 0.0
+
+    def update(self, y_r, y):
+        if self.y_prev is None:
+            self.y_prev = y
+        error = y_r - y
+        self.ydot = self.beta * self.ydot + self.gamma * (y - self.y_prev)
+        if abs(self.ydot) < self.vbar:
+            self.integrator += P.Ts / 2 * (error + self.error_prev)
+        self.y_prev = y
+        self.error_prev = error
+        return self.kp * error + self.ki * self.integrator - self.kd * self.ydot
+
+
+class Controller:
+    def __init__(self):
+        M = P.mc + 2 * P.mr
+        J = P.Jc + 2 * P.mr * P.d**2
+        a = P.mu / M
+        zeta = 0.707
+        wn_h = 2.2 / 8.0                 # the F.8 loops
+        tr_th = 0.8
+        wn_th = 2.2 / tr_th
+        wn_z = 2.2 / (10 * tr_th)
+        self.alt = PID(M * wn_h**2, 0.01, M * 2 * zeta * wn_h, vbar=0.5)
+        self.outer = PID(-wn_z**2 / P.g, -0.0005, (a - 2 * zeta * wn_z) / P.g, vbar=0.5)
+        self.inner = PID(J * wn_th**2, 0.0, J * 2 * zeta * wn_th)
+        self.Fe = M * P.g
+        self.unmix = np.linalg.inv(np.array([[1.0, 1.0], [P.d, -P.d]]))
+
+    def update(self, r, y):
+        h_r, z_r = r[0, 0], r[1, 0]
+        z, h, theta = y[:, 0]
+        F = self.Fe + self.alt.update(h_r, h)
+        theta_d = self.outer.update(z_r, z)
+        tau = self.inner.update(theta_d, theta)
+        u = self.unmix @ np.array([F, tau])
+        return np.clip(u, 0, P.f_max)
+`,
+  };
   function knobSections(parent, ctx, { lon = true, lat = true, title = 'Design knobs' } = {}) {
     const k = ctx.st.k;
     if (lon) {
@@ -125,6 +249,7 @@
     id: 'ch7', num: 7, tab: 'Ch 7', title: 'Pole placement (PD altitude)', pages: 'pp. 99–106, F.7 p. 397',
     lateralMetrics: false,
     controller: (ctx, o) => F.makePID(ctx, o),
+    implement: { feed: 'state' },  // Work mode simulates the student's F.7(d) controller
     defaults(sys) {
       const pr = sys.problems.ch7;
       return { comp: 'eq', lat: 'off', view: 'lon', zOff: 0, hOff: 0, w: { ...F.W0 }, form: 'real', p1: pr.desiredPoles[0].re, p2: pr.desiredPoles[1].re, sigma: -0.25, wd: 0.2 };
@@ -142,13 +267,12 @@
       return { ...z, kPh: g.kP, kDh: g.kD };
     },
     buildControls(parent, ctx) {
-      const sec = section(parent, 'PD altitude controller', 'p. 99 · F.7 p. 397');
-      F.forceLawControl(sec, ctx);
       if (ctx.S.mode === 'work') {
-        F.gainSliders(sec, ctx, ['kPh', 'kDh']);
-        sec.append(el('p', { class: 'muted small', text: 'The lateral loop is off (τ = 0), as in F.7. Target poles are the dashed rings.' }));
+        workSections(parent, ctx, 'F.7(d)', { lat: false });
         return;
       }
+      const sec = section(parent, 'PD altitude controller', 'p. 99 · F.7 p. 397');
+      F.forceLawControl(sec, ctx);
       const des = section(parent, 'Desired closed-loop poles', 'p. 100');
       segmented(des, { label: 'Pole pair', options: [{ value: 'real', label: 'two real' }, { value: 'complex', label: 'complex pair' }], ...bind(ctx, 'form') });
       slider(des, { label: 'p<sub>1</sub>', min: -2, max: 0, step: 0.001, ...bind(ctx, 'p1'), disabled: () => ctx.st.form !== 'real' });
@@ -223,15 +347,22 @@
           actions: [F.useGains(ctx, { kP: 'kPh', kD: 'kDh' })],
           solution: () => { const a = ans(); return [{ tex: `\\Delta^d = (s+0.2)(s+0.3) = s^2 + 0.5s + 0.06 \\Rightarrow k_P = ${tex(m().M)}\\cdot 0.06 = ${tex(a.kP)},\\; k_D = ${tex(m().M)}\\cdot 0.5 = ${tex(a.kD)}` }]; },
         },
-        {
-          id: 'd', title: '(d) Simulate',
-          html: 'Click <em>Use my gains</em>, then compare the × with the dashed rings and look at the step response. The dashed trace is the linear design model.',
-          check: () => {
-            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
-            const cl = F.rootsOf(F.lonPoly(m(), ctx.gains));
-            return M.polesMatch(cl, prob.desiredPoles, 0.02, 0.005) ? { ok: true, msg: 'The closed loop has the target poles.' } : { ok: false, msg: `Current poles: ${cl.map((q) => fmtPole(q)).join(', ')}.` };
+        WB.myCtrl.part(ctx, {
+          id: 'd', title: '(d) Implement the PD altitude controller and plot the step response',
+          html: 'Write the controller with the gains from (c). <code>update</code> gets the references r = [[h<sub>r</sub>], [z<sub>r</sub>]] and the state x, as in the Ch 7 code, and returns the rotor forces [f<sub>r</sub>, f<sub>ℓ</sub>]. The lateral loop is off in F.7. <em>Run my controller</em> drives the time plots; the check simulates a 2 m altitude step with the nominal and with other parameters and compares h(t) with the design.',
+          check: (code) => {
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(2), STEP(0)], tEnd: 30, feed: 'state' });
+              const g = F.pdFromPoles(ctx.sys.models(pc.params).lon, prob.desiredPoles);
+              return { sc, label: pc.label, ref: () => refPID(ctx, sc, { kPh: g.kP, kDh: g.kD }, { lat: 'off' }) };
+            });
+            return F.matchAll(ctx, code, cases, { tol: { 1: 0.02 * 2 } });
           },
-        },
+          solution: () => [
+            { code: SOL.f7 },
+            { html: 'PD with the derivative on h (Fig. 7-2) plus the hover force F<sub>e</sub> = (m<sub>c</sub> + 2m<sub>r</sub>)g from F.4, split equally between the rotors since τ = 0. The rotor limits are far away for a 2 m step.' },
+          ],
+        }),
       ]);
     },
   });
@@ -280,6 +411,7 @@
   F.register({
     id: 'ch8', num: 8, tab: 'Ch 8', title: 'Second-order design & successive loop closure', pages: 'pp. 107–136, F.8 pp. 397–398',
     controller: (ctx, o) => F.makePID(ctx, o),
+    implement: { feed: 'state' },  // Work mode simulates the student's F.8(e)/(f) controller
     defaults(sys) { return { comp: 'eq', lat: 'on', view: 'lat', zOff: 3, hOff: 0, w: { ...F.W0 }, k: f8Knobs(sys) }; },
     simDefaults(sys) { return sys.problems.ch8.sim; },
     gains(ctx) {
@@ -291,7 +423,7 @@
       const sec = section(parent, 'Controller', 'F.8 p. 397');
       F.viewControl(sec, ctx);
       if (ctx.S.mode === 'work') {
-        workSections(parent, ctx);
+        workSections(parent, ctx, 'F.8(e) or (f)');
         knobSections(parent, ctx, { title: 'Specs' });
         parent.append(el('p', { class: 'muted small', text: 'The target poles for these specs appear as dashed rings once you solve F.8(a), (b) and (d).' }));
       } else {
@@ -356,49 +488,55 @@
             { tex: `t_{r_z} = 8\\,\\text{s},\\; \\omega_{n_z} = ${tex(r.wnz)}:\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g} = ${tex(r.kPz)},\\quad k_{D_z} = \\frac{\\mu/(m_c+2m_r) - 2\\zeta_z\\omega_{n_z}}{g} = ${tex(r.kDz)}` },
           ]; },
         },
-        {
-          id: 'e', title: '(e) Implement with z<sub>r</sub> = 3 ± 2.5 m at 0.08 Hz',
-          html: 'Use your (b) and (d) gains (Work mode). The reference is set up already: square wave of amplitude 2.5 at 0.08 Hz with a 3 m offset (right panel). Passes when your lateral gains match the design within 1%.',
-          check: () => {
-            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode.' };
-            const r = ref(), w = ctx.st.w;
-            const ok = ['kPth', 'kDth', 'kPz', 'kDz'].every((k) => M.close(w[k], r[k]));
-            const zm = F.zMetrics(ctx);
-            return ok ? { ok: true, msg: `${isFinite(zm.tr) ? `z rise time ${fmt(zm.tr, 3)} s, overshoot ${fmt(zm.os, 3)}%.` : 'z does not reach 90% of the step before the reference switches.'} The 6.25 s half period is shorter than the z response.` } : { ok: false, msg: 'Your lateral gains do not match (b) and (d) yet.' };
+        WB.myCtrl.part(ctx, {
+          id: 'e', title: '(e) Implement the successive-loop-closure controller with z<sub>r</sub> = 3 ± 2.5 m at 0.08 Hz', seed: 'F.7/d',
+          html: 'Write the controller with your gains from (a), (b) and (d). <code>update</code> gets r = [[h<sub>r</sub>], [z<sub>r</sub>]] and the state x and returns [f<sub>r</sub>, f<sub>ℓ</sub>]. The time plots use the left panel and the reference offsets on the right (set to the 3 m offset already). The check runs a 2 m altitude step with z<sub>r</sub> = 3 ± 2.5 m (0.08 Hz) for 20 s, with the nominal and with other parameters, and compares z(t), h(t) and θ(t) with the design.',
+          check: (code) => {
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(2), SQUARE_Z], zOff: 3, tEnd: 20, feed: 'state' });
+              return { sc, label: pc.label, ref: () => refPID(ctx, sc, F.refF8(pc.params)) };
+            });
+            return F.matchAll(ctx, code, cases, { tol: { 0: 0.02 * 5, 1: 0.02 * 2, 2: 0.05 * M.DEG } });
           },
-        },
-        {
-          id: 'f', title: '(f) Fastest t<sub>r,h</sub> and t<sub>r,z</sub> without saturation',
-          inputs: { trh: 't<sub>r,h</sub> [s]', trz: 't<sub>r,z</sub> [s]' },
-          html: 'Checked by simulation with the current references and initial conditions (default: h<sub>r</sub> a 2 m step, z<sub>r</sub> = 3 ± 2.5 m), ζ = 0.707 and t<sub>r,θ</sub> = 0.8 s. Passes when neither rotor saturates, but 10% faster in either loop does.',
-          check: (v) => {
-            const trh = PD().num(v.trh), trz = PD().num(v.trz);
-            if (!(trh > 0) || !(trz > 0)) return { ok: false, msg: 'Enter two positive rise times.' };
-            const base = f8Knobs(ctx.sys), mk = (a, b) => ({ ...base, trh: a, Msep: b / base.trth });
-            if (satRun(ctx, mk(trh, trz))) return { ok: false, msg: 'A rotor saturates. Slow down.' };
-            const fh = satRun(ctx, mk(0.9 * trh, trz)), fz = satRun(ctx, mk(trh, 0.9 * trz));
-            if (fh && fz) return { ok: true, msg: 'No saturation, and 10% faster in either loop saturates.' };
-            return { ok: false, msg: `No saturation. You can still go faster in ${!fh && !fz ? 'both loops' : !fh ? 'the altitude loop' : 'the z loop'}.` };
+          solution: () => [
+            { code: SOL.f8('8.0', false) },
+            { html: 'Fig. 8-10 and 8-11 (p. 118): the altitude PD gives F = F<sub>e</sub> + F̃, the outer PD turns the z error into θ<sub>d</sub>, the inner PD turns θ<sub>d</sub> − θ into τ, and (f<sub>r</sub>, f<sub>ℓ</sub>) = [[1, 1], [d, −d]]⁻¹(F, τ). The 6.25 s half period is shorter than the z response (t<sub>r,z</sub> = 8 s), so z never settles between switches.' },
+          ],
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'f', title: '(f) Saturate the rotor forces; tune t<sub>r,h</sub> and t<sub>r,z</sub> for the fastest response without saturation', seed: ['F.8/e', 'F.7/d'],
+          html: 'Keep ζ = 0.707 and t<sub>r,θ</sub> = 0.8 s. The check gives your controller a huge error (each rotor force must stay within 0 ≤ f ≤ f<sub>max</sub>), then runs the (e) references for 15 s: the largest rotor force must reach 95% of f<sub>max</sub>, the forces may sit at a limit for at most 2 samples, and h must be within 5 cm of h<sub>r</sub> at the end.',
+          check: async (code) => {
+            const fmax = ctx.pModel.f_max;
+            const pr = await WB.myCtrl.probe(ctx, code, [[[100, 100], [0, 0, 0, 0, 0, 0]], [[-100, -100], [0, 0, 0, 0, 0, 0]]]);
+            if (pr.ok === false) return pr;
+            const bad = pr.u.flat().find((v) => v < -1e-9 || v > fmax * (1 + 1e-9));
+            if (bad !== undefined) return { ok: false, msg: `For a huge error from rest your controller returns a rotor force of ${fmt(bad, 4)} N. Saturate each rotor force at 0 ≤ f ≤ f_max (P.f_max).` };
+            const sc = F.scenario(ctx, { refs: [STEP(2), SQUARE_Z], zOff: 3, tEnd: 15, feed: 'state' });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            let peak = 0, nAt = 0;
+            for (let k = 0; k < res.t.length; k++) {
+              const u = res.uDemandAll.map((a) => a[k]);
+              peak = Math.max(peak, ...u);
+              if (u.some((v) => v >= fmax * (1 - 1e-6) || v <= fmax * 1e-6)) nAt++;
+            }
+            const pct = (100 * peak / fmax).toFixed(1), eh = Math.abs(F.endErr(res, 1));
+            if (nAt > 2) return { ok: false, msg: `A rotor force sits at its limit for ${nAt} samples, so the input saturates. Slow down.` };
+            if (eh > 0.05) return { ok: false, msg: `h is ${fmt(eh, 3)} m from h_r at t = 15 s.` };
+            if (peak < 0.95 * fmax) return { ok: false, msg: `The largest rotor force is ${pct}% of f_max. You can go faster.` };
+            return { ok: true, msg: `The largest rotor force is ${pct}% of f_max${nAt ? `, at the limit for ${nAt} sample${nAt > 1 ? 's' : ''}` : ''}.` };
           },
-          actions: [{
-            label: 'Try it', run: (v) => {
-              const trh = PD().num(v.trh), trz = PD().num(v.trz);
-              if (!(trh > 0) || !(trz > 0)) return { ok: false, msg: 'Enter two positive rise times.' };
-              ctx.app.setMode('explore');
-              Object.assign(ctx.st.k, { trh, Msep: trz / ctx.st.k.trth });
-              ctx.update(); return null;
-            },
-          }],
           solution: () => {
             const r = fastestNoSat(ctx);
             return [
-              { html: `Bisection on the simulation with the current references. Altitude alone (t<sub>r,z</sub> = 8 s): t<sub>r,h</sub> ≈ ${fmt(r.trh, 3)} s. Lateral alone (t<sub>r,h</sub> = 8 s): t<sub>r,z</sub> ≈ ${fmt(r.trzAlone, 3)} s (M ≈ ${fmt(r.trzAlone / 0.8, 3)}).` },
-              { html: `Both steps start at t = 0, so the loops share the rotor headroom and you cannot have both limits at once. Any pair on the trade-off curve passes, for example t<sub>r,h</sub> ≈ ${fmt(r.trh, 3)} s with t<sub>r,z</sub> ≈ ${fmt(r.trz, 3)} s: with the altitude loop at its limit, the book's lateral design is already the fastest that fits.` },
+              { code: SOL.f8('1.7', true) },
+              { html: `Both reference steps start at t = 0, so the loops share the rotor headroom. Altitude alone (t<sub>r,z</sub> = 8 s): t<sub>r,h</sub> ≈ ${fmt(r.trh, 3)} s is the limit, so t<sub>r,h</sub> = 1.7 s just fits. Lateral alone (t<sub>r,h</sub> = 8 s): t<sub>r,z</sub> ≈ ${fmt(r.trzAlone, 3)} s (M ≈ ${fmt(r.trzAlone / 0.8, 3)}). With the altitude loop at its limit, the book's lateral design (t<sub>r,z</sub> = 8 s) is already the fastest that fits (bisection on the simulation with the default references).` },
               { tex: '\\text{Altitude estimate (Eq. 8.8): } k_{P_h} \\le \\frac{2(f_{max} - F_e/2)}{e_{max}} \\Rightarrow \\omega_{n_h} \\le \\sqrt{\\frac{2f_{max} - F_e}{(m_c+2m_r)\\,e_{max}}}' },
-              { html: 'The altitude limit comes from the room above hover (f<sub>max</sub> − F<sub>e</sub>/2 = 2.64 N per rotor). The lateral loop barely uses the rotors until the outer loop is almost as fast as the inner loop, so saturation alone would let you push M near 1, which breaks the separation assumption. Watch the exact coupled poles (open circles) as M drops.' },
+              { html: 'The altitude limit comes from the room above hover (f<sub>max</sub> − F<sub>e</sub>/2 = 2.64 N per rotor). The lateral loop barely uses the rotors until the outer loop is almost as fast as the inner loop, so saturation alone would let you push M near 1, which breaks the separation assumption. Watch the exact coupled poles (open circles, Explore mode) as M drops.' },
             ];
           },
-        },
+        }),
       ]);
     },
   });
@@ -491,7 +629,7 @@
         ...bind(ctx, 'input'),
       });
       F.viewControl(sec, ctx);
-      if (ctx.S.mode === 'work') workSections(parent, ctx, { kI: true });
+      if (ctx.S.mode === 'work') workSections(parent, ctx, null, { kI: true });
       else {
         knobSections(parent, ctx);
         const ki = section(parent, 'Integrators', 'p. 142');
@@ -769,6 +907,7 @@
   F.register({
     id: 'ch10', num: 10, tab: 'Ch 10', title: 'Digital PID from measured outputs', pages: 'pp. 155–169, F.10 p. 399',
     controller: (ctx, o) => F.makePID(ctx, o),
+    implement: { feed: 'y' },  // Work mode simulates the student's F.10(b) controller
     defaults(sys) {
       const pr = sys.problems.ch10;
       return { comp: 'eq', lat: 'on', view: 'lat', zOff: 3, hOff: 0, deriv: 'dirty', sigma: pr.sigma, antiwindup: 'gate', vbarH: 0.5, vbarZ: 0.5, extra: 'int',
@@ -777,6 +916,12 @@
     simDefaults(sys) { return { ...sys.problems.ch10.sim, refs: [{ type: 'step', amplitude: 2.5 }], mismatch: sys.problems.ch10.mismatch }; },
     gains(ctx) { return ctx.S.mode === 'work' ? pick(ctx.st.w, ALL) : F.designSLC(ctx.pModel, ctx.st.k); },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') {
+        const sec = section(parent, 'Controller', 'F.10 p. 399');
+        F.viewControl(sec, ctx);
+        workSections(parent, ctx, 'F.10(b)', { kI: true });
+        return;
+      }
       const sec = section(parent, 'Implementation', 'p. 157 · Eq. 10.4, p. 163');
       segmented(sec, { label: 'Rates for the D terms', options: [{ value: 'dirty', label: 'dirty derivative of y' }, { value: 'state', label: 'true rates (cheating)' }], ...bind(ctx, 'deriv') });
       slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.5, step: 0.001, sig: 3, ...bind(ctx, 'sigma'), disabled: () => ctx.st.deriv !== 'dirty' });
@@ -785,8 +930,7 @@
       slider(sec, { label: 'v̄<sub>z</sub>', unit: 'm/s', min: 0.01, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'vbarZ'), disabled: () => ctx.st.antiwindup !== 'gate' });
       segmented(sec, { label: 'Extra plot', options: [{ value: 'int', label: 'integrators' }, { value: 'rates', label: 'ḣ estimate' }], ...bind(ctx, 'extra') });
       F.viewControl(sec, ctx);
-      if (ctx.S.mode === 'work') workSections(parent, ctx, { kI: true });
-      else {
+      {
         knobSections(parent, ctx);
         const ki = section(parent, 'Integrators', 'p. 160 · §10.1.3');
         slider(ki, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, ...bind(ctx, 'kIh', () => ctx.st.k) });
@@ -797,6 +941,7 @@
     splane(ctx) { return F.pidSplane(ctx, ctx.gains, { draggable: ctx.S.mode === 'explore' }); },
     onPoleDrag: F.pidDrag,
     extraPlot(ctx, res) {
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       if (ctx.st.extra === 'rates') {
         return { opts: { title: 'ḣ and its estimate', yLabel: 'ḣ [m/s]', unit: 'm/s' }, data: { series: [
           { label: 'controller estimate', y: Array.from(res.extras.hdotHat || []), color: '--series-2', width: 1.5 },
@@ -813,11 +958,11 @@
       const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       const m = ctx.sys.models(ctx.pModel);
       return [
-        { title: 'Nested PID from measured outputs', page: 'p. 155, p. 163–165',
+        { title: 'Nested PID from measured outputs', page: 'p. 155, p. 163–165', answers: 'F.10/b',
           theory: 'F = F_e + k_{P_h}e_h + k_{I_h}\\!\\int e_h - k_{D_h}\\dot h,\\quad \\theta_d = k_{P_z}e_z + k_{I_z}\\!\\int e_z - k_{D_z}\\dot z,\\quad \\tau = k_{P_\\theta}(\\theta_d - \\theta) - k_{D_\\theta}\\dot\\theta' },
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}(y[n] - y[n-1])',
-          numbers: `\\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}`, spoiler: true },
+          numbers: `\\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}`, spoiler: true, answers: 'F.10/b' },
         { title: 'Why the altitude loop needs k_I', page: 'F.10(b), p. 143–145', answers: ['F.4/a', 'F.9/a'],
           theory: '\\text{true weight } (m_c + 2m_r)_{true}\\,g \\ne F_e \\;\\Rightarrow\\; \\text{constant input disturbance},\\quad e_{ss} = \\frac{\\Delta W}{k_{P_h}}\\;(\\text{PD})',
           numbers: `F_e = ${tex(m.Fe)}\\,\\text{N (nominal)}`, spoiler: true,
@@ -839,25 +984,21 @@
             return v.every((x) => Math.abs(x) <= 20.0001) ? { ok: true, msg: `m_c ${fmt(v[0], 3)}%, J_c ${fmt(v[1], 3)}%, d ${fmt(v[2], 3)}%, μ ${fmt(v[3], 3)}%.` } : { ok: false, msg: 'Keep every parameter within ±20%.' };
           },
         },
-        {
-          id: 'b1', title: '(b) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
-          inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
-          check: (v) => PD().checkNumbers(v, { a: 0.09 / 0.11, b: 2 / 0.11 }, {}),
-          solution: () => [{ tex: '\\frac{0.09}{0.11} = 0.8182,\\quad \\frac{2}{0.11} = 18.18' }],
-        },
-        {
-          id: 'b2', title: '(b) No steady-state error with α = 0.2',
-          html: 'Checks the current simulation (mismatch in the left panel): |h<sub>r</sub> − h| and |z<sub>r</sub> − z| at t<sub>end</sub> both under 1 cm, using only measured outputs.',
-          check: () => {
-            if (ctx.st.deriv !== 'dirty') return { ok: false, msg: 'Use the dirty derivative (measured outputs only).' };
-            const res = ctx.app.result(), n = res.t.length - 1;
-            const eh = Math.abs(res.rAll[0][n] - res.yAll[1][n]), ez = Math.abs(res.rAll[1][n] - res.yAll[0][n]);
-            return { ok: eh < 0.01 && ez < 0.01, msg: `|e_h| = ${fmt(eh, 3)} m, |e_z| = ${fmt(ez, 3)} m at t_end.` };
+        WB.myCtrl.part(ctx, {
+          id: 'b', title: '(b) Implement the nested loops of F.8 with dirty derivatives (σ = 0.05); tune the integrators', seed: ['F.8/f', 'F.8/e'],
+          html: `From here on your controller's <code>update(r, y)</code> receives only the measured outputs y = [[z], [h], [θ]], not the state. The check runs a 2 m altitude step and a z<sub>r</sub> step to 5.5 m for 80 s on a plant that differs from the model by ${Object.entries(prob.mismatch).map(([k, v]) => `${ctx.sys.params.find((q) => q.key === k).label} ${v > 0 ? '+' : ''}${v}%`).join(', ')}: |h<sub>r</sub> − h| and |z<sub>r</sub> − z| at the end must both be under 1 cm.`,
+          check: async (code) => {
+            const sc = F.scenario(ctx, { refs: [STEP(2), STEP(2.5)], zOff: 3, tEnd: 80, mismatch: prob.mismatch });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const eh = Math.abs(F.endErr(res, 1)), ez = Math.abs(F.endErr(res, 0));
+            return { ok: eh < 0.01 && ez < 0.01, msg: `|h_r − h| = ${fmt(eh, 3)} m, |z_r − z| = ${fmt(ez, 3)} m at t = 80 s.` };
           },
           solution: () => [
-            { html: `The F.8 gains plus k<sub>I<sub>h</sub></sub> = ${prob.kIh} and k<sub>I<sub>z</sub></sub> = ${prob.kIz}, σ = 0.05, and anti-windup gates at v̄ = 0.5 m/s. Both integrator gains are inside the critical gains from P.6 (0.044 and −0.0030), but they move the PD poles more than P.6's 10% guideline (which allows only about k<sub>I<sub>h</sub></sub> ≤ 0.0037, |k<sub>I<sub>z</sub></sub>| ≤ 0.00026). That is needed here: the soft F.8 altitude loop sags meters under a 20% mass error, and with k<sub>I<sub>h</sub></sub> = 0.003 the altitude error is still about 1.6 m at 80 s. A tighter gate (e.g. 0.1 m/s) keeps the integrator off during the sag. The z loop is type 1, so its step error is zero even without k<sub>I<sub>z</sub></sub>; a small k<sub>I<sub>z</sub></sub> adds a slow closed-loop pole, and with |k<sub>I<sub>z</sub></sub>| = 0.0002 z is still 3 cm short at 80 s.` },
+            { code: SOL.f10 },
+            { html: `The F.8 gains plus k<sub>I<sub>h</sub></sub> = ${prob.kIh} and k<sub>I<sub>z</sub></sub> = ${prob.kIz}, σ = 0.05, and anti-windup that integrates only while |ẏ| < 0.5 m/s (the B.10 listing pattern, pp. 163–165). Both integrator gains are inside the critical gains from P.6 (0.044 and −0.0030), but they move the PD poles more than P.6's 10% guideline (which allows only about k<sub>I<sub>h</sub></sub> ≤ 0.0037, |k<sub>I<sub>z</sub></sub>| ≤ 0.00026). That is needed here: the soft F.8 altitude loop sags meters under a 20% mass error, and with k<sub>I<sub>h</sub></sub> = 0.003 the altitude error is still about 1.6 m at 80 s. A faster altitude loop (your F.8(f) tuning) sags much less. The z loop is type 1, so its step error is zero even without k<sub>I<sub>z</sub></sub>; a small k<sub>I<sub>z</sub></sub> adds a slow closed-loop pole.` },
           ],
-        },
+        }),
       ]);
     },
   });

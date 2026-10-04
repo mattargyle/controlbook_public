@@ -227,6 +227,7 @@ def _closed_loop(a):
         return e
     pns = _namespace(compile(a['plant'], '<workbench plant>', 'exec'), a['plantParams'])
     f, h = pns['f'], pns['h']
+    pP = pns['P']  # the plant's P.t is the time of the current step (for non-input disturbances)
     lims, Ts, feed = a['uLimit'], a['Ts'], a.get('feed', 'y')
     m = len(lims)
     rs, ds, nz = a['r'], a.get('d'), a.get('noise')
@@ -237,6 +238,7 @@ def _closed_loop(a):
         return np.asarray(f(xx, u), dtype=float).reshape(n, 1)
     for k in range(len(rs)):
         t = k * Ts
+        pP.t = t
         y = [float(v) for v in np.asarray(h(x), dtype=float).flatten()]
         ym = [v + (nz[k][i] if nz else 0.0) for i, v in enumerate(y)]
         r = rs[k] if not isinstance(rs[k], list) else np.array(rs[k], dtype=float).reshape(-1, 1)

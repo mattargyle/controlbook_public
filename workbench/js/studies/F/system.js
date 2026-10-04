@@ -12,6 +12,36 @@ WB.systems = WB.systems || {};
   const RAD = 180 / Math.PI;
   const NO_EXT = { Fwind: 0, wind: 0, ah: 0 };
 
+  // The plant for student controllers (see plantPy below). Same equations as f.
+  const PLANT_PY = `import math
+
+# disturbances (zero unless the run sets them), switched on at t >= wb_tDist
+_D = {k: float(getattr(P, 'wb_' + k, 0.0)) for k in ('dF', 'dtau', 'Fwind', 'wind', 'ah')}
+_tDist = float(getattr(P, 'wb_tDist', 0.0))
+_M = P.mc + 2 * P.mr
+_J = P.Jc + 2 * P.mr * P.d**2
+
+
+def h(state):
+    return [state[0][0], state[1][0], state[2][0]]
+
+
+def f(state, u):
+    zd, hd, th, thd = state[3][0], state[4][0], state[2][0], state[5][0]
+    fr, fl = float(u[0][0]), float(u[1][0])
+    Fw = wind = ah = 0.0
+    if getattr(P, 't', 0.0) >= _tDist - 1e-9:   # P.t: time of the current step
+        if _D['dF'] or _D['dtau']:
+            fr = min(max(fr + _D['dF'] / 2 + _D['dtau'] / (2 * P.d), 0.0), P.f_max)
+            fl = min(max(fl + _D['dF'] / 2 - _D['dtau'] / (2 * P.d), 0.0), P.f_max)
+        Fw, wind, ah = _D['Fwind'], _D['wind'], _D['ah']
+    F = fr + fl
+    return np.array([[zd + wind], [hd], [thd],
+                     [(-F * math.sin(th) - P.mu * zd + Fw) / _M],
+                     [(-_M * P.g + F * math.cos(th)) / _M + ah],
+                     [P.d * (fr - fl) / _J]])
+`;
+
   // Total mass and roll inertia (rotors are point masses at ±d).
   const mass = (p) => p.mc + 2 * p.mr;
   const inertia = (p) => p.Jc + 2 * p.mr * p.d * p.d;
@@ -91,6 +121,22 @@ WB.systems = WB.systems || {};
     },
     h(x) { return [x[0], x[1], x[2]]; },
     uLimit(p) { return [[0, p.f_max], [0, p.f_max]]; },
+
+    // Student controllers (WB.myCtrl, Ch 7–18): the same plant as Python, u = (f_r, f_ℓ)
+    // a 2×1 column. The disturbances come in as plant parameters (wb_dF, wb_dtau,
+    // wb_Fwind, wb_wind, wb_ah, switched on when P.t ≥ wb_tDist; common.js
+    // plantExtras). d_F, d_τ are mixed with the true d and saturated with u, as in
+    // common.js simulate.
+    plantPy: PLANT_PY,
+    py: {
+      r: 'r', rDoc: 'r = np.array([[h_r], [z_r]]): the altitude and position references',
+      y: ['z', 'h', 'theta'], x: ['z', 'h', 'theta', 'zdot', 'hdot', 'thetadot'],
+      u: 'u', uZero: 'np.array([0.0, 0.0])  # rotor forces [f_r, f_l]',
+    },
+    // Initial state as P.z0, ..., P.thetadot0 (as VTOLParam.py would define them).
+    pyParams(x0) { return { z0: x0[0], h0: x0[1], theta0: x0[2], zdot0: x0[3], hdot0: x0[4], thetadot0: x0[5] }; },
+    // Second parameter set for the controller checks: every loop's gains change by 25% or more.
+    altParams(p) { return { ...p, mc: p.mc * 0.6, Jc: p.Jc * 1.5, d: p.d * 0.8, mu: p.mu * 1.5 }; },
 
     // (F, τ) → (f_r, f_ℓ) with the controller's (nominal) d.
     mix(F, tau, p) { return [F / 2 + tau / (2 * p.d), F / 2 - tau / (2 * p.d)]; },

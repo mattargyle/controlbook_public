@@ -6,6 +6,11 @@
 // workbench uses the block structure L = [[L_z1, 0], [0, L_θ1], [L_z2, 0], [0, L_θ2]]
 // (θ innovation feeds θ̂, z innovation feeds ẑ). Then A − LC is block triangular
 // and eig(A − LC) = eig(z block) ∪ eig(θ block): two SISO designs.
+//
+// Work mode: the time plots run the student's own Python controller (F.11(e),
+// F.12(a, c), F.13(c), F.14(b); WB.myCtrl). There are no gain sliders or
+// implementation toggles; checks compare with the design where the problem fixes
+// it and check behaviour (specs, tracking, estimates) where the student tunes.
 (function () {
   const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
@@ -15,6 +20,248 @@
   const { tex, texMat, texPole, fmt, fmtPole } = M;
   const PD = () => WB.pd;
   const D = () => WB.design;
+
+  // Solution controllers (the reference designs: F.8 pole pairs, p_I = −0.4,
+  // observers 10× faster, disturbance poles −1, −1, −10).
+  const SOL = {
+    f11: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        M = P.mc + 2 * P.mr
+        J = P.Jc + 2 * P.mr * P.d**2
+        a = P.mu / M
+        # F.6 models: x_lon = (h, hdot), x_lat = (z, theta, zdot, thetadot)
+        A_lon = np.array([[0.0, 1.0], [0.0, 0.0]])
+        B_lon = np.array([[0.0], [1 / M]])
+        C_lon = np.array([[1.0, 0.0]])
+        A_lat = np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.0, -P.g, -a, 0.0], [0.0, 0.0, 0.0, 0.0]])
+        B_lat = np.array([[0.0], [0.0], [0.0], [1 / J]])
+        C_z = np.array([[1.0, 0.0, 0.0, 0.0]])
+        # (a) poles: the F.8 pairs (t_r,h = 8 s, t_r,theta = 0.8 s, t_r,z = 8 s, zeta = 0.707)
+        zeta = 0.707
+        pair = lambda tr: np.roots([1, 2 * zeta * 2.2 / tr, (2.2 / tr)**2])
+        self.K_lon = cnt.place(A_lon, B_lon, pair(8.0))
+        self.K_lat = cnt.place(A_lat, B_lat, np.concatenate([pair(8.0), pair(0.8)]))
+        # (d) reference gains for unity DC gain (Eq. 11.35)
+        self.kr_lon = -1.0 / (C_lon @ np.linalg.inv(A_lon - B_lon @ self.K_lon) @ B_lon)[0, 0]
+        self.kr_lat = -1.0 / (C_z @ np.linalg.inv(A_lat - B_lat @ self.K_lat) @ B_lat)[0, 0]
+        self.Fe = M * P.g
+        self.unmix = np.linalg.inv(np.array([[1.0, 1.0], [P.d, -P.d]]))
+
+    def update(self, r, x):
+        h_r, z_r = r[0, 0], r[1, 0]
+        z, h, theta, zdot, hdot, thetadot = x[:, 0]
+        x_lon = np.array([[h], [hdot]])
+        x_lat = np.array([[z], [theta], [zdot], [thetadot]])
+        F = self.Fe - (self.K_lon @ x_lon)[0, 0] + self.kr_lon * h_r
+        tau = -(self.K_lat @ x_lat)[0, 0] + self.kr_lat * z_r
+        return np.clip(self.unmix @ np.array([F, tau]), 0, P.f_max)
+`,
+    f12: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        M = P.mc + 2 * P.mr
+        J = P.Jc + 2 * P.mr * P.d**2
+        a = P.mu / M
+        A_lon = np.array([[0.0, 1.0], [0.0, 0.0]])
+        B_lon = np.array([[0.0], [1 / M]])
+        C_lon = np.array([[1.0, 0.0]])
+        A_lat = np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.0, -P.g, -a, 0.0], [0.0, 0.0, 0.0, 0.0]])
+        B_lat = np.array([[0.0], [0.0], [0.0], [1 / J]])
+        C_z = np.array([[1.0, 0.0, 0.0, 0.0]])
+        # augmented with x_I = integral of (r - y) (Eq. 12.1)
+        aug = lambda A, B, C: (np.block([[A, np.zeros((A.shape[0], 1))], [-C, np.zeros((1, 1))]]), np.vstack([B, [[0.0]]]))
+        A1_lon, B1_lon = aug(A_lon, B_lon, C_lon)
+        A1_lat, B1_lat = aug(A_lat, B_lat, C_z)
+        zeta = 0.707
+        pair = lambda tr: np.roots([1, 2 * zeta * 2.2 / tr, (2.2 / tr)**2])
+        p_I_h, p_I_z = -0.4, -0.4
+        K1 = cnt.place(A1_lon, B1_lon, np.concatenate([pair(8.0), [p_I_h]]))
+        self.K_lon, self.ki_lon = K1[:, 0:2], K1[0, 2]
+        K1 = cnt.place(A1_lat, B1_lat, np.concatenate([pair(8.0), pair(0.8), [p_I_z]]))
+        self.K_lat, self.ki_lat = K1[:, 0:4], K1[0, 4]
+        self.Fe = M * P.g
+        self.unmix = np.linalg.inv(np.array([[1.0, 1.0], [P.d, -P.d]]))
+        self.int_h = 0.0
+        self.int_z = 0.0
+        self.e_h_prev = 0.0
+        self.e_z_prev = 0.0
+
+    def forces(self, x_lon, x_lat, int_h, int_z):
+        F = self.Fe - (self.K_lon @ x_lon)[0, 0] - self.ki_lon * int_h
+        tau = -(self.K_lat @ x_lat)[0, 0] - self.ki_lat * int_z
+        return self.unmix @ np.array([F, tau])
+
+    def update(self, r, x):
+        h_r, z_r = r[0, 0], r[1, 0]
+        z, h, theta, zdot, hdot, thetadot = x[:, 0]
+        x_lon = np.array([[h], [hdot]])
+        x_lat = np.array([[z], [theta], [zdot], [thetadot]])
+        e_h, e_z = h_r - h, z_r - z
+        int_h = self.int_h + P.Ts / 2 * (e_h + self.e_h_prev)
+        int_z = self.int_z + P.Ts / 2 * (e_z + self.e_z_prev)
+        u = self.forces(x_lon, x_lat, int_h, int_z)
+        # anti-windup: hold both integrators while a rotor saturates
+        if np.all(u >= 0) and np.all(u <= P.f_max):
+            self.int_h, self.int_z = int_h, int_z
+        else:
+            u = self.forces(x_lon, x_lat, self.int_h, self.int_z)
+        self.e_h_prev, self.e_z_prev = e_h, e_z
+        return np.clip(u, 0, P.f_max)
+`,
+    f13: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        M = P.mc + 2 * P.mr
+        J = P.Jc + 2 * P.mr * P.d**2
+        a = P.mu / M
+        A_lon = np.array([[0.0, 1.0], [0.0, 0.0]])
+        B_lon = np.array([[0.0], [1 / M]])
+        C_lon = np.array([[1.0, 0.0]])
+        A_lat = np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.0, -P.g, -a, 0.0], [0.0, 0.0, 0.0, 0.0]])
+        B_lat = np.array([[0.0], [0.0], [0.0], [1 / J]])
+        C_lat = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])   # y_lat = (z, theta)
+        # F.12 controller: integrators on h and z
+        aug = lambda A, B, C: (np.block([[A, np.zeros((A.shape[0], 1))], [-C, np.zeros((1, 1))]]), np.vstack([B, [[0.0]]]))
+        A1, B1 = aug(A_lon, B_lon, C_lon)
+        zeta = 0.707
+        pair = lambda wn: np.roots([1, 2 * zeta * wn, wn**2])
+        wn_h, wn_th, wn_z = 2.2 / 8.0, 2.2 / 0.8, 2.2 / 8.0
+        K1 = cnt.place(A1, B1, np.concatenate([pair(wn_h), [-0.4]]))
+        self.K_lon, self.ki_lon = K1[:, 0:2], K1[0, 2]
+        A1, B1 = aug(A_lat, B_lat, C_lat[0:1, :])
+        K1 = cnt.place(A1, B1, np.concatenate([pair(wn_z), pair(wn_th), [-0.4]]))
+        self.K_lat, self.ki_lat = K1[:, 0:4], K1[0, 4]
+        # Observers, each pair 10x faster than its controller pair:
+        # L = place(A^T, C^T, q)^T (Eq. 13.16); the lateral L is 4x2 (outputs z, theta).
+        L_lon = cnt.place(A_lon.T, C_lon.T, pair(10 * wn_h)).T
+        L_lat = cnt.place(A_lat.T, C_lat.T, np.concatenate([pair(10 * wn_z), pair(10 * wn_th)])).T
+        self.obs = [(A_lon, B_lon, C_lon, L_lon), (A_lat, B_lat, C_lat, L_lat)]
+        self.Fe = M * P.g
+        self.mix = np.array([[1.0, 1.0], [P.d, -P.d]])      # (F, tau) = mix (f_r, f_l)
+        self.unmix = np.linalg.inv(self.mix)
+        self.xhat_lon = np.zeros((2, 1))
+        self.xhat_lat = np.zeros((4, 1))
+        self.u_prev = np.array([self.Fe / 2, self.Fe / 2])  # last rotor forces
+        self.int_h = self.int_z = 0.0
+        self.e_h_prev = self.e_z_prev = 0.0
+
+    def update(self, r, y):
+        h_r, z_r = r[0, 0], r[1, 0]
+        # observers, driven by the last (saturated) input: F~ = F - F_e, tau
+        F, tau = self.mix @ self.u_prev
+        (A, B, C, L), (A2, B2, C2, L2) = self.obs
+        self.xhat_lon = self.rk4(lambda x: A @ x + B * (F - self.Fe) + L @ (y[1:2] - C @ x), self.xhat_lon)
+        self.xhat_lat = self.rk4(lambda x: A2 @ x + B2 * tau + L2 @ (y[[0, 2]] - C2 @ x), self.xhat_lat)
+        x_lon, x_lat = self.xhat_lon, self.xhat_lat
+        # F.12 control law on the estimates, with anti-windup
+        e_h, e_z = h_r - x_lon[0, 0], z_r - x_lat[0, 0]
+        int_h = self.int_h + P.Ts / 2 * (e_h + self.e_h_prev)
+        int_z = self.int_z + P.Ts / 2 * (e_z + self.e_z_prev)
+        u = self.forces(x_lon, x_lat, int_h, int_z)
+        if np.all(u >= 0) and np.all(u <= P.f_max):
+            self.int_h, self.int_z = int_h, int_z
+        else:
+            u = self.forces(x_lon, x_lat, self.int_h, self.int_z)
+        self.e_h_prev, self.e_z_prev = e_h, e_z
+        u = np.clip(u, 0, P.f_max)
+        self.u_prev = u
+        # x_hat in the order of the state: (z, h, theta, zdot, hdot, thetadot)
+        x_hat = np.array([x_lat[0, 0], x_lon[0, 0], x_lat[1, 0], x_lat[2, 0], x_lon[1, 0], x_lat[3, 0]])
+        return u, x_hat
+
+    def forces(self, x_lon, x_lat, int_h, int_z):
+        F = self.Fe - (self.K_lon @ x_lon)[0, 0] - self.ki_lon * int_h
+        tau = -(self.K_lat @ x_lat)[0, 0] - self.ki_lat * int_z
+        return self.unmix @ np.array([F, tau])
+
+    def rk4(self, f, x):
+        F1 = f(x); F2 = f(x + P.Ts / 2 * F1); F3 = f(x + P.Ts / 2 * F2); F4 = f(x + P.Ts * F3)
+        return x + P.Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+`,
+    f14: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        M = P.mc + 2 * P.mr
+        J = P.Jc + 2 * P.mr * P.d**2
+        a = P.mu / M
+        A_lon = np.array([[0.0, 1.0], [0.0, 0.0]])
+        B_lon = np.array([[0.0], [1 / M]])
+        C_lon = np.array([[1.0, 0.0]])
+        A_lat = np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.0, -P.g, -a, 0.0], [0.0, 0.0, 0.0, 0.0]])
+        B_lat = np.array([[0.0], [0.0], [0.0], [1 / J]])
+        C_lat = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])   # y_lat = (z, theta)
+        # F.12 controller: integrators on h and z
+        aug = lambda A, B, C: (np.block([[A, np.zeros((A.shape[0], 1))], [-C, np.zeros((1, 1))]]), np.vstack([B, [[0.0]]]))
+        A1, B1 = aug(A_lon, B_lon, C_lon)
+        zeta = 0.707
+        pair = lambda wn: np.roots([1, 2 * zeta * wn, wn**2])
+        wn_h, wn_th, wn_z = 2.2 / 8.0, 2.2 / 0.8, 2.2 / 8.0
+        K1 = cnt.place(A1, B1, np.concatenate([pair(wn_h), [-0.4]]))
+        self.K_lon, self.ki_lon = K1[:, 0:2], K1[0, 2]
+        A1, B1 = aug(A_lat, B_lat, C_lat[0:1, :])
+        K1 = cnt.place(A1, B1, np.concatenate([pair(wn_z), pair(wn_th), [-0.4]]))
+        self.K_lat, self.ki_lat = K1[:, 0:4], K1[0, 4]
+        # Disturbance observers (Sec. 14.2): d_F at the force input; d_z, a force in
+        # zddot (it also absorbs a wind speed), and d_tau at the torque input.
+        Bd_lat = np.array([[0.0, 0.0], [0.0, 0.0], [1 / M, 0.0], [0.0, 1 / J]])
+        A2_lon = np.block([[A_lon, B_lon], [np.zeros((1, 3))]])
+        A2_lat = np.block([[A_lat, Bd_lat], [np.zeros((2, 6))]])
+        B2_lon, B2_lat = np.vstack([B_lon, [[0.0]]]), np.vstack([B_lat, np.zeros((2, 1))])
+        C2_lon, C2_lat = np.hstack([C_lon, [[0.0]]]), np.hstack([C_lat, np.zeros((2, 2))])
+        L_lon = cnt.place(A2_lon.T, C2_lon.T, np.concatenate([pair(10 * wn_h), [-1.0]])).T
+        L_lat = cnt.place(A2_lat.T, C2_lat.T, np.concatenate([pair(10 * wn_z), pair(10 * wn_th), [-1.0, -10.0]])).T
+        self.obs = [(A2_lon, B2_lon, C2_lon, L_lon), (A2_lat, B2_lat, C2_lat, L_lat)]
+        self.Fe = M * P.g
+        self.mix = np.array([[1.0, 1.0], [P.d, -P.d]])      # (F, tau) = mix (f_r, f_l)
+        self.unmix = np.linalg.inv(self.mix)
+        self.xhat_lon = np.zeros((3, 1))   # (h, hdot, d_F)
+        self.xhat_lat = np.zeros((6, 1))   # (z, theta, zdot, thetadot, d_z, d_tau)
+        self.u_prev = np.array([self.Fe / 2, self.Fe / 2])  # last rotor forces
+        self.int_h = self.int_z = 0.0
+        self.e_h_prev = self.e_z_prev = 0.0
+
+    def update(self, r, y):
+        h_r, z_r = r[0, 0], r[1, 0]
+        # observers, driven by the last (saturated) input: F~ = F - F_e, tau
+        F, tau = self.mix @ self.u_prev
+        (A, B, C, L), (A2, B2, C2, L2) = self.obs
+        self.xhat_lon = self.rk4(lambda x: A @ x + B * (F - self.Fe) + L @ (y[1:2] - C @ x), self.xhat_lon)
+        self.xhat_lat = self.rk4(lambda x: A2 @ x + B2 * tau + L2 @ (y[[0, 2]] - C2 @ x), self.xhat_lat)
+        x_lon, x_lat = self.xhat_lon, self.xhat_lat
+        # F.12 control law on the estimates, minus d_hat, with anti-windup
+        e_h, e_z = h_r - x_lon[0, 0], z_r - x_lat[0, 0]
+        int_h = self.int_h + P.Ts / 2 * (e_h + self.e_h_prev)
+        int_z = self.int_z + P.Ts / 2 * (e_z + self.e_z_prev)
+        u = self.forces(x_lon, x_lat, int_h, int_z)
+        if np.all(u >= 0) and np.all(u <= P.f_max):
+            self.int_h, self.int_z = int_h, int_z
+        else:
+            u = self.forces(x_lon, x_lat, self.int_h, self.int_z)
+        self.e_h_prev, self.e_z_prev = e_h, e_z
+        u = np.clip(u, 0, P.f_max)
+        self.u_prev = u
+        # x_hat in the order of the state: (z, h, theta, zdot, hdot, thetadot)
+        x_hat = np.array([x_lat[0, 0], x_lon[0, 0], x_lat[1, 0], x_lat[2, 0], x_lon[1, 0], x_lat[3, 0]])
+        d_hat = np.array([x_lon[2, 0], x_lat[4, 0], x_lat[5, 0]])   # (d_F, d_z, d_tau)
+        return u, x_hat, d_hat
+
+    def forces(self, x_lon, x_lat, int_h, int_z):
+        # subtract the matched disturbance estimates (d_z is not matched to tau;
+        # removing the estimator bias lets the z integrator cancel it)
+        F = self.Fe - (self.K_lon @ x_lon[0:2])[0, 0] - self.ki_lon * int_h - x_lon[2, 0]
+        tau = -(self.K_lat @ x_lat[0:4])[0, 0] - self.ki_lat * int_z - x_lat[5, 0]
+        return self.unmix @ np.array([F, tau])
+
+    def rk4(self, f, x):
+        F1 = f(x); F2 = f(x + P.Ts / 2 * F1); F3 = f(x + P.Ts / 2 * F2); F4 = f(x + P.Ts * F3)
+        return x + P.Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+`,
+  };
 
   // ----------------------------------------------------------- models --
   function sub(p) {
@@ -201,14 +448,6 @@
     sf: { lon: ['Kh1', 'Kh2', 'krh'], lat: ['Kz1', 'Kz2', 'Kz3', 'Kz4', 'krz'] },
     sfi: { lon: ['Kh1', 'Kh2', 'kIh'], lat: ['Kz1', 'Kz2', 'Kz3', 'Kz4', 'kIz'] },
   };
-  const SPEC = {
-    Kh1: ['K<sub>h,1</sub> (h)', 0, 2], Kh2: ['K<sub>h,2</sub> (ḣ)', 0, 3], krh: ['k<sub>r,h</sub>', 0, 2], kIh: ['k<sub>I,h</sub>', -1, 0],
-    Kz1: ['K<sub>z,1</sub> (z)', -0.5, 0.5], Kz2: ['K<sub>z,2</sub> (θ)', 0, 2], Kz3: ['K<sub>z,3</sub> (ż)', -1, 1], Kz4: ['K<sub>z,4</sub> (θ̇)', 0, 1], krz: ['k<sub>r,z</sub>', -0.5, 0.5], kIz: ['k<sub>I,z</sub>', -0.5, 0.5],
-    Lh1: ['L<sub>h,1</sub>', 0, 20], Lh2: ['L<sub>h,2</sub>', 0, 100], Ldh: ['L<sub>d,h</sub>', 0, 200],
-    Lz1: ['L<sub>z,1</sub>', 0, 20], Lz2: ['L<sub>z,2</sub>', -50, 50], Ldz: ['L<sub>d,z</sub>', -200, 200],
-    Lt1: ['L<sub>θ,1</sub>', 0, 200], Lt2: ['L<sub>θ,2</sub>', 0, 5000], Ldt: ['L<sub>d,θ</sub>', 0, 2000],
-  };
-  const wSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, SPEC, keys);
   // Work-mode gains (flat st.w) → gain object
   function fromW(w, level) {
     const g = { Kh: [w.Kh1, w.Kh2], Kz: [w.Kz1, w.Kz2, w.Kz3, w.Kz4], krh: w.krh, krz: w.krz, kIh: w.kIh, kIz: w.kIz };
@@ -278,8 +517,11 @@
     const mk = [];
     const ol = view === 'lon' ? L.eig(S.lon.A) : L.eig(S.lat.A);
     if (F.showsAnswer(ctx, olKey(view))) ol.forEach((q) => mk.push({ ...q, kind: 'ol', label: 'open-loop pole' }));
-    cl[view].forEach((q) => mk.push({ ...q, kind: 'cl', label: `controller pole (${view === 'lon' ? 'altitude' : 'lateral'})` }));
-    ob[view].forEach((q) => mk.push({ ...q, kind: 'obs', label: 'observer pole', noFit: Math.hypot(q.re, q.im) > 8 }));
+    // Work mode has no gains: the plots run the student's own controller.
+    if (ctx.S.mode === 'explore') {
+      cl[view].forEach((q) => mk.push({ ...q, kind: 'cl', label: `controller pole (${view === 'lon' ? 'altitude' : 'lateral'})` }));
+      ob[view].forEach((q) => mk.push({ ...q, kind: 'obs', label: 'observer pole', noFit: Math.hypot(q.re, q.im) > 8 }));
+    }
     if (ctx.S.mode === 'work' && ctx.app.isSolved('F.11/a')) {
       const P = ctrlPoles(ctx.st.k);
       (view === 'lon' ? P.lon : [...P.outer, ...P.inner]).forEach((q) => mk.push({ ...q, kind: 'target', label: 'target pole (spec)' }));
@@ -316,6 +558,9 @@
     return F.register(Object.assign({
       id: `ch${num}`, num, tab: `Ch ${num}`, title, pages, level,
       controller(ctx, o) { return makeSS(ctx, o); },
+      // Work mode simulates the student's controller (WB.myCtrl): F.11 and F.12 feed
+      // back the state, as in the book; F.13 and F.14 get only y = (z, h, θ).
+      implement: { feed: level === 'sf' || level === 'sfi' ? 'state' : 'y', linear: false },
       gains(ctx) { return ctx.S.mode === 'explore' ? design(ctx.pModel, ctx.st.k, level) : fromW(ctx.st.w, level); },
       splane,
       targets(ctx) { return { tr: ctx.st.k.trh }; },
@@ -324,18 +569,32 @@
   function viewSeg(parent, ctx) {
     segmented(parent, { label: 's-plane shows', options: [{ value: 'lon', label: 'altitude' }, { value: 'lat', label: 'lateral' }], ...bind(ctx, 'view') });
   }
-  function workControls(parent, ctx, level) {
-    const keys = KEYS[level === 'sf' ? 'sf' : 'sfi'];
-    const s1 = section(parent, 'Altitude gains', 'p. 173');
-    wSliders(s1, ctx, keys.lon);
-    const s2 = section(parent, 'Lateral gains', 'p. 173');
-    wSliders(s2, ctx, keys.lat);
-    if (level === 'obs' || level === 'dobs') {
-      const s3 = section(parent, 'Observer gains', 'p. 216 · Eq. 13.3');
-      wSliders(s3, ctx, level === 'dobs' ? ['Lh1', 'Lh2', 'Ldh', 'Lz1', 'Lz2', 'Ldz', 'Lt1', 'Lt2', 'Ldt'] : ['Lh1', 'Lh2', 'Lz1', 'Lz2', 'Lt1', 'Lt2']);
-      s3.append(el('p', { class: 'muted small', text: 'Lateral L = [[L_z1, 0], [0, L_θ1], [L_z2, 0], [0, L_θ2]]: the z innovation corrects ẑ and ż̂, the θ innovation corrects θ̂ and θ̇̂.' }));
-    }
+  // Work-mode control panel: the plots show the student's controller, named by `part`.
+  function workControls(parent, ctx, part, extra) {
+    const sec = section(parent, 'Plots', 'F.11–F.14');
+    viewSeg(sec, ctx);
+    if (extra) segmented(sec, { label: 'Extra plot', options: extra, ...bind(ctx, 'extra') });
+    F.workBanner(parent, ctx, part);
   }
+
+  // The workbench's controller at `level` with the reference design on a check run
+  // (the reference for WB.myCtrl checks).
+  const LEVEL_CH = { sf: 'ch11', sfi: 'ch12', obs: 'ch13', dobs: 'ch14' };
+  function refSS(ctx, sc, level, st = {}) {
+    const rc = WB.myCtrl.refCtx(ctx, sc, { chapter: WB.studies.F.chapters[LEVEL_CH[level]] });
+    rc.st = { ...ctx.st, antiwindup: 'clamp', dobs: true, ...st };
+    rc.gains = design(sc.params, knobs(ctx.sys), level);
+    return WB.myCtrl.reference(ctx, sc, makeSS(rc));
+  }
+  const STEP = (amplitude) => ({ type: 'step', amplitude, tStep: 0 });
+  // F.11(e): the 10–90% rise time of ζ = 1 poles at ω_n = 2.2/8 (the slowest the
+  // F.11(a) inequalities allow) is 3.36/ω_n = 12.2 s.
+  const TR11 = 12.5;
+  // F.12(a) windup test: f_max lowered to just above hover, so a 10 m climb keeps a
+  // rotor at its limit for seconds and an integrator that keeps integrating winds up.
+  const WINDUP = { fmax: 7.45, step: 10, os: 0.5, tEnd: 30 };
+  const misText = (ctx, mis) => Object.entries(mis).map(([k, v]) => `${ctx.sys.params.find((q) => q.key === k).label} ${v > 0 ? '+' : ''}${v}%`).join(', ');
+  const fm = (v) => `${fmt(v, 3)} m`;
 
   // Satisfies "ζ ≥ ζ_spec and ω_n ≥ ω_n,spec" (F.11a) for every pole.
   function meetsSpec(poles, wn, zeta) {
@@ -351,11 +610,11 @@
     defaults(sys) { return { view: 'lat', zOff: 3, hOff: 0, k: knobs(sys), w: slowW(sys, 'sf') }; },
     simDefaults(sys) { return sys.problems.ch11.sim; },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'F.11(e)'); return; }
       const sec = section(parent, 'u = −Kx + k_r r (per loop)', 'p. 183 · Eq. 11.38');
       viewSeg(sec, ctx);
       sec.append(el('p', { class: 'muted small', text: 'F = F_e − K_h(h, ḣ) + k_r,h h_r;  τ = −K_z(z, θ, ż, θ̇) + k_r,z z_r. The true state is fed back.' }));
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'sf'); knobControls(parent, ctx, 'sf', 'Specs'); }
-      else { knobControls(parent, ctx, 'sf', 'Design'); gainReadout(section(parent, 'Gains', 'p. 182'), ctx, 'sf'); }
+      knobControls(parent, ctx, 'sf', 'Design'); gainReadout(section(parent, 'Gains', 'p. 182'), ctx, 'sf');
     },
     math(ctx) {
       const S = sub(ctx.pModel), d = design(ctx.pModel, ctx.st.k, 'sf');
@@ -371,7 +630,7 @@
         { title: 'Gains for the desired poles', page: 'F.11(d) p. 399', answers: ['F.11/d', 'F.11/d2'],
           theory: '\\text{each loop has a free integrator, so } k_{r,h} = K_{h,1},\\; k_{r,z} = K_{z,1}',
           numbers: `K_h = ${texMat([d.Kh])},\\; k_{r,h} = ${tex(d.krh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{r,z} = ${tex(d.krz)}` },
-        { title: 'Tuning (F.11e)', page: 'p. 110–113',
+        { title: 'Tuning (F.11e)', page: 'p. 110–113', answers: 'F.11/e',
           theory: 't_r \\approx \\frac{2.2}{\\omega_n}:\\; \\text{move poles farther from the origin to speed up};\\quad M_p = e^{-\\zeta\\pi/\\sqrt{1-\\zeta^2}}:\\; \\text{raise } \\zeta \\text{ (smaller angle from the real axis) to cut overshoot}' },
       ];
     },
@@ -422,7 +681,6 @@
             const want = kr(S().lon.A, S().lon.B, S().lon.C, K);
             return M.close(k, want) ? { ok: true, msg: `Poles ${poles.map((q) => fmtPole(q)).join(', ')}.` } : { ok: false, msg: 'K is fine; check k_r.' };
           },
-          actions: [{ label: 'Use my gains', run: (v) => { const vals = [num(v.K1), num(v.K2), num(v.kr)]; if (vals.some((x) => x === null)) return { ok: false, msg: 'Fill in all three.' }; ctx.app.setMode('work'); [ctx.st.w.Kh1, ctx.st.w.Kh2, ctx.st.w.krh] = vals; ctx.update(); return null; } }],
           solution: () => { const r = ref(); return [
             { tex: `p = ${P().lon.map((q) => texPole(q, 4)).join(',\\;')}\\;(\\text{the F.8 pair}):\\quad K_h = ${texMat([r.Kh])},\\quad k_{r,h} = ${tex(r.krh)}` },
             { html: 'With x = (h, ḣ), −K<sub>h</sub>x + k<sub>r,h</sub>h<sub>r</sub> is exactly the F.8 PD law with derivative on h: K<sub>h</sub> = (k<sub>P<sub>h</sub></sub>, k<sub>D<sub>h</sub></sub>).' },
@@ -440,7 +698,6 @@
             const want = kr(S().lat.A, S().lat.B, S().Cz, K);
             return M.close(k, want) ? { ok: true, msg: `Poles ${poles.map((q) => fmtPole(q)).join(', ')}.` } : { ok: false, msg: 'K is fine; check k_r.' };
           },
-          actions: [{ label: 'Use my gains', run: (v) => { const vals = ['K1', 'K2', 'K3', 'K4', 'kr'].map((k) => num(v[k])); if (vals.some((x) => x === null)) return { ok: false, msg: 'Fill in all five.' }; ctx.app.setMode('work'); [ctx.st.w.Kz1, ctx.st.w.Kz2, ctx.st.w.Kz3, ctx.st.w.Kz4, ctx.st.w.krz] = vals; ctx.update(); return null; } }],
           solution: () => { const r = ref(); return [
             { tex: `p = ${[...P().outer, ...P().inner].map((q) => texPole(q, 4)).join(',\\;')}` },
             { tex: `\\Delta^d = ${T.polyTex(L.polyFromRoots([...P().outer, ...P().inner]))}` },
@@ -448,39 +705,50 @@
             { html: 'One reasonable choice: the F.8 outer and inner pairs (the problem allows anything faster and better damped). K<sub>z,1</sub> and K<sub>z,3</sub> are negative for the same reason k<sub>P<sub>z</sub></sub>, k<sub>D<sub>z</sub></sub> are.' },
           ]; },
         },
-        {
-          id: 'e', title: '(e) Faster? Less overshoot?',
-          html: 'Rise time: move the dominant poles farther from the origin (larger ω<sub>n</sub>), e.g. smaller t<sub>r</sub> knobs. Overshoot: increase ζ (move the poles toward the real axis). Try both in Explore mode and watch the rotor limits.',
-        },
+        WB.myCtrl.part(ctx, {
+          id: 'e', title: '(e) Implement the state-feedback controller and tune it', seed: ['F.10/b'],
+          html: `Compute your gains from (d) in <code>__init__</code> (from <code>P</code>). <code>update</code> gets r = [[h<sub>r</sub>], [z<sub>r</sub>]] and the state x, and returns [f<sub>r</sub>, f<sub>ℓ</sub>]. The check runs 2 m steps in h<sub>r</sub> and z<sub>r</sub> for 30 s, with the nominal and with other parameters: for both h and z the rise time must be at most ${TR11} s (the slowest response the (a) specs allow), the overshoot at most 6%, and the error at the end under 2 cm. Which pole changes reduce the rise time, and which the overshoot? Try them here.`,
+          check: async (code) => {
+            let first = '';
+            for (const pc of WB.myCtrl.paramCases(ctx)) {
+              const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(2), STEP(2)], tEnd: 30, feed: 'state' });
+              const res = await WB.myCtrl.run(ctx, code, sc);
+              if (res.ok === false) return res;
+              const n = res.t.length, bad = [], txt = [];
+              for (const [oi, name] of [[1, 'h'], [0, 'z']]) {
+                const y = res.yAll[oi], m = M.stepMetrics(res.t, y, 0, n, y[0], 2), e = Math.abs(F.endErr(res, oi));
+                txt.push(`${name}: rise ${fmt(m.tr, 3)} s, overshoot ${fmt(m.os, 3)}%, end error ${fm(e)}`);
+                if (!(m.tr <= TR11)) bad.push(`${name} rises too slowly`);
+                if (!(m.os <= 6)) bad.push(`${name} overshoots too much`);
+                if (!(e < 0.02)) bad.push(`${name} does not settle on its reference (DC gain)`);
+              }
+              if (bad.length) return { ok: false, msg: `With ${pc.label}: ${bad.join(', ')}. ${txt.join('; ')}.` };
+              first = first || txt.join('; ');
+            }
+            return { ok: true, msg: `Meets the specs with the nominal and other parameters (nominal: ${first}).` };
+          },
+          solution: () => [
+            { code: SOL.f11 },
+            { html: 'With x = (h, ḣ), −K<sub>h</sub>x + k<sub>r,h</sub>h<sub>r</sub> is exactly the F.8 altitude PD; the lateral K<sub>z</sub> places the F.8 outer and inner pairs on the full 4-state model. Rise time: move the dominant poles farther from the origin (larger ω<sub>n</sub>). Overshoot: increase ζ (move the poles toward the real axis). Faster poles need larger rotor forces, so watch the limits.' },
+          ],
+        }),
       ]);
     },
   });
 
   // ------------------------------------------------------------ Chapter 12 --
-  // Tracking errors at t_end, or just before the last z_r switch for a square wave.
-  function trackCheck(ctx, tol = 0.02) {
-    const res = ctx.app.result(), S = ctx.S, zc = S.sim.refs[0];
-    let t = S.sim.tEnd;
-    if (zc.type === 'square') {
-      const half = 0.5 / zc.frequency;
-      const k = Math.floor((S.sim.tEnd - zc.tStep) / half - 1e-9);
-      if (k >= 1) t = zc.tStep + k * half - 0.05;
-    }
-    const i = Math.max(0, Math.min(res.t.length - 1, Math.round(t / S.sim.Ts)));
-    const eh = Math.abs(res.rAll[0][i] - res.yAll[1][i]), ez = Math.abs(res.rAll[1][i] - res.yAll[0][i]);
-    return { eh, ez, t: res.t[i], ok: eh < tol && ez < tol };
-  }
   base('sfi', 12, 'Integrators with state feedback', 'pp. 197–214, F.12 p. 400', {
     defaults(sys) { return { view: 'lat', zOff: 3, hOff: 0, antiwindup: 'clamp', extra: 'int', k: knobs(sys), w: slowW(sys, 'sfi') }; },
     simDefaults(sys) { const pr = sys.problems.ch12; return { ...pr.sim, refs: [{ type: 'step', amplitude: 2.5 }], dists: [0, pr.dists.Fwind], mismatch: pr.mismatch }; },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'F.12(a) or (c)'); return; }
       const sec = section(parent, 'u = −Kx − k_I ∫(r − y)', 'p. 199');
       viewSeg(sec, ctx);
       segmented(sec, { label: 'Anti-windup (F.12a)', options: [{ value: 'clamp', label: 'hold integrators while a rotor saturates' }, { value: 'none', label: 'none' }], ...bind(ctx, 'antiwindup') });
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'sfi'); knobControls(parent, ctx, 'sfi', 'Specs'); }
-      else { knobControls(parent, ctx, 'sfi', 'Design'); gainReadout(section(parent, 'Gains', 'p. 199'), ctx, 'sfi'); }
+      knobControls(parent, ctx, 'sfi', 'Design'); gainReadout(section(parent, 'Gains', 'p. 199'), ctx, 'sfi');
     },
     extraPlot(ctx, res) {
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       return { opts: { title: 'integrators', yLabel: 'x_I [m·s]', unit: 'm·s' }, data: { series: [
         { label: 'x_I,h = ∫(h_r − h)', y: Array.from(res.extras.intH || []), color: '--series-1' },
         { label: 'x_I,z = ∫(z_r − z)', y: Array.from(res.extras.intZ || []), color: '--series-3' },
@@ -511,12 +779,34 @@
       const num = (v) => PD().num(v);
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: `(a) Gains with the F.11 poles plus p<sub>I,h</sub> = ${prob.pIh}, p<sub>I,z</sub> = ${prob.pIz}`,
-          html: 'Enter k<sub>I,h</sub> and k<sub>I,z</sub> (book sign: u = −Kx − k<sub>I</sub>x<sub>I</sub>).',
-          inputs: { kIh: 'k<sub>I,h</sub>', kIz: 'k<sub>I,z</sub>' },
-          check: (v) => PD().checkNumbers(v, { kIh: ref().kIh, kIz: ref().kIz }, { kIh: 'kI,h', kIz: 'kI,z' }),
-          solution: () => { const r = ref(); return [{ tex: `K_h = ${texMat([r.Kh])},\\; k_{I,h} = ${tex(r.kIh)},\\quad K_z = ${texMat([r.Kz])},\\; k_{I,z} = ${tex(r.kIz)}` }]; },
+          id: 'a', title: `(a) Gains with the F.8 pole pairs plus p<sub>I,h</sub> = ${prob.pIh}, p<sub>I,z</sub> = ${prob.pIz}`,
+          html: 'Use the F.11 reference poles (the F.8 pairs: altitude t<sub>r</sub> = 8 s; lateral t<sub>r,z</sub> = 8 s and t<sub>r,θ</sub> = 0.8 s; ζ = 0.707) plus the integrator poles. Book sign: u = −Kx − k<sub>I</sub>x<sub>I</sub> with x<sub>I</sub> = ∫(r − y).',
+          inputs: { Kh1: 'K<sub>h,1</sub>', Kh2: 'K<sub>h,2</sub>', kIh: 'k<sub>I,h</sub>', Kz1: 'K<sub>z,1</sub>', Kz2: 'K<sub>z,2</sub>', Kz3: 'K<sub>z,3</sub>', Kz4: 'K<sub>z,4</sub>', kIz: 'k<sub>I,z</sub>' },
+          check: (v) => { const r = ref(); return PD().checkNumbers(v, { Kh1: r.Kh[0], Kh2: r.Kh[1], kIh: r.kIh, Kz1: r.Kz[0], Kz2: r.Kz[1], Kz3: r.Kz[2], Kz4: r.Kz[3], kIz: r.kIz }, { kIh: 'kI,h', kIz: 'kI,z' }); },
+          solution: () => { const r = ref(); return [{ tex: `K_h = ${texMat([r.Kh])},\\; k_{I,h} = ${tex(r.kIh)},\\quad K_z = ${texMat([r.Kz])},\\; k_{I,z} = ${tex(r.kIz)}` }, { html: '[K k<sub>I</sub>] = place(A<sub>1</sub>, B<sub>1</sub>, p) for each loop, with the augmented A<sub>1</sub>, B<sub>1</sub> of Eq. 12.1 (p. 198).' }]; },
         },
+        WB.myCtrl.part(ctx, {
+          id: 'a2', title: '(a) Add integrators with anti-windup to your F.11 controller', seed: 'F.11/e',
+          html: `Use the gains from above. The check (1) runs 1 m steps in h<sub>r</sub> and z<sub>r</sub> for 20 s with the nominal and with other parameters and compares h(t) and z(t) with the design (within 3 cm), then (2) lowers f<sub>max</sub> to ${WINDUP.fmax} N (just above hover) and steps h<sub>r</sub> to ${WINDUP.step} m, so a rotor saturates for seconds: h may overshoot by at most ${WINDUP.os} m.`,
+          check: async (code) => {
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(1), STEP(1)], tEnd: 20, feed: 'state' });
+              return { sc, label: pc.label, ref: () => refSS(ctx, sc, 'sfi') };
+            });
+            const m = await F.matchAll(ctx, code, cases, { tol: { 0: 0.03, 1: 0.03 } });
+            if (!m.ok) return m;
+            const sc = F.scenario(ctx, { params: { ...ctx.pModel, f_max: WINDUP.fmax }, refs: [STEP(WINDUP.step), STEP(0)], tEnd: WINDUP.tEnd, feed: 'state' });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const os = Math.max(...res.yAll[1]) - WINDUP.step;
+            if (!(os <= WINDUP.os)) return { ok: false, msg: `Tracking matches, but with f_max = ${WINDUP.fmax} N the ${WINDUP.step} m climb overshoots by ${fm(os)}: the integrators wind up while a rotor is saturated.` };
+            return { ok: true, msg: `${m.msg} Saturated ${WINDUP.step} m climb: overshoot ${fm(Math.max(0, os))}.` };
+          },
+          solution: () => [
+            { code: SOL.f12 },
+            { html: `Anti-windup here holds both integrators while a rotor saturates (f<sub>max</sub> = ${WINDUP.fmax} N: about 0.23 m overshoot, versus 1.4 m without anti-windup). Integrating only while the loop is nearly settled, or unwinding by the saturation error (back-calculation), pass too.` },
+          ],
+        }),
         {
           id: 'b', title: '(b) 20% parameter variation and a 0.1 N wind force',
           html: 'In your dynamics, add F<sub>wind</sub> to the z equation (the hint in the statement) and let the parameters vary. Here: the wind F<sub>wind</sub> slider and the plant mismatch in the left panel (the chapter starts with both). Passes when both are set and every mismatch is within ±20%.',
@@ -528,12 +818,18 @@
             return v.every((x) => Math.abs(x) <= 20.0001) ? { ok: true, msg: `F_wind = ${fmt(w, 3)} N with plant mismatch.` } : { ok: false, msg: 'Keep every parameter within ±20%.' };
           },
         },
-        {
-          id: 'c', title: '(c) Tune the integrator poles for good tracking',
-          html: 'Passes when |h<sub>r</sub> − h| and |z<sub>r</sub> − z| at t<sub>end</sub> are both under 2 cm with the current mismatch and wind.',
-          check: () => { const r = trackCheck(ctx); return { ok: r.ok, msg: `|e_h| = ${fmt(r.eh, 3)} m, |e_z| = ${fmt(r.ez, 3)} m.` }; },
-          solution: () => [{ html: `The reference design keeps the F.11 poles and adds p<sub>I,h</sub> = ${prob.pIh}, p<sub>I,z</sub> = ${prob.pIz}. Both integrators settle the loops with the wind and the parameter errors; making p<sub>I</sub> faster speeds up the recovery but adds overshoot.` }],
-        },
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Tune the integrator poles (and other gains if needed) for good tracking', seed: ['F.12/a2'],
+          html: `The check runs a 2 m altitude step and a z<sub>r</sub> step to 5.5 m for 50 s, with F<sub>wind</sub> = ${prob.dists.Fwind} N and the plant off by ${misText(ctx, prob.mismatch)}: |h<sub>r</sub> − h| and |z<sub>r</sub> − z| at the end must both be under 2 cm.`,
+          check: async (code) => {
+            const sc = F.scenario(ctx, { refs: [STEP(2), STEP(2.5)], zOff: 3, tEnd: 50, mismatch: prob.mismatch, ext: { Fwind: prob.dists.Fwind }, feed: 'state' });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const eh = Math.abs(F.endErr(res, 1)), ez = Math.abs(F.endErr(res, 0));
+            return { ok: eh < 0.02 && ez < 0.02, msg: `|h_r − h| = ${fm(eh)}, |z_r − z| = ${fm(ez)} at t = 50 s.` };
+          },
+          solution: () => [{ code: SOL.f12 }, { html: `The design from (a) (p<sub>I,h</sub> = ${prob.pIh}, p<sub>I,z</sub> = ${prob.pIz}) already passes: both integrators settle the loops despite the wind and the parameter errors. Faster integrator poles speed up the recovery but add overshoot.` }],
+        }),
       ]);
     },
   });
@@ -547,18 +843,20 @@
         theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix}C\\\\ CA\\\\ \\vdots\\\\ CA^{n-1}\\end{bmatrix},\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = n' },
       { title: 'Observability of the VTOL', page: 'F.13(b) p. 400', answers: 'F.13/b',
         numbers: `\\operatorname{rank}\\mathcal{O}_{lon} = ${L.rank(Ol)},\\quad \\operatorname{rank}\\mathcal{O}_{lat} = ${L.rank(Oz)}\\;(C_{lat} \\text{ is } 2\\times4)` },
-      { title: 'Lateral observer gain (workbench block structure)', page: 'p. 222 · Eq. 13.16',
+      // the workbench's own choice of L (one of many): Explore only
+      ...(ctx.S.mode === 'explore' ? [{ title: 'Lateral observer gain (workbench block structure)', page: 'p. 222 · Eq. 13.16',
         theory: 'L_{lat} = \\begin{bmatrix}L_{z1} & 0\\\\ 0 & L_{\\theta1}\\\\ L_{z2} & 0\\\\ 0 & L_{\\theta2}\\end{bmatrix}',
-        note: 'With two outputs L is not unique. This structure lets the z innovation correct only (ẑ, ż̂) and the θ innovation only (θ̂, θ̇̂).' },
+        note: 'With two outputs L is not unique. This structure lets the z innovation correct only (ẑ, ż̂) and the θ innovation only (θ̂, θ̇̂).' }] : []),
       { title: 'Observer gains for the VTOL', page: 'F.13(c) p. 400', answers: ['F.6/b', 'F.13/c'],
         symbolic:'\\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
         numbers: d.Lz ? `L_h = ${texMat(d.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(d.Lz[0])}, ${tex(d.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(d.Lt[0])}, ${tex(d.Lt[1])})` : '',
         note: 'place() on the full (A, C) would return a different L with the same eigenvalues.' },
-      { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224',
+      { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224', answers: 'F.13/c',
         theory: '\\dot{\\hat x} = A\\hat x + B\\tilde u + L(y - C\\hat x),\\quad \\tilde u = (F_{sat} - F_e,\\; \\tau_{sat})' },
     ];
   }
   function obsExtraPlot(ctx, res) {
+    if (ctx.S.mode === 'work') return workExtraPlot(ctx, res);
     if (ctx.st.extra === 'd') {
       const dv = F.distValues(ctx), S = ctx.S, on = (t) => t >= S.sim.tDist;
       return { opts: { title: 'disturbance estimates', yLabel: 'd̂', unit: '' }, data: { series: [
@@ -580,22 +878,40 @@
     ] } };
   }
 
+  // Work mode: the true velocities with the student's x_hat (ż̂ = x_hat[3], ḣ̂ = x_hat[4]),
+  // or the d_hat they return (in their own order).
+  function workExtraPlot(ctx, res) {
+    const X = res.extras;
+    if (ctx.st.extra === 'd') {
+      const ds = ['dhat', 'dhat1', 'dhat2', 'dhat3'].filter((k) => X[k]);
+      return { opts: { title: 'your disturbance estimates', yLabel: 'd̂', unit: '' }, data: { series: ds.length
+        ? ds.map((k, i) => ({ label: `your d̂[${i}]`, y: Array.from(X[k]), color: ['--series-1', '--series-3', '--series-2', '--text-muted'][i] }))
+        : [{ label: 'return (u, x_hat, d_hat) to plot d̂', y: Array.from(res.t, () => 0), color: '--text-muted', dash: [3, 3] }] } };
+    }
+    const series = [
+      { label: 'ż', y: res.x.map((x) => x[3]), color: '--series-1' },
+      { label: 'ḣ', y: res.x.map((x) => x[4]), color: '--text-muted' },
+    ];
+    if (X.xhat3) series.unshift({ label: 'your ż̂', y: Array.from(X.xhat3), color: '--series-3', dash: [3, 3], width: 2 });
+    if (X.xhat4) series.push({ label: 'your ḣ̂', y: Array.from(X.xhat4), color: '--series-2', dash: [3, 3], width: 2 });
+    return { opts: { title: 'velocities and your estimates', yLabel: 'velocity [m/s]', unit: 'm/s' }, data: { series } };
+  }
+
   base('obs', 13, 'Observers', 'pp. 215–238, F.13 p. 400', {
     defaults(sys) { return { view: 'lat', zOff: 3, hOff: 0, antiwindup: 'clamp', extra: 'v', k: knobs(sys), w: slowW(sys, 'obs') }; },
     simDefaults(sys) { return { ...sys.problems.ch13.sim, refs: [{ type: 'square', amplitude: 2.5, frequency: 0.04 }] }; },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'F.13(c)'); return; }
       const sec = section(parent, 'Controller uses x̂', 'p. 222 · Fig. 13-3');
       viewSeg(sec, ctx);
       segmented(sec, { label: 'Extra plot', options: [{ value: 'v', label: 'velocities' }, { value: 'd', label: 'disturbances' }], ...bind(ctx, 'extra') });
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'obs'); knobControls(parent, ctx, 'obs', 'Specs'); }
-      else { knobControls(parent, ctx, 'obs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 222'), ctx, 'obs'); }
+      knobControls(parent, ctx, 'obs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 222'), ctx, 'obs');
     },
     extraPlot: obsExtraPlot,
     math(ctx) { return [...estCards(ctx, 'obs'), { title: 'Separation principle', page: 'p. 223', theory: '\\operatorname{eig} = \\operatorname{eig}(A - BK) \\cup \\operatorname{eig}(A - LC)', note: 'For the linear model. Saturation and the nonlinear plant break it.' }]; },
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch13;
       const S = () => sub(ctx.pModel);
-      const ref = () => design(ctx.pModel, knobs(ctx.sys), 'obs');
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Exact parameters, no input disturbance',
@@ -612,31 +928,48 @@
           check: (v) => PD().checkNumbers(v, { rl: L.rank(L.obsv(S().lon.A, S().lon.C)), rz: L.rank(L.obsv(S().lat.A, S().lat.C)) }, {}),
           solution: () => [{ tex: `\\mathcal{O}_{lat} = ${texMat(L.obsv(S().lat.A, S().lat.C), 3)}` }, { html: 'Ranks 2 and 4. The lateral pair is observable from z and θ together (and even from z alone).' }],
         },
-        {
-          id: 'c', title: `(c) Observer gains, each pair ${prob.obsFactor}× faster than its controller pair (ζ = 0.707)`,
-          html: 'Altitude L<sub>h</sub> (2×1); lateral in the block structure above.',
-          inputs: { Lh1: 'L<sub>h,1</sub>', Lh2: 'L<sub>h,2</sub>', Lz1: 'L<sub>z,1</sub>', Lz2: 'L<sub>z,2</sub>', Lt1: 'L<sub>θ,1</sub>', Lt2: 'L<sub>θ,2</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { Lh1: r.Lh[0], Lh2: r.Lh[1], Lz1: r.Lz[0], Lz2: r.Lz[1], Lt1: r.Lt[0], Lt2: r.Lt[1] }, {}); },
-          solution: () => { const r = ref(); return [
-            { tex: `q_h = ${r.obsPoles.lon.map((q) => texPole(q)).join(',\\;')},\\; q_z = ${r.obsPoles.outer.map((q) => texPole(q)).join(',\\;')},\\; q_\\theta = ${r.obsPoles.inner.map((q) => texPole(q)).join(',\\;')}` },
-            { tex: `L_h = ${texMat(r.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(r.Lz[0])}, ${tex(r.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(r.Lt[0])}, ${tex(r.Lt[1])})` },
-            { html: 'Each block is a SISO observer design: L = place(Aᵀ, Cᵀ, q)ᵀ (p. 222). For the z block, det(sI − A + LC) = s² + (L<sub>z1</sub> + μ/M)s + (μ/M·L<sub>z1</sub> + L<sub>z2</sub>).' },
-          ]; },
-        },
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Add an observer and use x̂ in your F.12 controller; tune the controller and observer poles', seed: ['F.12/c', 'F.12/a2'],
+          html: `Your controller now gets only y = [[z], [h], [θ]]. Return <code>(u, x_hat)</code> from <code>update</code>, with x_hat = [z, h, θ, ż, ḣ, θ̇] (your estimate of the whole state). The check starts the VTOL at z = h = 0.5 m (your estimate starts wherever you start it) and runs a 2 m altitude step and a z<sub>r</sub> step to 5.5 m for 30 s with exact parameters: over the last 10 s, |z − ẑ| and |h − ĥ| must stay under 1 mm, |θ − θ̂| under 0.01°, |ż − ż̂| and |ḣ − ḣ̂| under 5 mm/s and |θ̇ − θ̇̂| under 0.1°/s, and |h<sub>r</sub> − h|, |z<sub>r</sub> − z| at the end under 3 cm.`,
+          check: async (code) => {
+            const sc = F.scenario(ctx, { refs: [STEP(2), STEP(2.5)], zOff: 3, init: { z0: 0.5, h0: 0.5 }, tEnd: 30 });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const nx = F.needXhat(res);
+            if (nx) return nx;
+            const e = F.estErr(res, [[20, 30]]), D = M.DEG;
+            const lim = [1e-3, 1e-3, 0.01 * D, 5e-3, 5e-3, 0.1 * D];
+            const eh = Math.abs(F.endErr(res, 1)), ez = Math.abs(F.endErr(res, 0));
+            const msg = `Over the last 10 s: |z − ẑ| ≤ ${fm(e[0])}, |h − ĥ| ≤ ${fm(e[1])}, |θ − θ̂| ≤ ${fmt(e[2] / D, 3)}°, |ż − ż̂| ≤ ${fmt(e[3], 3)} m/s, |ḣ − ḣ̂| ≤ ${fmt(e[4], 3)} m/s, |θ̇ − θ̇̂| ≤ ${fmt(e[5] / D, 3)}°/s; at the end |h_r − h| = ${fm(eh)}, |z_r − z| = ${fm(ez)}.`;
+            return { ok: e.every((v, i) => v < lim[i]) && eh < 0.03 && ez < 0.03, msg };
+          },
+          solution: () => [
+            { code: SOL.f13 },
+            { html: 'The F.12 controller on x̂, with observers 10× faster than each controller pair, driven by the previous saturated input (F̃ = f<sub>r</sub> + f<sub>ℓ</sub> − F<sub>e</sub>, τ = d(f<sub>r</sub> − f<sub>ℓ</sub>)) and integrated with RK4, as the repo\'s ctrlObserver.py does. With two lateral outputs the 4×2 L is not unique; place (scipy\'s algorithm, as python-control uses) picks a well-conditioned one, and any L that puts the observer poles where you want them passes, since the check looks at the estimates.' },
+          ],
+        }),
         {
           id: 'd', title: '(d) Plot the states and their estimates',
-          html: 'In your code, have the controller return both u and x̂, and plot them on the same graph. Here the estimates ẑ, ĥ, θ̂ are the dashed traces on the output plots, and the extra plot shows ż, ḣ with their estimates (choose "velocities" on the right).',
+          html: 'Run your controller: the z, h and θ plots show your ẑ, ĥ, θ̂ (dashed) with the true outputs, and the extra plot your ż̂, ḣ̂ with the true velocities.',
         },
         {
           id: 'e', title: '(e) Add d<sub>F</sub> = 1.0 N and d<sub>τ</sub> = 0.1 N·m',
-          html: 'Set the thrust and torque disturbances in the left panel. The integrators act on r − ŷ, and ŷ is biased by the unmodeled disturbances, so the outputs settle off target.',
+          html: 'Runs your controller from (c) with an input force disturbance of 1.0 N and an input torque disturbance of 0.1 N·m (exact parameters, the (c) references). Your observer has no model of them, so x̂ is biased, and integrators acting on x̂ leave the outputs off their references. Passes when the run shows the bias (Chapter 14 removes it). <em>Set them</em> puts the same disturbances in the left panel.',
           actions: [{ label: 'Set them', run: () => { ctx.S.sim.dist = 1.0; ctx.S.sim.dists[0] = 0.1; ctx.update(); return null; } }],
-          check: () => {
-            const res = ctx.app.result(), n = res.t.length - 1;
-            const dv = F.distValues(ctx);
-            if (!(dv.dF || dv.dtau)) return { ok: false, msg: 'Add the disturbances first.' };
-            const bh = res.yAll[1][n] - res.extras.hhat[n], bz = res.yAll[0][n] - res.extras.zhat[n];
-            return { ok: true, msg: `At t_end: h − ĥ = ${fmt(bh, 3)} m, z − ẑ = ${fmt(bz, 3)} m. F.14 removes this bias.` };
+          check: async () => {
+            const code = WB.myCtrl.savedCode(ctx, 'F.13/c');
+            if (!code) return { ok: false, msg: 'Write your controller in (c) first.' };
+            const sc = F.scenario(ctx, { refs: [STEP(2), STEP(2.5)], zOff: 3, tEnd: 30, ext: { dF: 1.0, dtau: 0.1 } });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const nx = F.needXhat(res);
+            if (nx) return nx;
+            const b = [0, 1, 2].map((i) => F.bias(res, i, 25, 30));
+            const pk = Math.max(...res.x.map((x) => Math.abs(x[2]))) / M.DEG;
+            let msg = `With d_F = 1 N and d_τ = 0.1 N·m, over the last 5 s: z − ẑ = ${fm(b[0])}, h − ĥ = ${fm(b[1])}, θ − θ̂ = ${fmt(b[2] / M.DEG, 3)}°; at the end h_r − h = ${fm(-F.endErr(res, 1))}, z_r − z = ${fm(-F.endErr(res, 0))}.`;
+            if (pk > 90) msg += ` Your VTOL loses control (|θ| reaches ${fmt(pk, 3)}°).`;
+            if (Math.abs(b[0]) < 1e-3 && Math.abs(b[1]) < 1e-3) return { ok: false, msg: `${msg} x̂ follows the outputs exactly: is it coming from an observer of the model?` };
+            return { ok: true, msg };
           },
         },
       ]);
@@ -648,18 +981,19 @@
     defaults(sys) { return { view: 'lat', zOff: 3, hOff: 0, antiwindup: 'clamp', dobs: true, extra: 'd', k: knobs(sys), w: slowW(sys, 'dobs') }; },
     simDefaults(sys) { const pr = sys.problems.ch14; return { ...pr.sim, refs: [{ type: 'square', amplitude: 2.5, frequency: 0.04 }], dists: [0, 0, pr.dists.wind, pr.dists.ah], mismatch: pr.mismatch }; },
     buildControls(parent, ctx) {
+      const extra = [{ value: 'd', label: 'disturbance estimates' }, { value: 'v', label: 'velocities' }];
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'F.14(b)', extra); return; }
       const sec = section(parent, 'Controller uses x̂, subtracts d̂', 'p. 241');
       viewSeg(sec, ctx);
       segmented(sec, { label: 'Disturbance observer', options: [{ value: true, label: 'on' }, { value: false, label: 'off (F.14a)' }], ...bind(ctx, 'dobs') });
-      segmented(sec, { label: 'Extra plot', options: [{ value: 'd', label: 'disturbance estimates' }, { value: 'v', label: 'velocities' }], ...bind(ctx, 'extra') });
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'dobs'); knobControls(parent, ctx, 'dobs', 'Specs'); }
-      else { knobControls(parent, ctx, 'dobs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 241'), ctx, 'dobs'); }
+      segmented(sec, { label: 'Extra plot', options: extra, ...bind(ctx, 'extra') });
+      knobControls(parent, ctx, 'dobs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 241'), ctx, 'dobs');
     },
     extraPlot: obsExtraPlot,
     math(ctx) {
       const d = design(ctx.pModel, ctx.st.k, 'dobs');
       return [
-        { title: 'Disturbance models', page: 'p. 240–241',
+        { title: 'Disturbance models', page: 'p. 240–241', answers: 'F.14/b',
           theory: '\\text{altitude: } \\dot{\\hat d}_F = L_{d,h}(h - \\hat h)\\text{ at the input};\\quad \\text{lateral: } d_\\tau \\text{ at the input, } d_z \\text{ a force in } \\ddot z',
           note: 'A constant wind speed w added to ż (the F.14 snippet) is exactly a force μw in the observer\'s ż coordinates, so the d_z state absorbs it.' },
         { title: 'Augmented blocks', page: 'p. 240',
@@ -670,45 +1004,42 @@
           theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top \\text{ per block}' },
         { title: 'Observer gains for the specs', page: 'F.14(b) p. 401', answers: 'F.14/b',
           numbers: `L_h = ${texMat(d.Lh)},\\; L_z = ${texMat(d.Lz)},\\; L_\\theta = ${texMat(d.Lt)}` },
-        { title: 'Control law', page: 'p. 241',
+        { title: 'Control law', page: 'p. 241', answers: 'F.14/b',
           theory: '\\tilde F = -K_h\\hat x_{lon} - k_{I,h}x_{I,h} - \\hat d_F,\\quad \\tau = -K_z\\hat x_{lat} - k_{I,z}x_{I,z} - \\hat d_\\tau',
           note: 'd_z is not matched to τ, so it is not cancelled directly; removing the estimator bias lets the z integrator do the rest.' },
       ];
     },
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch14;
-      const ref = () => design(ctx.pModel, knobs(ctx.sys), 'dobs');
+      const mis = misText(ctx, prob.mismatch);
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: '(a) α = 0.2 with altitude and wind disturbances, no disturbance observer',
-          html: 'Add the book snippet&#39;s disturbances to your dynamics. Here: plant mismatch, the wind w and the altitude disturbance d<sub>h</sub> in the left panel (the chapter starts with all three), and the disturbance observer off. Passes when that is set up; then look at the tracking and the estimate errors.',
-          check: () => {
-            const dv = F.distValues(ctx), mis = Object.values(ctx.S.mismatch || {}).some((x) => Math.abs(x || 0) > 0);
-            if (ctx.st.dobs !== false) return { ok: false, msg: 'Turn the disturbance observer off (right panel) for this part.' };
-            if (!mis) return { ok: false, msg: 'Set a plant mismatch (α = 0.2) in the left panel.' };
-            if (!dv.wind || !dv.ah) return { ok: false, msg: 'Set the wind w and the altitude disturbance d_h in the left panel.' };
-            const res = ctx.app.result(), n = res.t.length - 1;
-            return { ok: true, msg: `Without the disturbance observer: h − ĥ = ${fmt(res.yAll[1][n] - res.extras.hhat[n], 3)} m, z − ẑ = ${fmt(res.yAll[0][n] - res.extras.zhat[n], 3)} m at t_end.` };
+          id: 'a', title: '(a) α = 0.2 with altitude and wind disturbances',
+          html: `The chapter starts with the plant off by ${mis}, a wind w = ${prob.dists.wind} m/s added to ż and an altitude disturbance d<sub>h</sub> = ${prob.dists.ah} m/s² added to ḧ (the book's snippet), in the left panel. Run your F.13 controller here to see how the estimates and the tracking suffer without a disturbance observer.`,
+          actions: [{ label: 'Run my F.13 controller', run: () => {
+            const code = WB.myCtrl.savedCode(ctx, 'F.13/c');
+            if (!code) return { ok: false, msg: 'Write your controller in F.13(c) first (Ch 13 tab).' };
+            return WB.myCtrl.use(ctx, code, 'a');
+          } }],
+        },
+        WB.myCtrl.part(ctx, {
+          id: 'b', title: '(b) Add a disturbance observer to both controllers; verify the estimator\'s steady-state error is removed, and tune', seed: ['F.13/c'],
+          html: `Return <code>(u, x_hat)</code>, or <code>(u, x_hat, d_hat)</code> to plot your d̂ (extra plot). The check runs a 2 m altitude step and a z<sub>r</sub> step to 5.5 m for 30 s with the plant off by ${mis}, w = ${prob.dists.wind} m/s and d<sub>h</sub> = ${prob.dists.ah} m/s²: over the last 5 s the means of z − ẑ and h − ĥ must be under 2 mm, and |h<sub>r</sub> − h|, |z<sub>r</sub> − z| at the end under 3 cm.`,
+          check: async (code) => {
+            const sc = F.scenario(ctx, { refs: [STEP(2), STEP(2.5)], zOff: 3, tEnd: 30, mismatch: prob.mismatch, ext: { wind: prob.dists.wind, ah: prob.dists.ah } });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const nx = F.needXhat(res);
+            if (nx) return nx;
+            const bz = F.bias(res, 0, 25, 30), bh = F.bias(res, 1, 25, 30);
+            const eh = Math.abs(F.endErr(res, 1)), ez = Math.abs(F.endErr(res, 0));
+            return { ok: Math.abs(bz) < 2e-3 && Math.abs(bh) < 2e-3 && eh < 0.03 && ez < 0.03, msg: `Mean over the last 5 s: z − ẑ = ${fm(bz)}, h − ĥ = ${fm(bh)}; at the end |h_r − h| = ${fm(eh)}, |z_r − z| = ${fm(ez)}.` };
           },
-        },
-        {
-          id: 'b', title: `(b) Disturbance-observer gains (observers ${prob.obsFactor || 10}× faster, p<sub>d,h</sub> = ${prob.pDh}, p<sub>d,z</sub> = ${prob.pDz}, p<sub>d,θ</sub> = ${prob.pDth})`,
-          inputs: { Ldh: 'L<sub>d,h</sub>', Ldz: 'L<sub>d,z</sub>', Ldt: 'L<sub>d,θ</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { Ldh: r.Lh[2], Ldz: r.Lz[2], Ldt: r.Lt[2] }, {}); },
-          solution: () => { const r = ref(); return [{ tex: `L_h = ${texMat(r.Lh)},\\quad L_z = ${texMat(r.Lz)},\\quad L_\\theta = ${texMat(r.Lt)}` }, { html: 'Same block structure as F.13, each block augmented with its disturbance state.' }]; },
-        },
-        {
-          id: 'b2', title: '(b) Estimator bias removed and disturbances compensated',
-          html: 'Passes when |h − ĥ| and |z − ẑ| at t<sub>end</sub> are under 1 cm with the observer on. Compare with it off.',
-          check: () => {
-            if (!ctx.st.dobs) return { ok: false, msg: 'Turn the disturbance observer on.' };
-            const res = ctx.app.result(), n = res.t.length - 1;
-            const bh = Math.abs(res.yAll[1][n] - res.extras.hhat[n]), bz = Math.abs(res.yAll[0][n] - res.extras.zhat[n]);
-            const t = trackCheck(ctx, 0.05);
-            return { ok: bh < 0.01 && bz < 0.01, msg: `|h − ĥ| = ${fmt(bh, 3)} m, |z − ẑ| = ${fmt(bz, 3)} m; tracking |e_h| = ${fmt(t.eh, 3)}, |e_z| = ${fmt(t.ez, 3)} m at t = ${fmt(t.t, 3)} s.` };
-          },
-          solution: () => [{ html: 'd̂<sub>F</sub> settles at the altitude disturbance (M·1.0 N) plus the weight error from the mass mismatch; d̂<sub>z</sub> settles near μ·w for the wind speed w.' }],
-        },
+          solution: () => [
+            { code: SOL.f14 },
+            { html: `The F.13 observers augmented with constant disturbance states (p. 240–241), each pair 10× faster than its controller pair plus a disturbance pole (p<sub>d,h</sub> = ${prob.pDh}, p<sub>d,z</sub> = ${prob.pDz}, p<sub>d,θ</sub> = ${prob.pDth}): d<sub>F</sub> at the force input and d<sub>τ</sub> at the torque input are subtracted from F and τ; d<sub>z</sub>, a force in z̈, is not matched to τ, but removing the estimator bias lets the z integrator cancel it. With these disturbances d̂<sub>F</sub> settles at M<sub>true</sub>·d<sub>h</sub> plus the weight error (M − M<sub>true</sub>)g, and d̂<sub>z</sub> near μ<sub>true</sub>·w: a constant wind speed added to ż is exactly a force μw in the observer's coordinates.` },
+          ],
+        }),
       ]);
     },
   });
