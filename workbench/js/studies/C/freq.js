@@ -704,7 +704,7 @@ class Controller:
         // menus (or presets, which answer them) here.
         WB.myCtrl.banner(section(parent, 'Your controller'), ctx, 'the implementation part');
         const sec = section(parent, 'Plot', 'p. 362–369');
-        sec.append(el('p', { class: 'muted small', text: 'The plants are the problem\'s: rate feedback with the C.10 gains k_Dθ, k_Dφ. Each loop\'s Bode plot, poles and spec readouts appear once you have derived its plant: (a) inner plant for C_in, (b) outer plant for C_out.' }));
+        sec.append(el('p', { class: 'muted small', text: `The plants are the problem's: rate feedback with the book's C.10 gains k_Dθ = ${fmt(c10(ctx.sys, ctx.pModel).kDth, 4)}, k_Dφ = ${fmt(c10(ctx.sys, ctx.pModel).kDphi, 4)}. Each loop's Bode plot, poles and spec readouts appear once you have derived its plant: (a) inner plant for C_in, (b) outer plant for C_out.` }));
         segmented(sec, {
           label: 'Plot',
           options: [{ value: 'inner', label: 'inner loop C_in' }, { value: 'outer', label: 'outer loop C_out' }],
@@ -894,6 +894,9 @@ class Controller:
 
     buildProblem(parent, ctx) {
       const cx = WB.py.cx;
+      // The plants use the book's C.10 rate gains, stated as given (like Ch 17's fixed loop).
+      const g10 = c10(ctx.sys, ctx.pModel);
+      const rateText = `the book's C.10 rate gains k<sub>D<sub>θ</sub></sub> = ${fmt(g10.kDth, 4)}, k<sub>D<sub>φ</sub></sub> = ${fmt(g10.kDphi, 4)} (σ = ${fmt(g10.sigma, 3)})`;
       const args = {
         s: { label: 's', complex: true, re: [-2, 1], im: [0.5, 5] },
         sigma: { label: 'σ', lo: 0.01, hi: 0.2 },
@@ -931,7 +934,7 @@ class Controller:
             { html: 'Book: p. 362 uses Θ/τ = (1/J<sub>s</sub>)/(s² + (b/J<sub>s</sub>)s + k/J<sub>s</sub>), which gives (σs + 1)/(σJ<sub>s</sub>s³ + (σb + J<sub>s</sub>)s² + (σk + b + k<sub>D</sub>)s + k); that form is accepted too (see ISSUES.md).' },
           ] },
         { id: 'a', title: '(a) Design C<sub>in</sub>(s) to meet the inner-loop specs', after: 'a1',
-          html: 'Give C<sub>in</sub>(s) as coefficient lists, highest power of s first (<code>np.convolve</code> multiplies two factors). <em>Use my C_in</em> draws P<sub>in</sub>·C<sub>in</sub> in the Bode plot (inner loop), the s-plane and the spec readouts. The plant is the rate-damped P<sub>in</sub> with the C.10 k<sub>D<sub>θ</sub></sub>. The check also requires a stable closed loop.',
+          html: `The inner plant uses ${rateText}. Give C<sub>in</sub>(s) as coefficient lists, highest power of s first (<code>np.convolve</code> multiplies two factors). <em>Use my C_in</em> draws P<sub>in</sub>·C<sub>in</sub> in the Bode plot (inner loop), the s-plane and the spec readouts. The plant is the rate-damped P<sub>in</sub> with the C.10 k<sub>D<sub>θ</sub></sub>. The check also requires a stable closed loop.`,
           code: {
             template: 'C_in_num = [1.0]\nC_in_den = [1.0]\n',
             check: async (code) => {
@@ -961,7 +964,7 @@ class Controller:
             { html: 'Book: p. 366. The repo\'s outer design uses a different model (see ISSUES.md).' },
           ] },
         { id: 'b', title: '(b) Design C<sub>out</sub>(s) and the prefilter F(s)', after: 'b1',
-          html: `Give C<sub>out</sub>(s) and F(s) as coefficient lists. The plant is P = P<sub>out</sub>·P<sub>in</sub>C<sub>in</sub>/(1 + P<sub>in</sub>C<sub>in</sub>) with your C<sub>in</sub> from (a) and the C.10 k<sub>D<sub>φ</sub></sub>. <em>Use my C_out, F</em> draws P·C<sub>out</sub> and F·T in the Bode plot (outer loop) and the spec readouts. The check also requires a stable closed loop, F(0) = 1, and a prefilter that removes the peaking: |F·T| at most ${fmt(db(LS_PEAK), 2)} dB.`,
+          html: `Give C<sub>out</sub>(s) and F(s) as coefficient lists. The plant is P = P<sub>out</sub>·P<sub>in</sub>C<sub>in</sub>/(1 + P<sub>in</sub>C<sub>in</sub>) with your C<sub>in</sub> from (a) and ${rateText}. <em>Use my C_out, F</em> draws P·C<sub>out</sub> and F·T in the Bode plot (outer loop) and the spec readouts. The check also requires a stable closed loop, F(0) = 1, and a prefilter that removes the peaking: |F·T| at most ${fmt(db(LS_PEAK), 2)} dB.`,
           code: {
             template: 'C_out_num = [1.0]\nC_out_den = [1.0]\nF_num = [1.0]\nF_den = [1.0]\n',
             check: async (code) => {
@@ -980,7 +983,7 @@ class Controller:
           ] },
         WB.myCtrl.part(ctx, {
           id: 'impl', title: 'Implement C<sub>in</sub>, C<sub>out</sub> and F in the simulation, with the rate feedback',
-          html: 'Not a lettered part in the book: run your design on the satellite. Your compensators from (a) and (b) are in <code>P.C_in_num</code>, <code>P.C_in_den</code>, <code>P.C_out_num</code>, <code>P.C_out_den</code>, <code>P.F_num</code>, <code>P.F_den</code> (coefficient lists, highest power of s first), and the C.10 rate gains in <code>P.kD_th</code>, <code>P.kD_phi</code>. Realize each transfer function in state-space form (Eq. 18.3–18.4), with dirty derivatives (σ = 0.05) for the rates. The check runs the ±15° square wave with exact parameters and compares φ(t) with the workbench running the same design (within 3%).',
+          html: `Not a lettered part in the book: run your design on the satellite. Your compensators from (a) and (b) are in <code>P.C_in_num</code>, <code>P.C_in_den</code>, <code>P.C_out_num</code>, <code>P.C_out_den</code>, <code>P.F_num</code>, <code>P.F_den</code> (coefficient lists, highest power of s first), and ${rateText} in <code>P.kD_th</code>, <code>P.kD_phi</code>. Realize each transfer function in state-space form (Eq. 18.3–18.4), with dirty derivatives (σ = 0.05) for the rates. The check runs the ±15° square wave with exact parameters and compares φ(t) with the workbench running the same design (within 3%).`,
           check: (code) => {
             const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'square', amplitude: 15, frequency: 0.02, tStep: 0 }, tEnd: 50 });
             const parts = lsParts(ctx);
