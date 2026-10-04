@@ -185,6 +185,27 @@
     },
   };
 
+  // D.16(b), (c) are functions of the frequency and the C_PID gains, checked at random
+  // arguments against the book's approximation or the exact closed-loop value.
+  // truth(|P|, {abs: |C|}, {din: |P/(1+PC)|, L: |PC|, T: |PC/(1+PC)|}) gives the percentage.
+  const W_DIN = { label: 'w', lo: 0.005, hi: 0.2 }, W_NOISE = { label: 'w', lo: 50, hi: 2000 };
+  function freqPy(ctx, fn, w, truths, bookRule) {
+    const C = WB.py.cx;
+    const spec = (truth) => ({
+      args: { w, ...lib.gainArgs, sigma: { label: 'σ', lo: 0.01, hi: 0.1 } },
+      items: [{ fn, args: ['w', 'kP', 'kI', 'kD', 'sigma'], truth: (p, a) => {
+        const t = ans.tf(p), s = { re: 0, im: a.w };
+        const Pj = C.div(t.b0, C.poly([1, t.a1, t.a0], s));
+        const Cj = C.add(C.add(a.kP, C.div(a.kI, s)), C.div(C.mul(a.kD, s), C.add(C.mul(a.sigma, s), 1)));
+        const Lj = C.mul(Pj, Cj), onePlus = C.add(1, Lj);
+        const abs = (z) => Math.hypot(z.re, z.im);
+        return truth(abs(Pj), { abs: abs(Cj) }, { din: abs(C.div(Pj, onePlus)), L: abs(Lj), T: abs(C.div(Lj, onePlus)) });
+      } }],
+    });
+    return lib.pyEither(ctx, truths.map(spec), [`(${bookRule})`, '(exact closed-loop value)']);
+  }
+  const PY_LOOP = 'def loop(w, kP, kI, kD, sigma):\n    s = 1j * w\n    Pj = (1 / P.m) / (s**2 + P.b / P.m * s + P.k / P.m)\n    Cj = kP + kI / s + kD * s / (sigma * s + 1)\n    return Pj, Cj\n';
+
   // ---------------------------------------------------------------- D.16 --
   CH.ch16 = {
     id: 'ch16', num: 16, tab: 'Ch 16', title: 'Frequency-domain specs', pages: 'pp. 283–301, pp. 382–383',
@@ -251,27 +272,28 @@
 
     buildProblem(parent, ctx) {
       const s = () => specs(ctx);
-      const either = (v, a, b, what) => {
-        const g = lib.num(v);
-        if (g === null) return { ok: false, msg: 'Enter a number.' };
-        if (M.close(g, a)) return { ok: true, msg: `Matches the book's ${what} rule.` };
-        if (M.close(g, b)) return { ok: true, msg: 'Matches the exact closed-loop value.' };
-        return { ok: false, msg: 'Not within 1% of the book\'s approximation or of the exact value.' };
-      };
       lib.panel(parent, ctx, ctx.sys.problems.ch16, [
         { id: 'plot', title: 'Bode plots of the plant and of the plant under PID',
           html: 'With <code>bode</code> in your code: P(s), and P(s)C(s) with the D.10 gains and the dirty derivative in C (p. 313). When you have them, click the button: the Bode panel here then draws both for the gains in the sliders (<em>Load my D.10 gains</em> copies your Work-mode D.10 gains).',
           done: 'I\'ve plotted them' },
-        { id: 'a', title: '(a) Tracking error to a unit ramp under PID', inputs: { v: 'e<sub>ss</sub> [m]' },
-          html: 'For the PID gains in the sliders (load your D.10 gains first).',
-          check: (v) => (ctx.st.kI > 0 ? lib.check(v, { v: s().ramp }, { v: 'e_ss' }) : { ok: false, msg: 'Set kI > 0.' }),
-          solution: () => [{ tex: `\\text{type 1}:\\; e_{ss} = \\frac{1}{M_v} = \\frac{k}{k_I} = ${tex(s().ramp)}\\,\\text{m}` }, { html: 'The dirty derivative and k<sub>D</sub> do not enter: only the integrator survives as s → 0.' }] },
-        { id: 'b', title: '(b) % of d<sub>in</sub> below 0.1 rad/s that shows up in z', inputs: { v: '%' },
-          check: (v) => either(v.v, 100 * s().gdin, 100 * s().gdinExact, '1/|C(jω_d,in)|'),
-          solution: () => [{ tex: `\\gamma_{d_{in}} = \\frac{1}{|C(j0.1)|} = ${tex(100 * s().gdin)}\\%\\quad(\\text{exact: } ${tex(100 * s().gdinExact)}\\%)` }, { html: '|C| falls with ω below the PID zeros (k<sub>I</sub>/ω dominates), so the worst case on ω ≤ 0.1 is at 0.1 rad/s.' }] },
-        { id: 'c', title: '(c) % of noise above 100 rad/s that shows up in z', inputs: { v: '%' },
-          check: (v) => either(v.v, 100 * s().gn, 100 * s().gnExact, '|PC(jω_no)|'),
-          solution: () => [{ tex: `\\gamma_n = |PC(j100)| = ${tex(db(s().gn))}\\,\\text{dB} = ${tex(100 * s().gn)}\\%` }, { html: 'At high frequency C → (k<sub>D</sub> + σk<sub>P</sub>)/σ (the dirty derivative caps it) and P ≈ 1/(mω²).' }] },
+        { id: 'a', title: '(a) Tracking error to a unit ramp under PID',
+          html: 'Steady-state error (m) as a function of the PID gains. The check calls it at random gains.',
+          code: lib.pyPart(ctx, {
+            args: lib.gainArgs,
+            items: [{ fn: 'e_ss', args: ['kP', 'kI', 'kD'], truth: (p, a) => p.k / a.kI }],
+          }, 'def e_ss(kP, kI, kD):\n    return ...\n'),
+          solution: () => [{ tex: `\\text{type 1}:\; e_{ss} = \\frac{1}{M_v} = \\frac{k}{k_I} = ${tex(s().ramp)}\\,\\text{m}\;\\text{(current gains)}` }, { html: 'The dirty derivative and k<sub>D</sub> do not enter: only the integrator survives as s → 0.' },
+            { code: 'def e_ss(kP, kI, kD):\n    return P.k / kI    # 1/M_v, M_v = lim s P C = kI/k' }] },
+        { id: 'b', title: '(b) % of d<sub>in</sub> below 0.1 rad/s that shows up in z',
+          html: 'Percent of an input disturbance at frequency w (rad/s) that shows up in z, as a function of w and the C<sub>PID</sub> gains (dirty derivative σ). The book\'s approximation and the exact closed-loop value are both accepted. ω<sub>d,in</sub> = 0.1 is the book\'s case.',
+          code: { template: 'def din_pct(w, kP, kI, kD, sigma):\n    return ...\n', ...freqPy(ctx, 'din_pct', W_DIN, [(Pj, Cj) => 100 / Cj.abs, (Pj, Cj, S) => 100 * S.din], 'the book\'s 1/|C(jω)| rule') },
+          solution: () => [{ tex: `\\gamma_{d_{in}} = \\frac{1}{|C(j0.1)|} = ${tex(100 * s().gdin)}\\%\\quad(\\text{exact: } ${tex(100 * s().gdinExact)}\\%)\;\\text{(current gains)}` }, { html: '|C| falls with ω below the PID zeros (k<sub>I</sub>/ω dominates), so the worst case on ω ≤ 0.1 is at 0.1 rad/s.' },
+            { code: `${PY_LOOP}\ndef din_pct(w, kP, kI, kD, sigma):\n    Pj, Cj = loop(w, kP, kI, kD, sigma)\n    return 100 / abs(Cj)    # exact: 100 * abs(Pj / (1 + Pj * Cj))` }] },
+        { id: 'c', title: '(c) % of noise above 100 rad/s that shows up in z',
+          html: 'Percent of sensor noise at frequency w (rad/s) that shows up in z, as a function of w and the gains. The book\'s approximation and the exact value are both accepted.',
+          code: { template: 'def noise_pct(w, kP, kI, kD, sigma):\n    return ...\n', ...freqPy(ctx, 'noise_pct', W_NOISE, [(Pj, Cj, S) => 100 * S.L, (Pj, Cj, S) => 100 * S.T], 'the book\'s |PC(jω)| rule') },
+          solution: () => [{ tex: `\\gamma_n = |PC(j100)| = ${tex(db(s().gn))}\\,\\text{dB} = ${tex(100 * s().gn)}\\%\;\\text{(current gains)}` }, { html: 'At high frequency C → (k<sub>D</sub> + σk<sub>P</sub>)/σ (the dirty derivative caps it) and P ≈ 1/(mω²).' },
+            { code: `${PY_LOOP}\ndef noise_pct(w, kP, kI, kD, sigma):\n    Pj, Cj = loop(w, kP, kI, kD, sigma)\n    return 100 * abs(Pj * Cj)    # exact: 100 * abs(Pj * Cj / (1 + Pj * Cj))` }] },
       ]);
     },
   };

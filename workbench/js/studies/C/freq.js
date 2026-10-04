@@ -220,6 +220,14 @@
   // Work mode starts from placeholder gains; the buttons load the C.10 or book-figure gains.
   const pidDefaults = () => ({ kPth: 60, kDth: 30, kPphi: 0.5, kIphi: 0.05, kDphi: 5, sigma: 0.05, view: 'inner' });
 
+  // Random arguments for the C.16 Python answers (functions of the loop gains).
+  const PY = {
+    kPin: { label: 'kP', lo: 10, hi: 200 }, kDin: { label: 'kD', lo: 5, hi: 80 },
+    kPout: { label: 'kP', lo: 0.1, hi: 3 }, kIout: { label: 'kI', lo: 0.005, hi: 0.5 }, kDout: { label: 'kD', lo: 1, hi: 15 },
+    sigma: { label: 'σ', lo: 0.01, hi: 0.1 },
+  };
+  const flat1 = (v) => (Array.isArray(v) ? v[0] : v);
+
   CH.ch16 = {
     id: 'ch16', num: 16, tab: 'Ch 16', title: 'Frequency-domain specs', pages: 'pp. 298–301',
     linear: false,
@@ -306,23 +314,45 @@
             const ok = ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi', 'sigma'].every((k) => M.close(st[k], g[k], 1e-3, 1e-9));
             return ok ? { ok: true, msg: 'The sliders hold the C.10 gains.' } : { ok: false, msg: 'Set the sliders to the C.10 gains (Load my C.10 gains copies yours from the Ch 10 tab) to plot the loops the problem asks for.' };
           } },
-        { id: 'a', title: '(a) Steady-state error to θ<sub>r</sub> = 20t²', inputs: { v: 'e<sub>ss</sub> [rad]' },
-          check: (v) => {
-            const g = PD().num(v.v), x = s();
-            if (g !== null && M.close(g, x.eBook, 0.02)) return { ok: false, msg: 'That matches the book (A/M_a), but L{20t²} = 40/s³, so the error is 2A/M_a.' };
-            const r = PD().checkNumbers({ v: v.v }, { v: x.eParab }, { v: 'e_ss' });
-            return r.ok ? { ok: true, msg: 'Right for the loop gain P_in C_in of hw16.py (PD on the error). The implemented controller differentiates θ, which makes the loop type 1, so it cannot track a parabola at all.' } : r;
+        { id: 'a', title: '(a) Steady-state error to θ<sub>r</sub> = 20t²',
+          html: 'Steady-state error (rad) as a function of the inner-loop gains, with the loop gain P<sub>in</sub>C<sub>in</sub> of hw16.py. The check calls it at random gains.',
+          code: {
+            template: 'def e_ss(kP, kD):\n    return ...\n',
+            check: async (code) => {
+              const r = await WB.py.check(ctx, {
+                args: { kP: PY.kPin, kD: PY.kDin },
+                items: [{ fn: 'e_ss', args: ['kP', 'kD'], truth: (p, a) => 2 * pr.parabA * (p.Js + p.Jp) / a.kP }],
+                explain: (it, f) => (M.close(flat1(f.e.got), flat1(f.e.want) / 2, 1e-4) ? 'Half the expected value matches the book (A/M_a), but L{20t²} = 40/s³, so the error is 2A/M_a.' : ''),
+              }, code);
+              return r.ok ? { ...r, msg: `${r.msg} Right for the loop gain P_in C_in of hw16.py (PD on the error). The implemented controller differentiates θ, which makes the loop type 1, so it cannot track a parabola at all.` } : r;
+            },
           },
-          html: 'Answers use the C.10 gains (nominal parameters), whatever the sliders are set to.',
-          solution: () => [{ tex: `e_{ss} = \\frac{2A}{M_a} = \\frac{${tex(2 * pr.parabA)}}{${tex(s().Ma)}} = ${tex(s().eParab)}\\,\\text{rad}` }, { html: 'Book: 1.53 with A/M<sub>a</sub> and the C.8 gains (M<sub>a</sub> at 22.3 dB, p. 299). Both treat the loop as P<sub>in</sub>C<sub>in</sub> with PD on the error. ctrlPID.py puts the derivative on θ, so its closed loop is type 1 (ramp error k<sub>D</sub>/k<sub>P</sub>) and the parabola error grows without bound.' }] },
-        { id: 'b', title: '(b) % of d<sub>in</sub> below 0.1 rad/s in θ', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gdin }, { v: 'percent' }),
-          solution: () => [{ tex: `|C_{in}(j0.1)| = ${tex(s().Bdin)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gdin)}\\%` }, { html: 'Book: 38 dB, 1.26% (C.8 gains).' }] },
+          solution: () => [{ tex: `e_{ss} = \\frac{2A}{M_a} = \\frac{2A(J_s+J_p)}{k_{P_\\theta}};\\quad \\text{C.10 gains: } \\frac{${tex(2 * pr.parabA)}}{${tex(s().Ma)}} = ${tex(s().eParab)}\\,\\text{rad}` }, { html: 'Book: 1.53 with A/M<sub>a</sub> and the C.8 gains (M<sub>a</sub> at 22.3 dB, p. 299). Both treat the loop as P<sub>in</sub>C<sub>in</sub> with PD on the error. ctrlPID.py puts the derivative on θ, so its closed loop is type 1 (ramp error k<sub>D</sub>/k<sub>P</sub>) and the parabola error grows without bound.' },
+            { code: `def e_ss(kP, kD):\n    Ma = kP / (P.Js + P.Jp)      # lim s^2 P_in C_in\n    return 2 * ${pr.parabA} / Ma          # θ_r = ${pr.parabA}t^2  ->  R = ${2 * pr.parabA}/s^3` }] },
+        { id: 'b', title: '(b) % of d<sub>in</sub> below 0.1 rad/s in θ',
+          html: 'Percent of an input disturbance at frequency w (rad/s) that shows up in θ, as a function of w and the inner-loop gains (dirty derivative σ, as in hw16.py).',
+          code: {
+            template: 'def din_pct(w, kP, kD, sigma):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { w: { label: 'w', lo: 0.005, hi: 0.5 }, kP: PY.kPin, kD: PY.kDin, sigma: PY.sigma },
+              items: [{ fn: 'din_pct', args: ['w', 'kP', 'kD', 'sigma'], truth: (p, a) => 100 / magAt(T.pid({ kP: a.kP, kD: a.kD, sigma: a.sigma }), a.w) }],
+            }, code),
+          },
+          solution: () => [{ tex: `|C_{in}(j0.1)| = ${tex(s().Bdin)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gdin)}\\%\;\\text{(C.10 gains)}` }, { html: 'Book: 38 dB, 1.26% (C.8 gains).' },
+            { code: 'def din_pct(w, kP, kD, sigma):\n    s = 1j * w\n    C_in = kP + kD * s / (sigma * s + 1)\n    return 100 / abs(C_in)      # |P/(1+PC)| ≈ 1/|C| where |PC| >> 1' }] },
         { id: 'p2', title: 'Outer loop: Bode plots of the plant and of the plant under PID control',
           html: 'Use <code>bode</code> with the C.10 gains. The workbench\'s Bode plot (<em>outer loop</em> view) shows P<sub>out</sub>C<sub>out</sub>, and P<sub>out</sub> once C.15(b) is done.' },
-        { id: 'c', title: '(c) % of noise above 10 rad/s in φ', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gn }, { v: 'percent' }),
-          solution: () => [{ tex: `|P_{out}C_{out}(j10)| = ${tex(-s().Bn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%` }, { html: 'Book: −8.4 dB, 38%. The part says "using PI control", but the loop is the PID of C.10.' }] },
+        { id: 'c', title: '(c) % of noise above 10 rad/s in φ',
+          html: 'Percent of sensor noise at frequency w (rad/s) that shows up in φ, as a function of w and the outer-loop PID gains (dirty derivative σ).',
+          code: {
+            template: 'def noise_pct(w, kP, kI, kD, sigma):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { w: { label: 'w', lo: 5, hi: 100 }, kP: PY.kPout, kI: PY.kIout, kD: PY.kDout, sigma: PY.sigma },
+              items: [{ fn: 'noise_pct', args: ['w', 'kP', 'kI', 'kD', 'sigma'], truth: (p, a) => 100 * magAt(T.mul(pOut(p), T.pid({ kP: a.kP, kI: a.kI, kD: a.kD, sigma: a.sigma })), a.w) }],
+            }, code),
+          },
+          solution: () => [{ tex: `|P_{out}C_{out}(j10)| = ${tex(-s().Bn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%\;\\text{(C.10 gains)}` }, { html: 'Book: −8.4 dB, 38%. The part says "using PI control", but the loop is the PID of C.10.' },
+            { code: 'def noise_pct(w, kP, kI, kD, sigma):\n    s = 1j * w\n    P_out = (P.b / P.Jp * s + P.k / P.Jp) / (s**2 + P.b / P.Jp * s + P.k / P.Jp)\n    C_out = kP + kI / s + kD * s / (sigma * s + 1)\n    return 100 * abs(P_out * C_out)   # |PC/(1+PC)| ≈ |PC| where |PC| << 1' }] },
       ]);
     },
   };

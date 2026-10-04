@@ -549,40 +549,57 @@
       const g = () => ctx.gains;
       lib.panel(parent, ctx, prob, [
         {
-          id: 'a1', title: '(a) PD only (set k<sub>I</sub> = 0)',
-          html: 'Errors for a unit input, using the current k<sub>P</sub>. Type ∞ as <code>inf</code>.',
-          inputs: { type: 'type', step: 'e<sub>step</sub>', ramp: 'e<sub>ramp</sub>', parab: 'e<sub>parab</sub>' },
-          check: (v) => {
-            if (g().kI > 0) return { ok: false, msg: 'Set kI = 0 first.' };
-            const inf = (s) => /^\s*(inf|∞|infinity)\s*$/i.test(String(s));
-            if (!inf(v.ramp) || !inf(v.parab)) return { ok: false, msg: 'Check the ramp and parabola errors against the system type.' };
-            return lib.check({ type: v.type, step: v.step }, { type: 0, step: a().step }, { step: 'e_step' });
-          },
+          id: 'a1', title: '(a) PD only (k<sub>I</sub> = 0)',
+          html: 'Set <code>system_type</code>, and write each steady-state error for a unit input (m) as a function of the gains. Return <code>np.inf</code> for an unbounded error. The check calls your functions at random gains.',
+          code: lib.pyPart(ctx, {
+            args: lib.gainArgs,
+            items: [
+              { var: 'system_type', truth: () => 0 },
+              { fn: 'e_step', args: ['kP', 'kD'], truth: (p, a) => p.k / (p.k + a.kP) },
+              { fn: 'e_ramp', args: ['kP', 'kD'], truth: () => Infinity },
+              { fn: 'e_parab', args: ['kP', 'kD'], truth: () => Infinity },
+            ],
+          }, 'system_type = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kD):\n    return ...\n'),
           solution: () => [
-            { tex: `PC = \\frac{(k_D s + k_P)/m}{s^2 + \\frac bm s + \\frac km} \\Rightarrow \\text{type 0},\\quad M_p = \\frac{k_P}{k} = ${tex(a().Mp)}` },
-            { tex: `e_{step} = \\frac{1}{1 + M_p} = \\frac{k}{k + k_P} = ${tex(a().step)},\\quad e_{ramp} = e_{parab} = \\infty` },
+            { tex: `PC = \\frac{(k_D s + k_P)/m}{s^2 + \\frac bm s + \\frac km} \\Rightarrow \\text{type 0},\\quad M_p = \\frac{k_P}{k} = ${tex(a().Mp)}\;\\text{(current gains)}` },
+            { tex: `e_{step} = \\frac{1}{1 + M_p} = \\frac{k}{k + k_P},\\quad e_{ramp} = e_{parab} = \\infty` },
+            { code: 'system_type = 0\n\ndef e_step(kP, kD):\n    return P.k / (P.k + kP)    # 1/(1 + M_p), M_p = kP/k\n\ndef e_ramp(kP, kD):\n    return np.inf\n\ndef e_parab(kP, kD):\n    return np.inf' },
             { html: 'Try it: compensation <em>none</em>, step input, k<sub>I</sub> = 0, and compare r − z at t_end.' },
           ],
         },
         {
           id: 'a2', title: '(a) With the integrator (k<sub>I</sub> > 0)',
-          inputs: { type: 'type', step: 'e<sub>step</sub>', ramp: 'e<sub>ramp</sub>' },
-          check: (v) => {
-            if (!(g().kI > 0)) return { ok: false, msg: 'Set kI > 0 first.' };
-            return lib.check(v, { type: 1, step: 0, ramp: a().ramp }, { ramp: 'e_ramp' });
-          },
-          solution: () => [{ tex: `PC = \\frac{(k_D s^2 + k_P s + k_I)/m}{s(s^2 + \\frac bm s + \\frac km)} \\Rightarrow \\text{type 1},\\; e_{step} = 0,\\; e_{ramp} = \\frac{k}{k_I} = ${tex(a().ramp)},\\; e_{parab} = \\infty` }],
+          html: 'Same as above, with PID control.',
+          code: lib.pyPart(ctx, {
+            args: lib.gainArgs,
+            items: [
+              { var: 'system_type', truth: () => 1 },
+              { fn: 'e_step', args: ['kP', 'kI', 'kD'], truth: () => 0 },
+              { fn: 'e_ramp', args: ['kP', 'kI', 'kD'], truth: (p, a) => p.k / a.kI },
+            ],
+          }, 'system_type = ...\n\ndef e_step(kP, kI, kD):\n    return ...\n\ndef e_ramp(kP, kI, kD):\n    return ...\n'),
+          solution: () => [
+            { tex: `PC = \\frac{(k_D s^2 + k_P s + k_I)/m}{s(s^2 + \\frac bm s + \\frac km)} \\Rightarrow \\text{type 1},\; e_{step} = 0,\; e_{ramp} = \\frac{k}{k_I},\; e_{parab} = \\infty` },
+            { code: 'system_type = 1\n\ndef e_step(kP, kI, kD):\n    return 0.0\n\ndef e_ramp(kP, kI, kD):\n    return P.k / kI    # 1/M_v, M_v = kI/k' },
+          ],
         },
         {
           id: 'b', title: '(b) Constant input disturbance',
-          html: 'Steady-state error per newton of d (m/N), without and with the integrator, at the current k<sub>P</sub>.',
-          inputs: { pd: 'PD', pid: 'PID' },
-          check: (v) => {
-            const pd = lib.num(v.pd);  // sign depends on the convention (Fig. 9-5 subtracts d_in; the sim adds d)
-            return lib.check({ pd: pd === null ? v.pd : Math.abs(pd), pid: v.pid }, { pd: 1 / (ctx.pModel.k + g().kP), pid: 0 }, { pd: 'PD', pid: 'PID' });
+          html: 'Steady-state error per newton of d (m/N), without and with the integrator, as functions of the gains. Either sign convention is accepted.',
+          code: {
+            template: 'def e_dist_pd(kP, kD):\n    return ...\n\ndef e_dist_pid(kP, kI, kD):\n    return ...\n',
+            // sign depends on the convention (Fig. 9-5 subtracts d_in; the sim adds d)
+            ...lib.pyEither(ctx, [1, -1].map((sg) => ({
+              args: lib.gainArgs,
+              items: [
+                { fn: 'e_dist_pd', args: ['kP', 'kD'], truth: (p, a) => sg / (p.k + a.kP) },
+                { fn: 'e_dist_pid', args: ['kP', 'kI', 'kD'], truth: () => 0 },
+              ],
+            }))),
           },
           solution: () => [
-            { tex: `\\text{PD}: \\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1/k}{1 + k_P/k} = \\frac{1}{k + k_P} = ${tex(1 / (ctx.pModel.k + g().kP))},\\quad \\text{PID}: 0` },
+            { tex: `\\text{PD}: \\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1/k}{1 + k_P/k} = \\frac{1}{k + k_P} = ${tex(1 / (ctx.pModel.k + g().kP))}\;\\text{(current gains)},\\quad \\text{PID}: 0` },
+            { code: 'def e_dist_pd(kP, kD):\n    return 1 / (P.k + kP)\n\ndef e_dist_pid(kP, kI, kD):\n    return 0.0' },
             { html: 'An error in k is such a disturbance: F<sub>e</sub> = k̂z<sub>r</sub> misses k z<sub>r</sub> by (k − k̂)z<sub>r</sub>. Try it: d = 0.5 N starts at t = 20 s.' },
           ],
         },
@@ -685,9 +702,15 @@
         },
         {
           id: 'b', title: 'Largest stable k<sub>I</sub>',
-          inputs: { k: 'k<sub>I,crit</sub>' },
-          check: (v) => lib.check(v, { k: ev().kCrit }, { k: 'kI,crit' }),
-          solution: () => [{ tex: `c_2c_1 > b_0k_I \\Rightarrow k_{I,crit} = \\frac{(2\\zeta\\omega_n)(\\omega_n^2)}{1/m} = ${tex(ev().kCrit)}` }],
+          html: 'As a function of the PD gains k<sub>P</sub>, k<sub>D</sub>. The check calls it at random gains.',
+          code: lib.pyPart(ctx, {
+            args: { kP: lib.gainArgs.kP, kD: lib.gainArgs.kD },
+            items: [{ fn: 'kI_crit', args: ['kP', 'kD'], truth: (p, a) => ans.evans(p, a).kCrit }],
+          }, 'def kI_crit(kP, kD):\n    return ...\n'),
+          solution: () => [
+            { tex: `c_2c_1 > b_0k_I \\Rightarrow k_{I,crit} = \\frac{(a_1 + b_0k_D)(a_0 + b_0k_P)}{b_0} = \\frac{(b + k_D)(k + k_P)}{m} = ${tex(ev().kCrit)}\;\\text{(current gains)}` },
+            { code: 'def kI_crit(kP, kD):\n    return (P.b + kD) * (P.k + kP) / P.m    # Routh: c2 c1 > c0 = kI/m' },
+          ],
         },
         {
           id: 'c', title: 'Pick k<sub>I</sub> that barely moves the PD poles',

@@ -220,6 +220,22 @@
   });
 
   // ------------------------------------------------------------ Chapter 16 --
+  // F.16 Python answers: functions of the frequency, the loop's gains and σ, checked
+  // at random values (signs as in F.8 / F.10; the outer loop uses k_DC = 1).
+  const SIG = { label: 'σ', lo: 0.01, hi: 0.1 };
+  const G16 = {
+    lon: { kP: { label: 'kP', lo: 0.05, hi: 2 }, kI: { label: 'kI', lo: 0.001, hi: 0.1 }, kD: { label: 'kD', lo: 0.1, hi: 3 } },
+    inner: { kP: { label: 'kP', lo: 0.1, hi: 2 }, kD: { label: 'kD', lo: 0.02, hi: 1 } },
+    outer: { kP: { label: 'kP', lo: -0.05, hi: -0.001 }, kI: { label: 'kI', lo: -0.003, hi: -0.0001 }, kD: { label: 'kD', lo: -0.1, hi: -0.005 } },
+  };
+  const outerMag = (q, a) => { const P = plants(q); return abs(T.mul(T.mul(P.outer, T.gain(F.kDCof(P.m, { kPth: 1 }))), pidTf(a.kP, a.kI, a.kD, a.sigma)), a.w); };
+  // Last frequency where the inner closed loop |T_in| drops through 0.1 (as specs16).
+  function wSensorOf(q, a) {
+    const Ti = T.feedback(T.mul(plants(q).inner, pidTf(a.kP, 0, a.kD, a.sigma)));
+    return T.crossDown(Ti, W, 0.1).pop() ?? NaN;
+  }
+  const PY_C = 'def C(s, kP, kI, kD, sigma):\n    return kP + kI / s + kD * s / (sigma * s + 1)\n';
+
   function specs16(ctx) {
     const pr = ctx.sys.problems.ch16, lp = loopsOf(ctx), g = f10Gains(ctx), P = lp.P;
     // (a) parabola r̈ = A: book convention |PC| slope at low frequency
@@ -315,26 +331,47 @@
     },
     buildProblem(parent, ctx) {
       const s = () => specs16(ctx);
-      const pc = (v) => ({ v: 100 * v });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
-        { id: 'a', title: '(a) Tracking error to a parabola of curvature 5 [m]', inputs: { v: 'e<sub>ss</sub>' },
-          check: (v) => { const x = s(); const gv = PD().num(v.v); if (gv !== null && isFinite(x.eParImpl) && M.close(gv, x.eParImpl, 0.02)) return { ok: false, msg: 'That is the error of the implemented loop (derivative on h). Table 9-1 / the Bode plot treat C as acting on the error.' }; return PD().checkNumbers(v, { v: x.ePar }, { v: 'e_ss' }); },
-          solution: () => [{ tex: `\\text{With } k_{I_h} > 0:\\; PC \\propto 1/s^3 \\Rightarrow \\text{type 3} \\Rightarrow e_{ss} = ${tex(s().ePar)}` }, { html: `"Curvature 5" is read as r̈ = 5, i.e. R = 5/s³. The implemented loop (derivative on h) instead has e<sub>ss</sub> = 5k<sub>D<sub>h</sub></sub>/k<sub>I<sub>h</sub></sub> = ${fmt(s().eParImpl, 3)} m.` }] },
-        { id: 'b', title: '(b) % of noise above 30 rad/s in h', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers(v, pc(s().gn), { v: 'percent' }),
-          solution: () => [{ tex: `|P C(j30)| = ${tex(db(s().gn))}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%` }] },
-        { id: 'c', title: '(c) % of an input disturbance below 2 rad/s in θ', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers(v, pc(s().gdin), { v: 'percent' }),
-          solution: () => [{ tex: `\\gamma_{d_{in}} = \\frac{1}{\\min|C|} = \\frac{1}{k_{P_\\theta}} = ${tex(s().gdin)} \\Rightarrow ${tex(100 * s().gdin)}\\%` }] },
-        { id: 'd', title: '(d) Above what frequency is 1° of θ sensor noise attenuated below 0.1°?', inputs: { v: 'ω [rad/s]' },
-          check: (v) => { const x = s(), gv = PD().num(v.v); if (gv === null) return { ok: false, msg: 'Enter a frequency.' }; return { ok: Math.abs(gv / x.wSensor - 1) < 0.05, msg: Math.abs(gv / x.wSensor - 1) < 0.05 ? 'Within 5%.' : 'Where does |T_in| drop to −20 dB?' }; },
-          solution: () => [{ tex: `|T_{in}(j\\omega)| = 0.1 \\text{ at } \\omega \\approx ${tex(s().wSensor)}` }, { html: 'Sensor answer: noise must be below 0.1° at low frequency (|T| ≈ 1 inside the bandwidth); noise of 1° is fine only above this frequency, and 10° only about a decade above (−40 dB/dec roll-off).' }] },
-        { id: 'e', title: '(e) % tracking error for z<sub>r</sub> content below 0.1 rad/s', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers(v, pc(s().gr), { v: 'percent' }),
-          solution: () => [{ tex: `\\gamma_r = \\frac{1}{|PC(j0.1)|} = ${tex(s().gr)} \\Rightarrow ${tex(100 * s().gr)}\\%\\;(\\text{exact } |S(j0.1)| = ${tex(100 * s().grExact)}\\%)` }, { html: 'The book approximation 1/|PC| is poor here because |PC(j0.1)| is not ≫ 1.' }] },
-        { id: 'f', title: '(f) % of an output disturbance below 0.01 rad/s in z', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers(v, pc(s().gout), { v: 'percent' }),
-          solution: () => [{ tex: `\\frac{1}{|PC(j0.01)|} = ${tex(s().gout)} \\Rightarrow ${tex(100 * s().gout)}\\%` }] },
+        { id: 'a', title: '(a) Tracking error to a parabola of curvature 5 [m]',
+          html: 'Book convention (C acting on the error), as a function of the altitude PID gains (k<sub>I<sub>h</sub></sub> &gt; 0). The check calls it at random gains.',
+          code: F.pyPart(ctx, {
+            args: G16.lon,
+            items: [{ fn: 'e_ss', args: ['kP', 'kI', 'kD'], truth: () => 0 }],
+            explain: (it, f) => (f.e.a && M.close(Number(f.e.got), 5 * f.e.a.kD / f.e.a.kI, 1e-4, 1e-9) ? 'That is the error of the implemented loop (derivative on h). Table 9-1 / the Bode plot treat C as acting on the error.' : ''),
+          }, 'def e_ss(kP, kI, kD):\n    return ...\n'),
+          solution: () => [{ tex: `\\text{With } k_{I_h} > 0:\; PC \\propto 1/s^3 \\Rightarrow \\text{type 3} \\Rightarrow e_{ss} = ${tex(s().ePar)}` }, { html: `"Curvature 5" is read as r̈ = 5, i.e. R = 5/s³. The implemented loop (derivative on h) instead has e<sub>ss</sub> = 5k<sub>D<sub>h</sub></sub>/k<sub>I<sub>h</sub></sub> = ${fmt(s().eParImpl, 3)} m (current gains).` },
+            { code: 'def e_ss(kP, kI, kD):\n    return 0.0    # type 3: PC ~ kI / (M s^3)' }] },
+        { id: 'b', title: '(b) % of noise above 30 rad/s in h',
+          html: 'Percent of sensor noise at frequency w (rad/s) that shows up in h, using the book\'s approximation (p. 287), as a function of w and the altitude PID gains with dirty derivative σ.',
+          code: F.pyPart(ctx, { args: { w: { label: 'w', lo: 10, hi: 300 }, ...G16.lon, sigma: SIG }, items: [{ fn: 'noise_pct', args: ['w', 'kP', 'kI', 'kD', 'sigma'], truth: (q, a) => 100 * abs(T.mul(plants(q).lon, pidTf(a.kP, a.kI, a.kD, a.sigma)), a.w) }] },
+            'def noise_pct(w, kP, kI, kD, sigma):\n    return ...\n'),
+          solution: () => [{ tex: `|P C(j30)| = ${tex(db(s().gn))}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%\;\\text{(current gains)}` },
+            { code: `${PY_C}\ndef noise_pct(w, kP, kI, kD, sigma):\n    s = 1j * w\n    Pl = 1 / ((P.mc + 2 * P.mr) * s**2)\n    return 100 * abs(Pl * C(s, kP, kI, kD, sigma))   # |T| ≈ |PC| where |PC| << 1` }] },
+        { id: 'c', title: '(c) % of an input disturbance below 2 rad/s in θ',
+          html: 'Worst case over the band, using the book\'s approximation (p. 290), as a function of the inner PD gains and σ.',
+          code: F.pyPart(ctx, { args: { ...G16.inner, sigma: SIG }, items: [{ fn: 'din_pct', args: ['kP', 'kD', 'sigma'], truth: (q, a) => 100 / a.kP }] },
+            'def din_pct(kP, kD, sigma):\n    return ...\n'),
+          solution: () => [{ tex: `\\gamma_{d_{in}} = \\frac{1}{\\min|C|} = \\frac{1}{k_{P_\\theta}} = ${tex(s().gdin)} \\Rightarrow ${tex(100 * s().gdin)}\\%\;\\text{(current gains)}` },
+            { html: 'Re C(jω) = k<sub>P</sub> + k<sub>D</sub>σω²/(1 + σ²ω²) ≥ k<sub>P</sub>, so |C| is smallest at DC.' },
+            { code: 'def din_pct(kP, kD, sigma):\n    return 100 / kP     # 1/min|C|, and min|C| = |C(0)| = kP' }] },
+        { id: 'd', title: '(d) Above what frequency is 1° of θ sensor noise attenuated below 0.1°?',
+          html: 'The frequency (rad/s) above which the inner closed loop passes less than 0.1 of the θ noise, as a function of the inner PD gains and σ (dirty derivative). The check calls it at random gains.',
+          code: F.pyPart(ctx, { args: { ...G16.inner, sigma: SIG }, items: [{ fn: 'w_sensor', args: ['kP', 'kD', 'sigma'], truth: (q, a) => wSensorOf(q, a) }] },
+            'def w_sensor(kP, kD, sigma):\n    return ...\n'),
+          solution: () => [{ tex: `|T_{in}(j\\omega)| = 0.1 \\text{ at } \\omega \\approx ${tex(s().wSensor)}\;\\text{(current gains)}` }, { html: 'Sensor answer: noise must be below 0.1° at low frequency (|T| ≈ 1 inside the bandwidth); noise of 1° is fine only above this frequency, and 10° only about a decade above (−40 dB/dec roll-off).' },
+            { code: `${PY_C}\ndef w_sensor(kP, kD, sigma):\n    J = P.Jc + 2 * P.mr * P.d**2\n    def T(w):\n        s = 1j * w\n        L = C(s, kP, 0, kD, sigma) / (J * s**2)\n        return abs(L / (1 + L))\n    w = np.logspace(-3, 4, 7000)\n    k = np.nonzero(np.array([T(x) for x in w]) >= 0.1)[0][-1]   # last point above 0.1\n    lo, hi = np.log(w[k]), np.log(w[k + 1])\n    for _ in range(60):                                         # bisection on log w\n        mid = (lo + hi) / 2\n        lo, hi = (lo, mid) if T(np.exp(mid)) < 0.1 else (mid, hi)\n    return np.exp((lo + hi) / 2)` }] },
+        { id: 'e', title: '(e) % tracking error for z<sub>r</sub> content below 0.1 rad/s',
+          html: 'Percent tracking error for z<sub>r</sub> content at frequency w (rad/s), using the book\'s approximation (p. 287) with the inner loop replaced by its DC gain (F.8), as a function of w, the outer PID gains (k<sub>P</sub>, k<sub>D</sub>, k<sub>I</sub> &lt; 0) and σ.',
+          code: F.pyPart(ctx, { args: { w: { label: 'w', lo: 0.01, hi: 0.5 }, ...G16.outer, sigma: SIG }, items: [{ fn: 'track_pct', args: ['w', 'kP', 'kI', 'kD', 'sigma'], truth: (q, a) => 100 / outerMag(q, a) }] },
+            'def track_pct(w, kP, kI, kD, sigma):\n    return ...\n'),
+          solution: () => [{ tex: `\\gamma_r = \\frac{1}{|PC(j0.1)|} = ${tex(s().gr)} \\Rightarrow ${tex(100 * s().gr)}\\%\;(\\text{exact } |S(j0.1)| = ${tex(100 * s().grExact)}\\%)` }, { html: 'The book approximation 1/|PC| is poor here because |PC(j0.1)| is not ≫ 1.' },
+            { code: `${PY_C}\ndef track_pct(w, kP, kI, kD, sigma):\n    s = 1j * w\n    Pz = -P.g / (s * (s + P.mu / (P.mc + 2 * P.mr)))   # times k_DC = 1\n    return 100 / abs(Pz * C(s, kP, kI, kD, sigma))` }] },
+        { id: 'f', title: '(f) % of an output disturbance below 0.01 rad/s in z',
+          html: 'Percent of an output disturbance at frequency w (rad/s) that shows up in z, with the same approximation and loop model as (e).',
+          code: F.pyPart(ctx, { args: { w: { label: 'w', lo: 0.001, hi: 0.05 }, ...G16.outer, sigma: SIG }, items: [{ fn: 'dout_pct', args: ['w', 'kP', 'kI', 'kD', 'sigma'], truth: (q, a) => 100 / outerMag(q, a) }] },
+            'def dout_pct(w, kP, kI, kD, sigma):\n    return ...\n'),
+          solution: () => [{ tex: `\\frac{1}{|PC(j0.01)|} = ${tex(s().gout)} \\Rightarrow ${tex(100 * s().gout)}\\%\;\\text{(current gains)}` },
+            { code: `${PY_C}\ndef dout_pct(w, kP, kI, kD, sigma):\n    s = 1j * w\n    Pz = -P.g / (s * (s + P.mu / (P.mc + 2 * P.mr)))\n    return 100 / abs(Pz * C(s, kP, kI, kD, sigma))   # |S| ≈ 1/|PC| where |PC| >> 1` }] },
       ]);
     },
   });

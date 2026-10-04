@@ -224,6 +224,18 @@
   };
 
   // ------------------------------------------------------------ Chapter 16 --
+  // B.16 answers are functions of the frequency and the gains (signs as the
+  // pendulum's: all negative), checked at random arguments.
+  const SIGMA = { label: 'σ', lo: 0.01, hi: 0.1 };
+  const IN_ARGS = { kPth: { label: 'kPθ', lo: -150, hi: -20 }, kDth: { label: 'kDθ', lo: -15, hi: -1 }, sigma: SIGMA };
+  const OUT_ARGS = { kPz: { label: 'kPz', lo: -0.5, hi: -0.02 }, kIz: { label: 'kIz', lo: -0.3, hi: -0.005 }, kDz: { label: 'kDz', lo: -0.8, hi: -0.05 }, sigma: SIGMA };
+  // truth(|P_in C_in(jw)|) gives the expected value.
+  const inCheck = (ctx, fn, w, truth) => (code) => WB.py.check(ctx, {
+    args: { w, ...IN_ARGS },
+    items: [{ fn, args: ['w', 'kPth', 'kDth', 'sigma'], truth: (p, a) => truth(T.mag(T.mul(Pin(p), Cin(a)), a.w)) }],
+  }, code);
+  const PY_IN = 'def loop_in(w, kP, kD, sigma):\n    s = 1j * w\n    J = P.m1 * P.ell / 6 + P.m2 * 2 * P.ell / 3\n    Pin = (-1 / J) / (s**2 - (P.m1 + P.m2) * P.g / J)\n    Cin = kP + kD * s / (sigma * s + 1)\n    return Pin * Cin\n';
+
   B.chapters.ch16 = {
     id: 'ch16', num: 16, tab: 'Ch 16', title: 'Frequency-domain specs', pages: 'pp. 283–301',
     linear: false,
@@ -294,17 +306,29 @@
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
         { id: 'in', title: 'Inner loop: Bode plots of the plant and of the plant under PD control',
           html: 'Use the B.10 gains (hw16.py). In your code: bode(P_in) and bode(P_in·C_in) on one graph. Here: Loop = inner, and the gains on the right (in Work mode, Use my Ch 10 gains).' },
-        { id: 'a', title: '(a) Inner-loop tracking error below 1 rad/s', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().grIn }, { v: 'percent' }),
-          solution: () => [{ tex: `B_r = ${tex(s().BrIn)}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().grIn)}\\%` }, { html: 'The book reads 6.5 dB → 47% from Fig. 16-10 (p. 297), which matches t<sub>r,θ</sub> = 0.5 s (B.8) gains, not the B.10 listing\'s 0.2 s.' }] },
-        { id: 'b', title: '(b) Percent of inner-loop noise above 200 rad/s in θ', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gnIn }, { v: 'percent' }),
-          solution: () => [{ tex: `|PC(j200)| = ${tex(-s().BnIn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gnIn)}\\%` }, { html: 'Book: −32.2 dB → 2.45% (p. 297), again from different gains.' }] },
+        { id: 'a', title: '(a) Inner-loop tracking error below 1 rad/s',
+          html: 'Percent tracking error (γ<sub>r</sub>, p. 286) for r<sub>θ</sub> content at frequency w (rad/s), as a function of w and the inner gains with the dirty derivative σ. The check calls it at random arguments; w = 1 is the book\'s case.',
+          code: { template: 'def track_pct_in(w, kP, kD, sigma):\n    return ...\n', check: inCheck(ctx, 'track_pct_in', { label: 'w', lo: 0.1, hi: 2 }, (Lg) => 100 / Lg) },
+          solution: () => [{ tex: `B_r = ${tex(s().BrIn)}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().grIn)}\\%\;\\text{(current gains)}` }, { html: 'The book reads 6.5 dB → 47% from Fig. 16-10 (p. 297), which matches t<sub>r,θ</sub> = 0.5 s (B.8) gains, not the B.10 listing\'s 0.2 s.' },
+            { code: `${PY_IN}\ndef track_pct_in(w, kP, kD, sigma):\n    return 100 / abs(loop_in(w, kP, kD, sigma))` }] },
+        { id: 'b', title: '(b) Percent of inner-loop noise above 200 rad/s in θ',
+          html: 'Percent of noise at frequency w (rad/s) that shows up in θ, as a function of w and the inner gains.',
+          code: { template: 'def noise_pct_in(w, kP, kD, sigma):\n    return ...\n', check: inCheck(ctx, 'noise_pct_in', { label: 'w', lo: 100, hi: 1000 }, (Lg) => 100 * Lg) },
+          solution: () => [{ tex: `|PC(j200)| = ${tex(-s().BnIn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gnIn)}\\%\;\\text{(current gains)}` }, { html: 'Book: −32.2 dB → 2.45% (p. 297), again from different gains.' },
+            { code: `${PY_IN}\ndef noise_pct_in(w, kP, kD, sigma):\n    return 100 * abs(loop_in(w, kP, kD, sigma))` }] },
         { id: 'out', title: 'Outer loop: Bode plots of the plant and of the plant under PID control',
           html: 'Same, with bode(P_out) and bode(P_out·C_out). Here: Loop = outer.' },
-        { id: 'c', title: '(c) Outer-loop tracking error below 0.001 rad/s for |r| ≤ 50', inputs: { v: '|e| bound' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 50 * s().grOut }, { v: 'bound' }),
-          solution: () => [{ tex: `B_r = ${tex(s().BrOut)}\\,\\text{dB},\\; |e| \\le 50\\gamma_r = ${tex(50 * s().grOut)}` }, { html: 'Book: 154 dB → γ<sub>r</sub> = 2·10⁻⁸, |e| ≤ 1·10⁻⁶ (p. 297; it prints "100e−08").' }] },
+        { id: 'c', title: '(c) Outer-loop tracking error below 0.001 rad/s for |r| ≤ 50',
+          html: 'Bound on |e| for |r| ≤ 50 with content at frequency w (rad/s), as a function of w and the outer PID gains with σ.',
+          code: {
+            template: 'def e_bound_out(w, kP, kI, kD, sigma):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { w: { label: 'w', lo: 5e-4, hi: 2e-3 }, ...OUT_ARGS },
+              items: [{ fn: 'e_bound_out', args: ['w', 'kPz', 'kIz', 'kDz', 'sigma'], truth: (p, a) => ctx.sys.problems.ch16.rMax / T.mag(T.mul(Pout(p), Cout(a)), a.w) }],
+            }, code),
+          },
+          solution: () => [{ tex: `B_r = ${tex(s().BrOut)}\\,\\text{dB},\; |e| \\le 50\\gamma_r = ${tex(50 * s().grOut)}\;\\text{(current gains)}` }, { html: 'Book: 154 dB → γ<sub>r</sub> = 2·10⁻⁸, |e| ≤ 1·10⁻⁶ (p. 297; it prints "100e−08").' },
+            { code: 'def e_bound_out(w, kP, kI, kD, sigma):\n    s = 1j * w\n    Pout = (-2 * P.ell / 3 * s**2 + P.g) / s**2\n    Cout = kP + kI / s + kD * s / (sigma * s + 1)\n    return 50 / abs(Pout * Cout)' }] },
       ]);
     },
   };

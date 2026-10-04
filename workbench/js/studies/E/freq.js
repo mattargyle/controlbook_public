@@ -279,43 +279,76 @@ WB.studies.E = WB.studies.E || { chapters: {} };
 
     buildProblem(parent, ctx) {
       const s = () => this.specs(ctx);
-      const pc = (v, truth, label) => PD().checkNumbers({ v }, { v: 100 * truth }, { v: label });
+      // Answers are functions of the frequency and the gains, checked at random
+      // arguments (inner gains > 0, outer < 0). PD/PID with the dirty derivative (σ).
+      const IN = { kP: { label: 'kPθ', lo: 0.5, hi: 20 }, kD: { label: 'kDθ', lo: 0.1, hi: 5 }, sigma: { label: 'σ', lo: 0.01, hi: 0.1 } };
+      const OUT = { kP: { label: 'kPz', lo: -0.1, hi: -0.005 }, kI: { label: 'kIz', lo: -0.01, hi: -1e-5 }, kD: { label: 'kDz', lo: -0.2, hi: -0.01 }, sigma: IN.sigma };
+      const Lin = (p, a) => T.mag(T.mul(T.tf([ctx.sys.linear(p).b0], [1, 0, 0]), T.pid({ kP: a.kP, kD: a.kD, sigma: a.sigma })), a.w);
+      const Lout = (p, a) => T.at(T.mul(T.tf([-p.g], [1, 0, 0]), T.pid({ kP: a.kP, kI: a.kI, kD: a.kD, sigma: a.sigma })), a.w);
+      const sens = (p, a) => 1 / Math.hypot(1 + Lout(p, a).re, Lout(p, a).im);
+      const sensIn = (p, a) => { const z = T.at(T.mul(T.tf([ctx.sys.linear(p).b0], [1, 0, 0]), T.pid({ kP: a.kP, kD: a.kD, sigma: a.sigma })), a.w); return 1 / Math.hypot(1 + z.re, z.im); };
+      const args = (w, gains) => ({ w: { label: 'w', lo: w[0], hi: w[1] }, ...gains });
+      // The book reads 1/|L| off the Bode plot; the exact |S| = 1/|1 + L| is accepted too.
+      const either = (code, spec, fn, book, exact, okMsg) => {
+        const run = (truth) => WB.py.check(ctx, { ...spec, items: [{ ...spec.item, fn, truth }] }, code);
+        return run(book).then((r) => (r.ok ? r : run(exact).then((r2) => (r2.ok ? { ...r2, msg: `${r2.msg} ${okMsg}` } : r))));
+      };
+      const inArgs = ['w', 'kP', 'kD', 'sigma'], outArgs = ['w', 'kP', 'kI', 'kD', 'sigma'];
+      const near = (f, x) => Math.abs(Number(f.e.got) - x) <= 1e-4 * Math.abs(x);
+      const PY_IN = 'def L_in(w, kP, kD, sigma):\n    s = 1j * w\n    b0 = P.ell / (P.m2 * P.ell**2 / 3 + P.m1 * (P.ell / 2)**2)\n    return b0 / s**2 * (kP + kD * s / (sigma * s + 1))\n';
+      const PY_OUT = 'def L_out(w, kP, kI, kD, sigma):\n    s = 1j * w\n    return -P.g / s**2 * (kP + kI / s + kD * s / (sigma * s + 1))\n';
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
         { id: 'in', title: 'Inner loop: Bode plots of the plant and of the plant under PD',
           html: 'Select <em>Bode of: inner (θ)</em>. The gains come from the knobs (default: the E.8 specs), with the dirty derivative (σ). In your own code, build P<sub>in</sub> and P<sub>in</sub>C<sub>in</sub> with <code>control.tf</code> and plot both with <code>bode</code>.' },
-        { id: 'a', title: '(a) Inner tracking error below 1 rad/s', inputs: { v: '%' },
-          check: (v) => {
-            const g = PD().num(v.v), x = s();
-            if (g !== null && M.close(g, 100 * x.grExact, 0.01)) return { ok: true, msg: `Exact |S(j1)|. The book's method (1/|L|, Eq. 16.5) gives ${fmt(100 * x.gr, 3)}%.` };
-            return pc(v.v, x.gr, 'percent');
+        { id: 'a', title: '(a) Inner tracking error below 1 rad/s',
+          html: 'Percent tracking error for θ<sub>r</sub> content below w (rad/s), as a function of w and the inner PD gains (dirty derivative σ). The check calls it at random arguments; w = 1 is the book\'s case.',
+          code: {
+            template: 'def track_pct(w, kP, kD, sigma):\n    return ...\n',
+            check: (code) => either(code, { args: args([0.05, 3], IN), item: { args: inArgs } }, 'track_pct',
+              (p, a) => 100 / Lin(p, a), (p, a) => 100 * sensIn(p, a), '(Exact |S|; the book\'s method uses 1/|L|, Eq. 16.5.)'),
           },
-          solution: () => [{ tex: `|L_{in}(j1)| = ${tex(db(1 / s().gr))}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().gr)}\\%\\quad(\\text{exact } |S(j1)| = ${tex(100 * s().grExact)}\\%)` }, { html: 'Both are accepted: the book reads 1/|L| off the Bode plot (p. 287, and A.16/B.16 on pp. 295–297).' }] },
-        { id: 'b', title: '(b) Input disturbance below 0.8 rad/s, % in θ', inputs: { v: '%' },
-          check: (v) => {
-            const g = PD().num(v.v), x = s();
-            if (g !== null && M.close(g, 100 * x.gdinEdge, 0.02)) return { ok: false, msg: 'That is 1/|C_in| at 0.8 rad/s. For a PD, |C_in| is smallest at low frequency, so the worst case is 1/k_Pθ.' };
-            return pc(v.v, x.gdin, 'percent');
+          solution: () => [{ tex: `|L_{in}(j1)| = ${tex(db(1 / s().gr))}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().gr)}\\%\\quad(\\text{exact } |S(j1)| = ${tex(100 * s().grExact)}\\%;\\text{ current gains})` }, { html: 'Both are accepted: the book reads 1/|L| off the Bode plot (p. 287, and A.16/B.16 on pp. 295–297).' },
+            { code: `${PY_IN}\ndef track_pct(w, kP, kD, sigma):\n    return 100 / abs(L_in(w, kP, kD, sigma))` }] },
+        { id: 'b', title: '(b) Input disturbance below 0.8 rad/s, % in θ',
+          html: 'Percent of an input disturbance with content below w (rad/s) that shows up in θ, as a function of w and the inner PD gains.',
+          code: {
+            template: 'def din_pct(w, kP, kD, sigma):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: args([0.05, 3], IN),
+              items: [{ fn: 'din_pct', args: inArgs, truth: (p, a) => 100 / a.kP }],
+              explain: (it, f) => (near(f, 100 / T.mag(T.pid({ kP: f.e.a.kP, kD: f.e.a.kD, sigma: f.e.a.sigma }), f.e.a.w)) ? 'That is 1/|C_in| at the band edge w. For a PD, |C_in| is smallest at low frequency, so the worst case below w is at ω → 0.' : ''),
+            }, code),
           },
-          solution: () => [{ tex: `\\frac{P_{in}}{1 + P_{in}C_{in}} \\approx \\frac{1}{C_{in}},\\; |C_{in}(j\\omega)| \\ge k_{P_\\theta} = ${tex(s().g.kPth)} \\Rightarrow \\gamma_{d_{in}} = ${tex(100 * s().gdin)}\\%` }, { html: `At the band edge 1/|C<sub>in</sub>(j0.8)| = ${fmt(100 * s().gdinEdge, 3)}%. See ISSUES.md: the problem does not say which one it wants.` }] },
-        { id: 'c', title: '(c) Noise above 300 rad/s, % in θ', inputs: { v: '%' },
-          check: (v) => pc(v.v, s().gn, 'percent'),
-          solution: () => [{ tex: `|L_{in}(j300)| = ${tex(db(s().gn))}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%` }, { html: 'Above 1/σ = 20 rad/s the dirty-derivative PD flattens at k<sub>P</sub> + k<sub>D</sub>/σ, so |L<sub>in</sub>| falls at −40 dB/dec.' }] },
+          solution: () => [{ tex: `\\frac{P_{in}}{1 + P_{in}C_{in}} \\approx \\frac{1}{C_{in}},\; |C_{in}(j\\omega)| \\ge k_{P_\\theta} = ${tex(s().g.kPth)} \\Rightarrow \\gamma_{d_{in}} = ${tex(100 * s().gdin)}\\%\;\\text{(current gains)}` }, { html: `At the band edge 1/|C<sub>in</sub>(j0.8)| = ${fmt(100 * s().gdinEdge, 3)}%. See ISSUES.md: the problem does not say which one it wants.` },
+            { code: 'def din_pct(w, kP, kD, sigma):\n    return 100 / kP     # max over ω ≤ w of 1/|C_in(jω)|, reached as ω → 0' }] },
+        { id: 'c', title: '(c) Noise above 300 rad/s, % in θ',
+          html: 'Percent of noise at frequency w (rad/s) that shows up in θ, as a function of w and the inner PD gains.',
+          code: {
+            template: 'def noise_pct(w, kP, kD, sigma):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, { args: args([100, 2000], IN), items: [{ fn: 'noise_pct', args: inArgs, truth: (p, a) => 100 * Lin(p, a) }] }, code),
+          },
+          solution: () => [{ tex: `|L_{in}(j300)| = ${tex(db(s().gn))}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%\;\\text{(current gains)}` }, { html: 'Above 1/σ = 20 rad/s the dirty-derivative PD flattens at k<sub>P</sub> + k<sub>D</sub>/σ, so |L<sub>in</sub>| falls at −40 dB/dec.' },
+            { code: `${PY_IN}\ndef noise_pct(w, kP, kD, sigma):\n    return 100 * abs(L_in(w, kP, kD, sigma))` }] },
         { id: 'out', title: 'Outer loop: Bode plots of the plant and of the plant under PID',
           html: 'Select <em>Bode of: outer (z)</em>. The book asks for the E.10 gains; the knobs default to the E.8 specs with a small k<sub>I<sub>z</sub></sub> (the buttons load the E.8 specs or the E.10 sample design). Dirty derivative as above.' },
-        { id: 'd', title: '(d) Output disturbance below 0.1 rad/s, % in z', inputs: { v: '%' },
-          check: (v) => {
-            const g = PD().num(v.v), x = s();
-            if (g !== null && M.close(g, 100 * x.gdoutExact, 0.01)) return { ok: true, msg: 'Exact |S(j0.1)|. The book\'s method (1/|L|) gives ' + fmt(100 * x.gdout, 3) + '%.' };
-            return pc(v.v, x.gdout, 'percent');
+        { id: 'd', title: '(d) Output disturbance below 0.1 rad/s, % in z',
+          html: 'Percent of an output disturbance at frequency w (rad/s) that shows up in z, as a function of w and the outer PID gains (negative), inner loop as its DC gain.',
+          code: {
+            template: 'def dout_pct(w, kP, kI, kD, sigma):\n    return ...\n',
+            check: (code) => either(code, { args: args([0.01, 0.3], OUT), item: { args: outArgs } }, 'dout_pct',
+              (p, a) => 100 / Math.hypot(Lout(p, a).re, Lout(p, a).im), (p, a) => 100 * sens(p, a), '(Exact |S|; the book\'s method uses 1/|L|.)'),
           },
-          solution: () => [{ tex: `\\gamma_{d_{out}} \\approx \\frac{1}{|L_{out}(j0.1)|} = ${tex(100 * s().gdout)}\\%\\quad(\\text{exact } |S(j0.1)| = ${tex(100 * s().gdoutExact)}\\%)` }, { html: 'Both are accepted. |L<sub>out</sub>(j0.1)| is only about 14 dB, so the approximation is rough.' }] },
-        { id: 'e', title: '(e) Error amplitude for y<sub>r</sub> = 2 sin(0.6t)', inputs: { v: '|e| [m]' },
-          check: (v) => {
-            const g = PD().num(v.v), x = s();
-            if (g !== null && M.close(g, x.esinApprox, 0.01)) return { ok: true, msg: `That is the book's A/|L| method. Here |L(j0.6)| = ${fmt(x.Lsin, 2)} < 1, so it is a poor approximation: the exact error is A/|1 + L| = ${fmt(x.esin, 3)} m.` };
-            return PD().checkNumbers({ v: v.v }, { v: x.esin }, { v: '|e|' });
+          solution: () => [{ tex: `\\gamma_{d_{out}} \\approx \\frac{1}{|L_{out}(j0.1)|} = ${tex(100 * s().gdout)}\\%\\quad(\\text{exact } |S(j0.1)| = ${tex(100 * s().gdoutExact)}\\%;\\text{ current gains})` }, { html: 'Both are accepted. |L<sub>out</sub>(j0.1)| is only about 14 dB with the E.8 gains, so the approximation is rough.' },
+            { code: `${PY_OUT}\ndef dout_pct(w, kP, kI, kD, sigma):\n    return 100 / abs(L_out(w, kP, kI, kD, sigma))` }] },
+        { id: 'e', title: '(e) Error amplitude for y<sub>r</sub> = 2 sin(0.6t)',
+          html: 'Error amplitude (m) for z<sub>r</sub> = 2 sin(wt), as a function of w and the outer PID gains.',
+          code: {
+            template: 'def e_amp(w, kP, kI, kD, sigma):\n    return ...\n',
+            check: (code) => either(code, { args: args([0.05, 2], OUT), item: { args: outArgs } }, 'e_amp',
+              (p, a) => 2 * sens(p, a), (p, a) => 2 / Math.hypot(Lout(p, a).re, Lout(p, a).im), '(That is the book\'s A/|L| method, a poor approximation where |L| is not ≫ 1; the exact error is A/|1 + L|.)'),
           },
-          solution: () => [{ tex: `|e| = \\frac{2}{|1 + L_{out}(j0.6)|} = ${tex(s().esin)}\\;\\text{m}\\quad(\\text{book method } 2/|L| = ${tex(s().esinApprox)},\\; |L(j0.6)| = ${tex(s().Lsin, 2)})` }, { html: 'The outer bandwidth is about 0.45 rad/s, so a 0.6 rad/s reference is mostly not followed. (With the derivative on the output in the time domain, the actual closed loop has no zero from k<sub>D</sub>, which makes tracking a little worse still.)' }] },
+          solution: () => [{ tex: `|e| = \\frac{2}{|1 + L_{out}(j0.6)|} = ${tex(s().esin)}\;\\text{m}\\quad(\\text{book method } 2/|L| = ${tex(s().esinApprox)},\; |L(j0.6)| = ${tex(s().Lsin, 2)};\\text{ current gains})` }, { html: 'The outer bandwidth is about 0.45 rad/s with the E.8 gains, so a 0.6 rad/s reference is mostly not followed. (With the derivative on the output in the time domain, the actual closed loop has no zero from k<sub>D</sub>, which makes tracking a little worse still.)' },
+            { code: `${PY_OUT}\ndef e_amp(w, kP, kI, kD, sigma):\n    return 2 / abs(1 + L_out(w, kP, kI, kD, sigma))` }] },
       ]);
     },
   };

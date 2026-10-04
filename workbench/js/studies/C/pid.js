@@ -295,7 +295,7 @@
   const PYARGS = {
     s: { label: 's', complex: true, re: [-3, 1], im: [0.3, 6] },
     kPin: { label: 'kP', lo: 10, hi: 200 }, kDin: { label: 'kD', lo: 5, hi: 80 },
-    kPout: { label: 'kP', lo: 0.1, hi: 3 }, kDout: { label: 'kD', lo: 1, hi: 15 },
+    kPout: { label: 'kP', lo: 0.1, hi: 3 }, kDout: { label: 'kD', lo: 1, hi: 15 }, kIout: { label: 'kI', lo: 0.005, hi: 0.5 },
   };
   const cx = WB.py.cx;
   const innerDen = (p, s, kP, kD) => { const J = p.Js + p.Jp; return cx.poly([1, kD / J, kP / J], s); };
@@ -618,50 +618,66 @@
 
     buildProblem(parent, ctx) {
       const a = () => this.analysis(ctx);
+      const J = (p) => p.Js + p.Jp;
+      // C.9(a) has two right answers: type 2 for PD on the error (the book, Fig. 9-11), type 1
+      // for the derivative on θ (ctrlPD.py). The student's ref_type picks which one is checked.
+      const innerItems = (type) => [
+        { var: 'ref_type', truth: () => type },
+        { fn: 'e_ref', args: ['kP', 'kD'], truth: type === 2 ? (p, x) => J(p) / x.kP : (p, x) => x.kD / x.kP },
+        { var: 'dist_type', truth: () => 0 },
+        { fn: 'e_dist', args: ['kP', 'kD'], truth: (p, x) => 1 / x.kP },
+      ];
+      const checkInner = async (code) => {
+        if (!code.trim()) return { ok: false, msg: 'Write your code first.' };
+        const out = await WB.py.evaluate(code, [{ params: { ...ctx.pModel }, vars: ['ref_type'] }]);
+        const t = out.rows ? out.rows[0].vars.ref_type : null;
+        if (out.rows && t !== 1 && t !== 2) return { ok: false, msg: 'Count the free integrators in the loop (and mind where the derivative acts).' };
+        const r = await WB.py.check(ctx, { args: { kP: PYARGS.kPin, kD: PYARGS.kDin }, items: innerItems(t === 1 ? 1 : 2) }, code);
+        if (!r.ok) return r;
+        return { ...r, msg: t === 2 ? `${r.msg} The book's answer, for PD on the error (Fig. 9-11). The repo differentiates θ instead, which makes it type 1 (see the solution).`
+          : `${r.msg} Right for the implemented controller (derivative on θ, ctrlPD.py). The book answers type 2 for PD on the error (Fig. 9-11).` };
+      };
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch9, [
         {
           id: 'a', title: '(a) Inner loop with PD',
-          html: 'Answers use the current k<sub>P<sub>θ</sub></sub>, k<sub>D<sub>θ</sub></sub>. Give the reference type and the error for the lowest-order input with a finite nonzero error (unit input, R = 1/s<sup>q+1</sup> as in Table 9-1, rad), then the disturbance type and the error for a unit step d.',
-          inputs: { type: 'type vs. θ<sub>r</sub>', err: 'e (finite, nonzero)', dtype: 'type vs. d', dstep: 'e from unit step d' },
-          check: (v) => {
-            const A = a(), g = ctx.gains;
-            const t = PD().num(v.type);
-            const d = PD().checkNumbers({ dtype: v.dtype, dstep: v.dstep }, { dtype: 0, dstep: A.inner.dStep }, { dtype: 'disturbance type', dstep: 'e from d' });
-            if (!d.ok) return d;
-            if (t === 2) {
-              const r = PD().checkNumbers({ err: v.err }, { err: A.inner.parab }, { err: 'e_parab' });
-              return r.ok ? { ok: true, msg: 'The book\'s answer, for PD on the error (Fig. 9-11). The repo differentiates θ instead, which makes it type 1 (see the solution).' } : r;
-            }
-            if (t === 1) {
-              const r = PD().checkNumbers({ err: v.err }, { err: g.kDth / g.kPth }, { err: 'e_ramp' });
-              return r.ok ? { ok: true, msg: 'Right for the implemented controller (derivative on θ, ctrlPD.py). The book answers type 2 for PD on the error (Fig. 9-11).' } : r;
-            }
-            return { ok: false, msg: 'Count the free integrators in the loop (and mind where the derivative acts).' };
+          html: 'Set the reference type <code>ref_type</code> and write <code>e_ref</code>, the error for the lowest-order input with a finite nonzero error (unit input, R = 1/s<sup>q+1</sup> as in Table 9-1, rad). Then the disturbance type <code>dist_type</code> and <code>e_dist</code>, the error magnitude for a unit step d. Errors are functions of the inner-loop gains; the check calls them at random gains.',
+          code: {
+            template: 'ref_type = ...\n\ndef e_ref(kP, kD):\n    return ...\n\ndist_type = ...\n\ndef e_dist(kP, kD):\n    return ...\n',
+            check: checkInner,
           },
           solution: () => [
-            { tex: `\\text{Fig. 9-11 (PD on the error)}:\\; PC = \\frac{k_Ds + k_P}{(J_s+J_p)s^2} \\Rightarrow \\text{type 2},\\; e_{parab} = \\frac{J_s+J_p}{k_{P_\\theta}} = ${tex(a().inner.parab)}` },
-            { tex: `\\text{derivative on } \\theta \\text{ (ctrlPD.py, ctrlPID.py)}:\\; \\frac{E}{R} = \\frac{(J_s+J_p)s^2 + k_Ds}{(J_s+J_p)s^2 + k_Ds + k_P} \\Rightarrow \\text{type 1},\\; e_{ramp} = \\frac{k_{D_\\theta}}{k_{P_\\theta}} = ${tex(ctx.gains.kDth / ctx.gains.kPth)}` },
-            { tex: `\\text{input disturbance (either form): type 0},\\; e = \\frac{1}{k_{P_\\theta}} = ${tex(a().inner.dStep)}` },
+            { tex: `\\text{Fig. 9-11 (PD on the error)}:\; PC = \\frac{k_Ds + k_P}{(J_s+J_p)s^2} \\Rightarrow \\text{type 2},\; e_{parab} = \\frac{J_s+J_p}{k_{P_\\theta}} = ${tex(a().inner.parab)}` },
+            { tex: `\\text{derivative on } \\theta \\text{ (ctrlPD.py, ctrlPID.py)}:\; \\frac{E}{R} = \\frac{(J_s+J_p)s^2 + k_Ds}{(J_s+J_p)s^2 + k_Ds + k_P} \\Rightarrow \\text{type 1},\; e_{ramp} = \\frac{k_{D_\\theta}}{k_{P_\\theta}} = ${tex(ctx.gains.kDth / ctx.gains.kPth)}` },
+            { tex: `\\text{input disturbance (either form): type 0},\; e = \\frac{1}{k_{P_\\theta}} = ${tex(a().inner.dStep)}\;\\text{(current gains)}` },
             { html: 'Book: p. 151. Its Notes (p. 153) say the type does not change when the derivative moves to the output; for this loop it does, because the plant has no damping of its own.' },
+            { code: '# PD on the error (the book); ref_type = 1 with e_ref = kD / kP is right for ctrlPD.py\nref_type = 2\n\ndef e_ref(kP, kD):\n    return (P.Js + P.Jp) / kP     # e_parab = 1/M_a\n\ndist_type = 0\n\ndef e_dist(kP, kD):\n    return 1 / kP' },
           ],
         },
         {
           id: 'b1', title: '(b) Outer loop with PD (k<sub>I<sub>φ</sub></sub> = 0)',
-          inputs: { type: 'type', step: 'e<sub>step</sub>' },
-          check: (v) => {
-            if (a().hasI) return { ok: false, msg: 'Set kIφ = 0 first.' };
-            return PD().checkNumbers(v, { type: 0, step: a().outer.step }, { step: 'e_step' });
+          html: 'Inner loop replaced by its DC gain. Set <code>system_type</code> and write the unit-step error as a function of the outer-loop gains.',
+          code: {
+            template: 'system_type = ...\n\ndef e_step(kP, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { kP: PYARGS.kPout, kD: PYARGS.kDout },
+              items: [{ var: 'system_type', truth: () => 0 }, { fn: 'e_step', args: ['kP', 'kD'], truth: (p, x) => 1 / (1 + x.kP) }],
+            }, code),
           },
-          solution: () => [{ tex: `\\text{type 0}:\\; e_{step} = \\frac{1}{1 + k_{P_\\phi}} = ${tex(1 / (1 + ctx.gains.kPphi))},\\; e_{ramp} = \\infty;\\; \\text{disturbance: type 0, } \\frac{1}{1 + k_{P_\\phi}}` }, { html: 'Book: p. 152. Try it: feedforward off, step input, k<sub>I<sub>φ</sub></sub> = 0.' }],
+          solution: () => [{ tex: `\\text{type 0}:\; e_{step} = \\frac{1}{1 + k_{P_\\phi}} = ${tex(1 / (1 + ctx.gains.kPphi))},\; e_{ramp} = \\infty;\; \\text{disturbance: type 0, } \\frac{1}{1 + k_{P_\\phi}}` }, { html: 'Book: p. 152. Try it: feedforward off, step input, k<sub>I<sub>φ</sub></sub> = 0.' },
+            { code: 'system_type = 0\n\ndef e_step(kP, kD):\n    return 1 / (1 + kP)      # M_p = lim PC = kP (P_out(0) = 1)' }],
         },
         {
           id: 'b2', title: '(b) Outer loop with an integrator (k<sub>I<sub>φ</sub></sub> > 0)',
-          inputs: { type: 'type', ramp: 'e<sub>ramp</sub>' },
-          check: (v) => {
-            if (!a().hasI) return { ok: false, msg: 'Set kIφ > 0 first.' };
-            return PD().checkNumbers(v, { type: 1, ramp: a().outer.ramp }, { ramp: 'e_ramp' });
+          html: 'Same, with PID: <code>system_type</code> and the unit-ramp error as a function of the gains.',
+          code: {
+            template: 'system_type = ...\n\ndef e_ramp(kP, kI, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { kP: PYARGS.kPout, kI: PYARGS.kIout, kD: PYARGS.kDout },
+              items: [{ var: 'system_type', truth: () => 1 }, { fn: 'e_ramp', args: ['kP', 'kI', 'kD'], truth: (p, x) => 1 / x.kI }],
+            }, code),
           },
-          solution: () => [{ tex: `\\text{type 1}:\\; e_{step} = 0,\\; e_{ramp} = \\frac{1}{k_{I_\\phi}};\\; \\text{disturbance: type 1, ramp error } \\frac{1}{k_{I_\\phi}}` }, { html: 'Book: p. 152–153. Try a ramp input with k<sub>I<sub>φ</sub></sub> > 0.' }],
+          solution: () => [{ tex: `\\text{type 1}:\; e_{step} = 0,\; e_{ramp} = \\frac{1}{k_{I_\\phi}};\; \\text{disturbance: type 1, ramp error } \\frac{1}{k_{I_\\phi}}` }, { html: 'Book: p. 152–153. Try a ramp input with k<sub>I<sub>φ</sub></sub> > 0.' },
+            { code: 'system_type = 1\n\ndef e_ramp(kP, kI, kD):\n    return 1 / kI            # M_v = lim s PC = kI' }],
         },
       ]);
     },
@@ -803,10 +819,18 @@
         },
         {
           id: 'x', title: 'Extension: largest stable k<sub>I<sub>φ</sub></sub> (design model)',
-          html: 'Not in the book. Use the C.8 PD gains.',
-          inputs: { k: 'k<sub>I,crit</sub>' },
-          check: (v) => PD().checkNumbers(v, { k: ev().kCrit }, { k: 'kI,crit' }),
-          solution: () => [{ tex: `k_{I,crit} = ${isFinite(ev().kCrit) ? tex(ev().kCrit) : '\\infty'}` }],
+          html: 'Not in the book. As a function of the outer PD gains k<sub>P</sub>, k<sub>D</sub>; return <code>np.inf</code> if no k<sub>I</sub> destabilizes the loop. The check calls it at random gains.',
+          code: {
+            template: 'def kI_crit(kP, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { kP: PYARGS.kPout, kD: PYARGS.kDout },
+              items: [{ fn: 'kI_crit', args: ['kP', 'kD'], truth: (p, x) => this.evans({ pModel: p }, { kPphi: x.kP, kDphi: x.kD }).kCrit }],
+            }, code),
+          },
+          solution: () => [
+            { tex: `k_{I,crit} = \\frac{d_2d_1}{c_0 - d_2c_1}\;(c_0 > d_2c_1,\\text{ else } \\infty);\\quad \\text{C.8 gains: } ${isFinite(ev().kCrit) ? tex(ev().kCrit) : '\\infty'}` },
+            { code: 'def kI_crit(kP, kD):\n    Jp, b, k = P.Jp, P.b, P.k\n    a3 = Jp + b * kD\n    d2 = (b + b * kP + k * kD) / a3\n    d1 = (k + k * kP) / a3\n    c1, c0 = b / a3, k / a3\n    # Routh on s^3 + d2 s^2 + (d1 + kI c1) s + kI c0\n    return d2 * d1 / (c0 - d2 * c1) if c0 > d2 * c1 else np.inf' },
+          ],
         },
       ]);
     },

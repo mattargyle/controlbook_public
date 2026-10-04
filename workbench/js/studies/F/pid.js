@@ -458,6 +458,15 @@
     };
   }
 
+  // Random gains for the F.9 Python answers (signs as in F.8 / F.10).
+  const G9 = {
+    lon: { kP: { label: 'kP', lo: 0.05, hi: 2 }, kD: { label: 'kD', lo: 0.1, hi: 3 } },
+    inner: { kP: { label: 'kP', lo: 0.05, hi: 2 }, kD: { label: 'kD', lo: 0.02, hi: 1 } },
+    outer: { kP: { label: 'kP', lo: -0.05, hi: -0.001 }, kI: { label: 'kI', lo: -0.003, hi: -0.0001 }, kD: { label: 'kD', lo: -0.1, hi: -0.005 } },
+  };
+  // Outer z plant with the inner loop replaced by its DC gain (1: the θ plant is a double integrator).
+  const outerOf = (q) => { const m = m0(q); return { b0: m.outer.b0, a1: m.outer.a1 }; };
+
   F.register({
     id: 'ch9', num: 9, tab: 'Ch 9', title: 'System type & integrators', pages: 'pp. 137–154, F.9 p. 398',
     controller: (ctx, o) => F.makePID(ctx, o),
@@ -541,38 +550,64 @@
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch9, [
         {
           id: 'a', title: '(a) Longitudinal controller: PD, then PID',
-          html: 'Book convention (Table 9-1, C acting on the error). Errors for unit inputs (step 1/s, ramp 1/s², parabola 1/s³) with the current k<sub>P<sub>h</sub></sub>, k<sub>D<sub>h</sub></sub>; disturbance error per unit step d<sub>in</sub> [m/N].',
-          inputs: { tPD: 'type, PD', eS: 'e<sub>step</sub>, PD [m]', eR: 'e<sub>ramp</sub>, PD [m]', eP: 'e<sub>parab</sub>, PD [m]', tPID: 'type, PID', dPD: 'd<sub>in</sub> type, PD', dPID: 'd<sub>in</sub> type, PID', eD: 'e from step d, PD' },
-          check: (v) => PD().checkNumbers(v, { tPD: 2, eS: 0, eR: 0, eP: m().M / g().kPh, tPID: 3, dPD: 0, dPID: 1, eD: 1 / g().kPh }, { eS: 'e_step', eR: 'e_ramp', eP: 'e_parab', eD: 'e from d' }),
+          html: 'Book convention (Table 9-1, C acting on the error). Set the reference-tracking and input-disturbance system types, and write the PD errors for unit inputs (step 1/s, ramp 1/s², parabola 1/s³) and the error magnitude per unit step d<sub>in</sub> [m/N] as functions of the gains. Return <code>np.inf</code> for an unbounded error. The check calls them at random gains.',
+          code: F.pyPart(ctx, {
+            args: G9.lon,
+            items: [
+              { var: 'type_pd', truth: () => 2 }, { var: 'type_pid', truth: () => 3 },
+              { var: 'dist_type_pd', truth: () => 0 }, { var: 'dist_type_pid', truth: () => 1 },
+              { fn: 'e_step', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_ramp', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_parab', args: ['kP', 'kD'], truth: (q, a) => m0(q).M / a.kP },
+              { fn: 'e_dist', args: ['kP', 'kD'], truth: (q, a) => 1 / a.kP },
+            ],
+            explain: (it, f) => (it.fn === 'e_ramp' && f.e.a && M.close(Number(f.e.got), f.e.a.kD / f.e.a.kP, 1e-4, 1e-9) ? 'That is the implemented loop (derivative on h); Table 9-1 assumes C acts on the error.' : ''),
+          }, 'type_pd = ...\ntype_pid = ...\ndist_type_pd = ...\ndist_type_pid = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kD):\n    return ...\n\ndef e_dist(kP, kD):\n    return ...\n'),
           solution: () => [
-            { tex: `PC_{PD} = \\frac{k_{D_h}s + k_{P_h}}{(m_c+2m_r)s^2}: \\text{type 2},\\; M_a = \\frac{k_{P_h}}{m_c+2m_r},\\; e_{parab} = ${tex(m().M / g().kPh)}` },
+            { tex: `PC_{PD} = \\frac{k_{D_h}s + k_{P_h}}{(m_c+2m_r)s^2}: \\text{type 2},\; M_a = \\frac{k_{P_h}}{m_c+2m_r},\; e_{parab} = ${tex(m().M / g().kPh)}\;\\text{(current gains)}` },
             { tex: '\\text{PID adds } 1/s: \\text{type 3 (step, ramp, parabola errors all } 0)' },
-            { tex: `\\frac{P}{1+PC}\\Big|_{s\\to0} = \\frac{1}{k_{P_h}} = ${tex(1 / g().kPh)}\\;(\\text{type 0}),\\quad \\text{PID: } \\frac{s}{k_{I_h}} \\to 0\\;(\\text{type 1})` },
+            { tex: `\\frac{P}{1+PC}\\Big|_{s\\to0} = \\frac{1}{k_{P_h}} = ${tex(1 / g().kPh)}\;(\\text{type 0}),\\quad \\text{PID: } \\frac{s}{k_{I_h}} \\to 0\;(\\text{type 1})` },
             { html: 'pp. 141–145. With the derivative on h (as implemented), tracking drops one type: PD gives e<sub>ramp</sub> = k<sub>D</sub>/k<sub>P</sub>; the readout on the right shows both.' },
+            { code: 'type_pd = 2\ntype_pid = 3\ndist_type_pd = 0\ndist_type_pid = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return 0.0\n\ndef e_parab(kP, kD):\n    return (P.mc + 2 * P.mr) / kP   # 1/M_a\n\ndef e_dist(kP, kD):\n    return 1 / kP' },
           ],
         },
         {
           id: 'b', title: '(b) Inner loop of the lateral controller, PD',
-          html: 'Errors for unit θ̃<sup>d</sup> inputs with the current k<sub>P<sub>θ</sub></sub>, k<sub>D<sub>θ</sub></sub>.',
-          inputs: { t: 'type', eS: 'e<sub>step</sub> [rad]', eR: 'e<sub>ramp</sub> [rad]', eP: 'e<sub>parab</sub> [rad]', dT: 'd<sub>in</sub> type', eD: 'e per unit step d [rad/N·m]' },
-          check: (v) => PD().checkNumbers(v, { t: 2, eS: 0, eR: 0, eP: m().J / g().kPth, dT: 0, eD: 1 / g().kPth }, { eS: 'e_step', eR: 'e_ramp', eP: 'e_parab', eD: 'e from d' }),
-          solution: () => [{ tex: `PC = \\frac{k_{D_\\theta}s + k_{P_\\theta}}{Js^2}: \\text{type 2},\\; e_{parab} = \\frac{J}{k_{P_\\theta}} = ${tex(m().J / g().kPth)};\\quad d_{in}: \\text{type 0},\\; e = \\frac{1}{k_{P_\\theta}} = ${tex(1 / g().kPth)}` }],
+          html: 'Same as (a) for unit θ̃<sup>d</sup> inputs: the system types, the errors [rad] and the error per unit step d [rad/N·m] as functions of k<sub>P<sub>θ</sub></sub>, k<sub>D<sub>θ</sub></sub>.',
+          code: F.pyPart(ctx, {
+            args: G9.inner,
+            items: [
+              { var: 'system_type', truth: () => 2 }, { var: 'dist_type', truth: () => 0 },
+              { fn: 'e_step', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_ramp', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_parab', args: ['kP', 'kD'], truth: (q, a) => m0(q).J / a.kP },
+              { fn: 'e_dist', args: ['kP', 'kD'], truth: (q, a) => 1 / a.kP },
+            ],
+          }, 'system_type = ...\ndist_type = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kD):\n    return ...\n\ndef e_dist(kP, kD):\n    return ...\n'),
+          solution: () => [
+            { tex: `PC = \\frac{k_{D_\\theta}s + k_{P_\\theta}}{Js^2}: \\text{type 2},\; e_{parab} = \\frac{J}{k_{P_\\theta}} = ${tex(m().J / g().kPth)};\\quad d_{in}: \\text{type 0},\; e = \\frac{1}{k_{P_\\theta}} = ${tex(1 / g().kPth)}\;\\text{(current gains)}` },
+            { code: 'system_type = 2\ndist_type = 0\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return 0.0\n\ndef e_parab(kP, kD):\n    J = P.Jc + 2 * P.mr * P.d**2\n    return J / kP\n\ndef e_dist(kP, kD):\n    return 1 / kP' },
+          ],
         },
         {
           id: 'c', title: '(c) Outer loop of the lateral controller: PD, then PID',
-          html: 'Inner loop replaced by its DC gain. Uses the current k<sub>P<sub>z</sub></sub>, k<sub>D<sub>z</sub></sub>; the PID parts use the current k<sub>I<sub>z</sub></sub> (≠ 0). Errors that are infinite need no entry.',
-          inputs: { tPD: 'type, PD', eS: 'e<sub>step</sub>, PD [m]', eR: 'e<sub>ramp</sub>, PD [m]', tPID: 'type, PID', eP: 'e<sub>parab</sub>, PID [m]', dPD: 'd<sub>in</sub> type, PD', dPID: 'd<sub>in</sub> type, PID' },
-          check: (v) => {
-            if (!g().kIz) return { ok: false, msg: 'Set k_I,z ≠ 0 for the PID parts.' };
-            const o = A().outerMdl;
-            const Mv = o.b0 * g().kPz / o.a1, Ma = o.b0 * g().kIz / o.a1;
-            return PD().checkNumbers(v, { tPD: 1, eS: 0, eR: 1 / Mv, tPID: 2, eP: 1 / Ma, dPD: 0, dPID: 1 }, { eS: 'e_step', eR: 'e_ramp', eP: 'e_parab' });
-          },
+          html: 'Inner loop replaced by its DC gain. Set the system types, and write e<sub>step</sub>, e<sub>ramp</sub> for PD and e<sub>parab</sub> for PID [m] as functions of the outer gains (k<sub>P</sub>, k<sub>D</sub>, k<sub>I</sub> &lt; 0, as in F.8 and F.10).',
+          code: F.pyPart(ctx, {
+            args: G9.outer,
+            items: [
+              { var: 'type_pd', truth: () => 1 }, { var: 'type_pid', truth: () => 2 },
+              { var: 'dist_type_pd', truth: () => 0 }, { var: 'dist_type_pid', truth: () => 1 },
+              { fn: 'e_step', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_ramp', args: ['kP', 'kD'], truth: (q, a) => outerOf(q).a1 / (outerOf(q).b0 * a.kP) },
+              { fn: 'e_parab', args: ['kP', 'kI', 'kD'], truth: (q, a) => outerOf(q).a1 / (outerOf(q).b0 * a.kI) },
+            ],
+          }, 'type_pd = ...\ntype_pid = ...\ndist_type_pd = ...\ndist_type_pid = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kI, kD):\n    return ...\n'),
           solution: () => {
             const o = A().outerMdl, Mv = o.b0 * g().kPz / o.a1, Ma = g().kIz ? o.b0 * g().kIz / o.a1 : NaN;
             return [
-              { tex: `PC = \\frac{-gk_{DC_\\theta}(k_{D_z}s + k_{P_z})}{s(s + \\mu/M)}: \\text{type 1},\\; M_v = \\frac{-g k_{P_z}M}{\\mu} = ${tex(Mv)},\\; e_{ramp} = ${tex(1 / Mv)}` },
-              { tex: `\\text{PID: type 2},\\; M_a = \\frac{-g k_{I_z}M}{\\mu} = ${tex(Ma)},\\; e_{parab} = ${tex(1 / Ma)};\\quad d_{in}: \\text{PD type 0, PID type 1}` },
+              { tex: `PC = \\frac{-gk_{DC_\\theta}(k_{D_z}s + k_{P_z})}{s(s + \\mu/M)}: \\text{type 1},\; M_v = \\frac{-g k_{P_z}M}{\\mu} = ${tex(Mv)},\; e_{ramp} = ${tex(1 / Mv)}\;\\text{(current gains)}` },
+              { tex: `\\text{PID: type 2},\; M_a = \\frac{-g k_{I_z}M}{\\mu} = ${tex(Ma)},\; e_{parab} = ${tex(1 / Ma)};\\quad d_{in}: \\text{PD type 0, PID type 1}` },
+              { code: 'type_pd = 1\ntype_pid = 2\ndist_type_pd = 0\ndist_type_pid = 1\n\na = P.mu / (P.mc + 2 * P.mr)\nb0 = -P.g          # times k_DC = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return a / (b0 * kP)    # 1/M_v\n\ndef e_parab(kP, kI, kD):\n    return a / (b0 * kI)    # 1/M_a' },
             ];
           },
         },

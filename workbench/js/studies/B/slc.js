@@ -791,10 +791,23 @@
         },
         {
           id: 'b', title: 'Root locus versus k<sub>Iz</sub>: largest stable |k<sub>Iz</sub>|',
-          html: 'The locus is drawn on the s-plane once the Evans form is solved, for k<sub>Iz</sub> = −κ (filter model).',
-          inputs: { k: 'κ<sub>crit</sub>' },
-          check: (v) => PD().checkNumbers(v, { k: this.kappaCrit(evF()) }, { k: 'κcrit' }),
-          solution: () => [{ tex: `\\kappa_{crit} = ${tex(this.kappaCrit(evF()))}` }],
+          html: 'As a function of the outer PD gains k<sub>Pz</sub>, k<sub>Dz</sub> (filter model, k<sub>Iz</sub> = −κ); the check calls it at random gains. The locus is drawn on the s-plane once the Evans form is solved.',
+          code: {
+            template: 'def kappa_crit(kP, kD):\n    # largest kappa = -kI that keeps the closed loop stable\n    return ...\n',
+            // gains with a stable PD loop (k_Dz < k_Pz/q for every q the check draws)
+            check: pyCheck(ctx, {
+              args: { kPz: ARGS.kPz, kDz: { label: 'kDz', lo: -0.8, hi: -0.25 } },
+              items: [{ fn: 'kappa_crit', args: ['kPz', 'kDz'], truth: (p, a) => {
+                const q = qOf(p);
+                return this.kappaCrit({ den: [1 + a.kDz, a.kPz - q * a.kDz, -q * a.kPz, 0], num: [-1, q] });
+              } }],
+            }),
+          },
+          solution: () => [
+            { tex: '(1 + k_{Dz})s^3 + (k_{Pz} - q k_{Dz})s^2 - (q k_{Pz} + \\kappa)s + q\\kappa = 0:\\quad \\text{Routh: } a_2 a_1 > a_3 a_0 \\Rightarrow \\kappa_{crit} = \\frac{-q k_{Pz}(k_{Pz} - q k_{Dz})}{k_{Pz} - q k_{Dz} + q(1 + k_{Dz})}' },
+            { tex: `\\text{current PD gains: } \\kappa_{crit} = ${tex(this.kappaCrit(evF()))}` },
+            { code: 'q = np.sqrt(3 * P.g / (2 * P.ell))\n\ndef kappa_crit(kP, kD):\n    a3, a2 = 1 + kD, kP - q * kD\n    # a1 = -q kP - kappa > 0 and a2 a1 > a3 a0 = a3 q kappa\n    return -q * kP * a2 / (a2 + a3 * q)' },
+          ],
         },
         {
           id: 'c', title: 'Select k<sub>Iz</sub> that does not significantly change the other closed-loop poles',

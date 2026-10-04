@@ -431,6 +431,21 @@ WB.studies.D = WB.studies.D || { chapters: {} };
     pyError: (out) => ({ ok: false, msg: out.timeout ? out.error : 'Python raised an error.', detail: [out.error, out.where, (out.stdout || '').trim()].filter(Boolean).join('\n') }),
     // A Python answer part: {template, check(code)} with spec as in WB.py.check.
     pyPart: (ctx, spec, template) => ({ template, check: (code) => lib.refresh(ctx, WB.py.check(ctx, spec, code)) }),
+    // A Python answer with two accepted forms (a sign convention, or the book's
+    // approximation vs. the exact value): passes if either spec matches, with its message.
+    pyEither: (ctx, specs, msgs) => ({
+      check: async (code) => {
+        let first = null;
+        for (let i = 0; i < specs.length; i++) {
+          const r = await WB.py.check(ctx, specs[i], code);
+          if (r.ok) return lib.passed(ctx, msgs && msgs[i] ? { ...r, msg: `${r.msg} ${msgs[i]}` } : r);
+          if (!first) first = r;
+        }
+        return first;
+      },
+    }),
+    // Random PID gains for answers that are functions of the gains (D.9, D.P.6, D.16).
+    gainArgs: { kP: { label: 'kP', lo: 0.5, hi: 20 }, kI: { label: 'kI', lo: 0.05, hi: 5 }, kD: { label: 'kD', lo: 0.5, hi: 30 } },
     // Complex s for transfer-function and characteristic-polynomial answers.
     sArg: { label: 's', complex: true, re: [-3, 2], im: [0.2, 6] },
     // Spring compensation label: F_e = k z_e answers D.4(a), so Work mode writes F_e.

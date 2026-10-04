@@ -41,7 +41,8 @@ def _out(v):
     if isinstance(v, (complex, np.complexfloating)):
         return {'re': float(v.real), 'im': float(v.imag)}
     if isinstance(v, (int, float, np.integer, np.floating)):
-        return float(v)
+        f = float(v)
+        return f if math.isfinite(f) else str(f)  # JSON has no inf/nan: 'inf', '-inf', 'nan'
     if isinstance(v, np.ndarray):
         return _out(v.item()) if v.ndim == 0 else [_out(x) for x in v]
     if isinstance(v, (list, tuple)):
@@ -305,7 +306,9 @@ def wb_simulate(payload):
     return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
   }
   const flat = (v) => (Array.isArray(v) ? v.flatMap(flat) : [v]);
-  const cplx = (v) => (v && typeof v === 'object' ? [v.re, v.im] : [v, 0]);
+  // Non-finite values arrive as 'inf', '-inf' or 'nan' (see _out).
+  const real = (v) => (typeof v === 'string' ? Number(v.replace('inf', 'Infinity').replace('nan', 'NaN')) : v);
+  const cplx = (v) => (v && typeof v === 'object' ? [v.re, v.im] : [real(v), 0]);
   const shapeOf = (v) => (Array.isArray(v) ? [v.length, ...shapeOf(v[0])] : []);
   const fmtV = (v) => {
     const [re, im] = cplx(v);
@@ -407,7 +410,7 @@ def wb_simulate(payload):
         }
         const G = entries.map((e) => flat(e.got).map(cplx)), W = entries.map((e) => flat(e.want).map(cplx));
         let scale = 0;
-        for (const w of W) for (const [re, im] of w) scale = Math.max(scale, Math.hypot(re, im));
+        for (const w of W) for (const [re, im] of w) if (Number.isFinite(re) && Number.isFinite(im)) scale = Math.max(scale, Math.hypot(re, im));
         const tol = 1e-6 * Math.max(scale, 1e-9) + 1e-12;
         let c = [1, 0];
         const mode = it.compare || 'equal';
@@ -419,6 +422,7 @@ def wb_simulate(payload):
           let nr = 0, ni = 0, dd = 0;
           for (let k = 0; k < G.length; k++) for (let j = 0; j < G[k].length; j++) {
             const [gr, gi] = G[k][j], [wr, wi] = W[k][j];
+            if (![gr, gi, wr, wi].every(Number.isFinite)) continue;
             nr += wr * gr + wi * gi; ni += wr * gi - wi * gr; dd += wr * wr + wi * wi;
           }
           c = dd > 0 ? [nr / dd, ni / dd] : [0, 0];
@@ -427,6 +431,11 @@ def wb_simulate(payload):
         for (let k = 0; k < G.length; k++) {
           for (let j = 0; j < G[k].length; j++) {
             const [gr, gi] = G[k][j], [wr, wi] = W[k][j];
+            // An infinite expected value (an unbounded error, say) must be matched exactly.
+            if (![gr, gi, wr, wi].every(Number.isFinite)) {
+              if (!(gr === wr && gi === wi)) { failures.push({ it, s, e: entries[k], j, kind: 'value' }); return; }
+              continue;
+            }
             const er = gr - (c[0] * wr - c[1] * wi), ei = gi - (c[0] * wi + c[1] * wr);
             if (!(Math.hypot(er, ei) <= tol * Math.max(1, Math.hypot(c[0], c[1])))) {
               failures.push({ it, s, e: entries[k], j, kind: 'value' });

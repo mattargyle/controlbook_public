@@ -110,6 +110,9 @@ WB.chapters = WB.chapters || {};
     return { ...PD().gainsFromPoles(ctx.model, PD().polesFromWnZeta(wn, st.zeta)), kI: st.kIx, wn };
   }
 
+  // Random gains for Python answers that are functions of the gains (Ch 9, P.6).
+  const GAIN_ARGS = { kP: { label: 'kP', lo: 0.02, hi: 2 }, kI: { label: 'kI', lo: 0.01, hi: 1 }, kD: { label: 'kD', lo: 0.005, hi: 0.5 } };
+
   const readout = (parent, ctx) => WB.ui.readout(parent, () => ['kP', 'kI', 'kD'].map((k) => [k, ctx.gains[k]]), { wrap: false });
 
   // ------------------------------------------------------------- Chapter 9 --
@@ -214,37 +217,62 @@ WB.chapters = WB.chapters || {};
       const g = () => ctx.gains;
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a1', title: '(a) PD only: set k<sub>I</sub> = 0',
-          inputs: { type: 'type', step: 'e<sub>step</sub>', ramp: 'e<sub>ramp</sub>', parab: 'e<sub>parab</sub>' },
-          html: 'Answers use the current k<sub>P</sub>, k<sub>D</sub>. Errors are for a unit input, in rad. Enter <code>inf</code> for an unbounded error.',
-          check: (v) => {
-            if (g().kI > 0) return { ok: false, msg: 'Set kI = 0 first.' };
-            if (!/^\s*(inf|infinity|∞)\s*$/i.test(v.parab || '')) return { ok: false, msg: 'Check e_parab.' };
-            return PD().checkNumbers(v, { type: 1, step: 0, ramp: 1 / a().Mv }, { ramp: 'e_ramp' });
+          id: 'a1', title: '(a) PD only (k<sub>I</sub> = 0)',
+          html: 'Set <code>system_type</code>, and write each steady-state error for a unit input (rad) as a function of the gains. Return <code>np.inf</code> for an unbounded error. The check calls your functions at random gains.',
+          code: {
+            template: 'system_type = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: GAIN_ARGS,
+              items: [
+                { var: 'system_type', truth: () => 1 },
+                { fn: 'e_step', args: ['kP', 'kD'], truth: () => 0 },
+                { fn: 'e_ramp', args: ['kP', 'kD'], truth: (p, a) => { const m = ctx.sys.secondOrderModel(p); return m.a1 / (m.b0 * a.kP); } },
+                { fn: 'e_parab', args: ['kP', 'kD'], truth: () => Infinity },
+              ],
+            }, code),
           },
           solution: () => [
-            { tex: `PC = \\frac{b_0(k_D s + k_P)}{s(s + a_1)}\\;\\Rightarrow\\;\\text{type 1},\\; M_v = \\frac{b_0 k_P}{a_1} = \\frac{k_P}{b}` },
+            { tex: `PC = \\frac{b_0(k_D s + k_P)}{s(s + a_1)}\;\\Rightarrow\;\\text{type 1},\; M_v = \\frac{b_0 k_P}{a_1} = \\frac{k_P}{b}` },
             { html: 'Step error 0, ramp error b/k<sub>P</sub>, parabola error ∞ (p. 146).' },
+            { code: 'system_type = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return P.b / kP      # 1/M_v, M_v = b0 kP / a1\n\ndef e_parab(kP, kD):\n    return np.inf' },
           ],
         },
         {
           id: 'a2', title: '(a) With the integrator (k<sub>I</sub> > 0)',
-          html: 'Unit parabola means R(s) = 1/s³.',
-          inputs: { type: 'type', ramp: 'e<sub>ramp</sub>', parab: 'e<sub>parab</sub>' },
-          check: (v) => {
-            if (!(g().kI > 0)) return { ok: false, msg: 'Set kI > 0 first.' };
-            return PD().checkNumbers(v, { type: 2, ramp: 0, parab: 1 / a().Ma }, { parab: 'e_parab' });
+          html: 'Same as above, with PID control. Unit parabola means R(s) = 1/s³.',
+          code: {
+            template: 'system_type = ...\n\ndef e_ramp(kP, kI, kD):\n    return ...\n\ndef e_parab(kP, kI, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: GAIN_ARGS,
+              items: [
+                { var: 'system_type', truth: () => 2 },
+                { fn: 'e_ramp', args: ['kP', 'kI', 'kD'], truth: () => 0 },
+                { fn: 'e_parab', args: ['kP', 'kI', 'kD'], truth: (p, a) => { const m = ctx.sys.secondOrderModel(p); return m.a1 / (m.b0 * a.kI); } },
+              ],
+            }, code),
           },
-          solution: () => [{ tex: `PC = \\frac{b_0(k_D s^2 + k_P s + k_I)}{s^2(s + a_1)}\\;\\Rightarrow\\;\\text{type 2},\\; e_{parab} = \\frac{b}{k_I}` }],
+          solution: () => [
+            { tex: `PC = \\frac{b_0(k_D s^2 + k_P s + k_I)}{s^2(s + a_1)}\;\\Rightarrow\;\\text{type 2},\; e_{parab} = \\frac{b}{k_I}` },
+            { code: 'system_type = 2\n\ndef e_ramp(kP, kI, kD):\n    return 0.0\n\ndef e_parab(kP, kI, kD):\n    return P.b / kI      # 1/M_a, M_a = b0 kI / a1' },
+          ],
         },
         {
           id: 'b', title: '(b) Constant input disturbance of size d',
-          html: 'Steady-state error magnitude per unit d (rad per N·m), without and with the integrator.',
-          inputs: { pd: 'PD', pid: 'PID' },
-          check: (v) => PD().checkNumbers(v, { pd: 1 / g().kP, pid: 0 }, { pd: 'PD', pid: 'PID' }),
+          html: 'Steady-state error magnitude per unit d (rad per N·m), without and with the integrator, as functions of the gains.',
+          code: {
+            template: 'def e_dist_pd(kP, kD):\n    return ...\n\ndef e_dist_pid(kP, kI, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: GAIN_ARGS,
+              items: [
+                { fn: 'e_dist_pd', args: ['kP', 'kD'], truth: (p, a) => 1 / a.kP },
+                { fn: 'e_dist_pid', args: ['kP', 'kI', 'kD'], truth: () => 0 },
+              ],
+            }, code),
+          },
           solution: () => [
             { tex: `\\text{PD}: \\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1}{k_P} = ${tex(1 / g().kP)},\\quad \\text{PID}: 0` },
             { html: 'Book: p. 147. Try it: set d ≠ 0 (left panel), then switch k<sub>I</sub> between 0 and a positive value.' },
+            { code: 'def e_dist_pd(kP, kD):\n    return 1 / kP\n\ndef e_dist_pid(kP, kI, kD):\n    return 0.0' },
           ],
         },
       ]);
@@ -504,10 +532,18 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'b', title: '(b) Largest stable k<sub>I</sub>',
-          html: 'For the current k<sub>P</sub>, k<sub>D</sub> (your A.8 gains on the right).',
-          inputs: { k: 'k<sub>I,crit</sub>' },
-          check: (v) => PD().checkNumbers(v, { k: this.evans(ctx).kCrit }, { k: 'kI,crit' }),
-          solution: () => [{ tex: `k_{I,crit} = ${tex(this.evans(ctx).kCrit)}` }],
+          html: 'As a function of the PD gains k<sub>P</sub>, k<sub>D</sub>. The check calls it at random gains.',
+          code: {
+            template: 'def kI_crit(kP, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { kP: GAIN_ARGS.kP, kD: GAIN_ARGS.kD },
+              items: [{ fn: 'kI_crit', args: ['kP', 'kD'], truth: (p, a) => { const m = ctx.sys.secondOrderModel(p); return (m.a1 + m.b0 * a.kD) * (m.a0 + m.b0 * a.kP) / m.b0; } }],
+            }, code),
+          },
+          solution: () => [
+            { tex: `k_{I,crit} = \\frac{c_2 c_1}{b_0} = \\frac{(a_1 + b_0 k_D)(a_0 + b_0 k_P)}{b_0} = ${tex(this.evans(ctx).kCrit)}\\;\\text{(current gains)}` },
+            { code: 'def kI_crit(kP, kD):\n    b0 = 3 / (P.m * P.ell**2)\n    a1 = 3 * P.b / (P.m * P.ell**2)\n    return (a1 + b0 * kD) * (b0 * kP) / b0   # Routh: c2 c1 > c0 = b0 kI, with a0 = 0' },
+          ],
         },
         {
           id: 'c', title: '(c) Pick k<sub>I</sub> that barely moves the PD poles',

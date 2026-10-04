@@ -501,62 +501,90 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch9;
       const a = () => this.analysis(ctx);
-      const absCheck = (v, truth, labels) => {
-        const vv = { ...v };
-        for (const k of Object.keys(truth)) { const g = PD().num(v[k]); if (g !== null && truth[k] !== 0) vv[k] = String(Math.abs(g) * Math.sign(truth[k])); }
-        return PD().checkNumbers(vv, truth, labels);
-      };
+      // Answers are functions of the gains, checked at random gains (inner gains > 0, outer < 0).
+      const IN = { kP: { label: 'kPθ', lo: 0.5, hi: 20 }, kD: { label: 'kDθ', lo: 0.1, hi: 5 } };
+      const OUT = { kP: { label: 'kPz', lo: -0.2, hi: -0.001 }, kI: { label: 'kIz', lo: -0.01, hi: -1e-5 }, kD: { label: 'kDz', lo: -0.3, hi: -0.005 } };
+      const b0 = (p) => ctx.sys.linear(p).b0;
+      const signHint = (it, f) => (Math.abs(Number(f.e.got) + Number(f.e.want)) <= 1e-6 * Math.abs(Number(f.e.want)) ? 'Give the magnitude (the outer gains are negative).' : '');
+      const check = (code, args, items, extra = {}) => WB.py.check(ctx, { args, items, ...extra }, code);
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a1', title: '(a) Inner loop under PD: tracking',
-          html: 'Errors for a unit input (unit parabola: R(s) = 1/s³), using the current gains.',
-          inputs: { type: 'type', step: 'e<sub>step</sub>', ramp: 'e<sub>ramp</sub>', parab: 'e<sub>parab</sub> [rad]' },
-          check: (v) => PD().checkNumbers(v, { type: 2, step: 0, ramp: 0, parab: a().inParab }, { parab: 'e_parab' }),
+          html: 'Set <code>system_type</code>, and write each steady-state error for a unit input (unit parabola: R(s) = 1/s³) as a function of the inner PD gains. Return <code>np.inf</code> for an unbounded error. The check calls your functions at random gains.',
+          code: {
+            template: 'system_type = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kD):\n    return ...\n',
+            check: (code) => check(code, IN, [
+              { var: 'system_type', truth: () => 2 },
+              { fn: 'e_step', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_ramp', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_parab', args: ['kP', 'kD'], truth: (p, x) => 1 / (b0(p) * x.kP) },
+            ]),
+          },
           solution: () => [
-            { tex: `P_{in}C_{in} = \\frac{b_0(k_{D_\\theta}s + k_{P_\\theta})}{s^2} \\Rightarrow \\text{type 2},\\quad e_{parab} = \\frac{1}{b_0 k_{P_\\theta}} = ${tex(a().inParab)}` },
+            { tex: `P_{in}C_{in} = \\frac{b_0(k_{D_\\theta}s + k_{P_\\theta})}{s^2} \\Rightarrow \\text{type 2},\\quad e_{parab} = \\frac{1}{b_0 k_{P_\\theta}} = ${tex(a().inParab)}\;\\text{(current gains)}` },
             { html: 'Step and ramp errors are zero. Book convention (pp. 146–152; Notes and References, p. 153): the loop gain with C = k<sub>P</sub> + k<sub>D</sub>s; with the derivative on the output the type is the same but the error values can differ.' },
+            { code: 'system_type = 2\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return 0.0\n\ndef e_parab(kP, kD):\n    b0 = P.ell / (P.m2 * P.ell**2 / 3 + P.m1 * (P.ell / 2)**2)\n    return 1 / (b0 * kP)     # 1/M_a, M_a = b0 kP' },
           ],
         },
         {
           id: 'a2', title: '(a) Inner loop: input disturbance',
-          inputs: { type: 'type', e: 'e<sub>ss</sub> per N of step d [rad/N]' },
-          check: (v) => absCheck(v, { type: 0, e: a().inDist }, { e: 'e_ss' }),
-          solution: () => [{ tex: `\\lim_{s\\to0}\\frac{P_{in}}{1 + P_{in}C_{in}} = \\lim_{s\\to0}\\frac{b_0}{s^2 + b_0(k_{D_\\theta}s + k_{P_\\theta})} = \\frac{1}{k_{P_\\theta}} = ${tex(a().inDist)} \\Rightarrow \\text{type 0}` }],
+          html: 'Set <code>system_type</code> (with respect to the disturbance), and write the steady-state error magnitude per newton of a step d (rad/N) as a function of the inner PD gains.',
+          code: {
+            template: 'system_type = ...\n\ndef e_dist(kP, kD):\n    return ...\n',
+            check: (code) => check(code, IN, [
+              { var: 'system_type', truth: () => 0 },
+              { fn: 'e_dist', args: ['kP', 'kD'], truth: (p, x) => 1 / x.kP },
+            ]),
+          },
+          solution: () => [
+            { tex: `\\lim_{s\\to0}\\frac{P_{in}}{1 + P_{in}C_{in}} = \\lim_{s\\to0}\\frac{b_0}{s^2 + b_0(k_{D_\\theta}s + k_{P_\\theta})} = \\frac{1}{k_{P_\\theta}} = ${tex(a().inDist)} \\Rightarrow \\text{type 0}` },
+            { code: 'system_type = 0\n\ndef e_dist(kP, kD):\n    return 1 / kP' },
+          ],
         },
         {
           id: 'b1', title: '(b) Outer loop under PD (k<sub>I<sub>z</sub></sub> = 0)',
-          inputs: { type: 'type', parab: 'e<sub>parab</sub> [m]' },
-          check: (v) => {
-            if (a().hasI) return { ok: false, msg: 'Set kIz = 0 first.' };
-            return PD().checkNumbers(v, { type: 2, parab: a().outParab }, { parab: 'e_parab' });
+          html: 'As in (a), for the outer loop with the inner loop as its DC gain, as functions of the outer PD gains (negative). Unit parabola, in m.',
+          code: {
+            template: 'system_type = ...\n\ndef e_parab(kP, kD):\n    return ...\n',
+            check: (code) => check(code, OUT, [
+              { var: 'system_type', truth: () => 2 },
+              { fn: 'e_parab', args: ['kP', 'kD'], truth: (p, x) => -1 / (p.g * x.kP) },
+            ], { explain: signHint }),
           },
-          solution: () => [{ tex: `P_{out}C_{out} = \\frac{-g(k_{D_z}s + k_{P_z})}{s^2} \\Rightarrow \\text{type 2},\\quad e_{parab} = \\frac{1}{M_a} = -\\frac{1}{gk_{P_z}}${a().hasI ? '' : ' = ' + tex(a().outParab)}` }, { html: 'Step and ramp errors are zero.' }],
+          solution: () => [
+            { tex: `P_{out}C_{out} = \\frac{-g(k_{D_z}s + k_{P_z})}{s^2} \\Rightarrow \\text{type 2},\\quad e_{parab} = \\frac{1}{M_a} = -\\frac{1}{gk_{P_z}}` },
+            { html: 'Step and ramp errors are zero.' },
+            { code: 'system_type = 2\n\ndef e_parab(kP, kD):\n    return -1 / (P.g * kP)   # M_a = -g kP > 0' },
+          ],
         },
         {
           id: 'b2', title: '(b) Outer loop with an integrator (k<sub>I<sub>z</sub></sub> ≠ 0)',
-          inputs: { type: 'type' },
-          check: (v) => {
-            if (!a().hasI) return { ok: false, msg: 'Set kIz ≠ 0 first.' };
-            return PD().checkNumbers(v, { type: 3 }, {});
+          code: {
+            template: 'system_type = ...\n',
+            check: (code) => check(code, {}, [{ var: 'system_type', truth: () => 3 }]),
           },
-          solution: () => [{ tex: 'P_{out}C_{out} = \\frac{-g(k_Ds^2 + k_Ps + k_I)}{s^3} \\Rightarrow \\text{type 3: zero error to steps, ramps and parabolas}' }],
+          solution: () => [
+            { tex: 'P_{out}C_{out} = \\frac{-g(k_Ds^2 + k_Ps + k_I)}{s^3} \\Rightarrow \\text{type 3: zero error to steps, ramps and parabolas}' },
+            { code: 'system_type = 3' },
+          ],
         },
         {
           id: 'b3', title: '(b) Outer loop: input disturbance (on the beam angle)',
-          html: 'Magnitudes. PD: error per unit step d; PID: error per unit ramp slope of d.',
-          inputs: { tPD: 'type (PD)', ePD: '|e| PD [m/rad]', tPID: 'type (PID)' },
-          check: (v) => {
-            const g = ctx.gains;
-            return absCheck(v, { tPD: 0, ePD: 1 / g.kPz, tPID: 1 }, { ePD: 'PD error' });
+          html: 'Disturbance types with PD and with PID, and the PD error magnitude per unit step d (m/rad) as a function of the outer gains.',
+          code: {
+            template: 'type_pd = ...\ntype_pid = ...\n\ndef e_dist_pd(kP, kD):\n    return ...\n',
+            check: (code) => check(code, OUT, [
+              { var: 'type_pd', truth: () => 0 },
+              { var: 'type_pid', truth: () => 1 },
+              { fn: 'e_dist_pd', args: ['kP', 'kD'], truth: (p, x) => Math.abs(1 / x.kP) },
+            ], { explain: signHint }),
           },
-          solution: () => {
-            const g = ctx.gains;
-            return [
-              { tex: `\\text{PD: }\\lim_{s\\to0}\\frac{-g}{s^2 - g(k_{D_z}s + k_{P_z})} = \\frac{1}{k_{P_z}} = ${tex(1 / g.kPz)}\\;(\\text{type 0})` },
-              { tex: `\\text{PID: }\\lim_{s\\to0} s\\frac{-g}{s^3 - g(k_{D_z}s^2 + k_{P_z}s + k_{I_z})}\\frac{1}{s^2} = \\frac{1}{k_{I_z}}\\;(\\text{type 1})` },
-              { html: 'The "Force disturbance" card shows what this means for a force on the beam: divide again by k<sub>P<sub>θ</sub></sub>.' },
-            ];
-          },
+          solution: () => [
+            { tex: '\\text{PD: }\\lim_{s\\to0}\\frac{-g}{s^2 - g(k_{D_z}s + k_{P_z})} = \\frac{1}{k_{P_z}}\;(\\text{type 0})' },
+            { tex: '\\text{PID: }\\lim_{s\\to0} s\\frac{-g}{s^3 - g(k_{D_z}s^2 + k_{P_z}s + k_{I_z})}\\frac{1}{s^2} = \\frac{1}{k_{I_z}}\;(\\text{type 1})' },
+            { html: 'The "Force disturbance" card shows what this means for a force on the beam: divide again by k<sub>P<sub>θ</sub></sub>.' },
+            { code: 'type_pd = 0\ntype_pid = 1\n\ndef e_dist_pd(kP, kD):\n    return abs(1 / kP)' },
+          ],
         },
       ]);
     },
@@ -680,10 +708,19 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         },
         {
           id: 'b', title: 'Root locus: most negative stable k<sub>I</sub>',
-          inputs: { k: 'k<sub>I,crit</sub>' },
-          html: 'Uses the PD gains from the current t<sub>r<sub>θ</sub></sub>, M and ζ (E.8: 1 s, 10, 0.707).',
-          check: (v) => PD().checkNumbers(v, { k: -this.evans(ctx).kCrit }, { k: 'kI,crit' }),
-          solution: () => [{ tex: `c_2c_1 > c_0:\\; (-gk_{D_z})(-gk_{P_z}) > -gk_{I_z} \\Rightarrow k_{I_z} > -gk_{D_z}k_{P_z} = ${tex(-this.evans(ctx).kCrit)}` }],
+          html: 'As a function of the outer PD gains k<sub>P</sub>, k<sub>D</sub> (negative), with the inner loop as its DC gain as in the Evans form. The check calls it at random gains.',
+          code: {
+            template: 'def kI_crit(kP, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { kP: { label: 'kP', lo: -0.2, hi: -0.001 }, kD: { label: 'kD', lo: -0.3, hi: -0.005 } },
+              params: (p) => ({ ...p, length: p.ell }),
+              items: [{ fn: 'kI_crit', args: ['kP', 'kD'], truth: (p, x) => -p.g * x.kD * x.kP }],
+            }, code),
+          },
+          solution: () => [
+            { tex: `c_2c_1 > c_0:\; (-gk_{D_z})(-gk_{P_z}) > -gk_{I_z} \\Rightarrow k_{I_z} > -gk_{D_z}k_{P_z} = ${tex(-this.evans(ctx).kCrit)}\;\\text{(E.8 gains)}` },
+            { code: 'def kI_crit(kP, kD):\n    return -P.g * kD * kP' },
+          ],
         },
         {
           id: 'c', title: 'Select k<sub>I</sub> that does not significantly change the other closed-loop poles',

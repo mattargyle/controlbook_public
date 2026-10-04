@@ -14,6 +14,9 @@ TARGETED = {
         ('ch4', '(c)', 'def tau_fl(theta, thetadot):\n    return 0\n\ndef thetaddot_fl(theta, thetadot, tau_tilde):\n    return 3 / (P.m * P.ell**2) * (tau_tilde - P.b * thetadot - P.m * P.g * P.ell / 2 * np.cos(theta))\n', 'not linear', False),
         ('ch5', 'Transfer', 'def transfer_function(s):\n    return 2 * (3 / (P.m * P.ell**2)) / (s**2 + 3 * P.b / (P.m * P.ell**2) * s)\n', 'expected', False),
         ('ch6', 'A, B', 'A = np.array([[0, 1], [0, -3 * P.b / (P.m * P.ell**2)]])\nB = np.array([0, 3 / (P.m * P.ell**2)])\nC = np.array([1, 0])\nD = 0\n', 'Matches', True),
+        ('ch9', '(a) PD', 'system_type = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return P.b / kP\n\ndef e_parab(kP, kD):\n    return 1e9\n', 'expected ∞', False),
+        ('ch9', '(a) PD', 'system_type = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return P.b / 0.1134\n\ndef e_parab(kP, kD):\n    return float("inf")\n', 'expected', False),
+        ('ch16', '(b)', 'def e_ss(kP, kI, kD):\n    return 5 * P.b / kI\n', 'L{5t²}', False),
     ],
     'B': [
         ('ch3', '(a)', 'def potential(z, theta):\n    return 1.225 * (np.cos(theta) - 1)\n', 'rather than numbers', False),
@@ -26,6 +29,7 @@ TARGETED = {
         ('ch8', '(d) Low', 'q = np.sqrt(3 * P.g / (2 * P.ell))\ndef filt(s, k_DC):\n    return -3 / (2 * P.ell * k_DC) / (s + q)\ndef char_out(s, kP, kD):\n    return 2 * ((1 + kD) * s**2 + (kP - q * kD) * s - q * kP)\ndef z_cl(s, kP, kD):\n    return 2 * kP * (s - q) / char_out(s, kP, kD)\n', 'Matches', True),
         ('p6', 'Closed', 'def L(s, kP, kD):\n    return (-2 * P.ell / 3 * s**2 + P.g) / (s**3 + kP * s**2)\n', 'expected', False),
         ('ch12', '(a) Integrator', 'A1 = np.zeros((5, 5))\nB1 = np.zeros((5, 1))\n', 'expected', False),
+        ('p6', 'Root locus', 'def kappa_crit(kP, kD):\n    return 0.0209\n', 'expected', False),
     ],
     'C': [
         ('ch3', '(a)', 'def potential(theta, phi):\n    return 0.05 * (phi - theta)**2\n', 'rather than numbers', False),
@@ -44,6 +48,9 @@ TARGETED = {
         ('p6', '(a)', 'def L(s, kP, kD):\n    return (P.b * s + P.k) / (P.Jp * s**3 + (P.b + P.b * kP) * s**2 + (P.k + P.k * kP) * s)\n', 'expected', False),
         ('ch18', '(a) Inner plant', 'def P_in(s, kD, sigma):\n    Js, b, k = P.Js, P.b, P.k\n    return (sigma * s + 1) / (sigma * Js * s**3 + (sigma * b + Js) * s**2 + (sigma * k + b + kD) * s + k)\n', 'book text', True),
         ('ch18', '(b) Outer plant', 'def P_out(s, kD, sigma):\n    return (sigma * s + 1) / (sigma * P.Jp * s**3 + (sigma * P.b + P.Jp) * s**2 + (sigma * P.k + P.b + kD) * s + P.k)\n', 'expected', False),
+        ('ch9', '(a) Inner', 'ref_type = 1\n\ndef e_ref(kP, kD):\n    return kD / kP\n\ndist_type = 0\n\ndef e_dist(kP, kD):\n    return 1 / kP\n', 'derivative on θ', True),
+        ('ch9', '(a) Inner', 'ref_type = 2\n\ndef e_ref(kP, kD):\n    return kD / kP\n\ndist_type = 0\n\ndef e_dist(kP, kD):\n    return 1 / kP\n', 'expected', False),
+        ('ch16', '(a)', 'def e_ss(kP, kD):\n    return 20 * (P.Js + P.Jp) / kP\n', 'L{20t²}', False),
     ],
     'D': [
         ('ch2', '(a)', 'def kinetic(z, zdot):\n    return 2.5 * zdot**2\n', 'rather than numbers', False),
@@ -63,6 +70,9 @@ TARGETED = {
         ('ch7', '(b)', 'def char_poly(s, kP, kD):\n    return P.m * s**2 + (P.b + kD) * s + P.k + kP\n\ndef closed_loop(s, kP, kD):\n    return kP / char_poly(s, kP, kD)\n', 'Matches', True),
         ('ch7', '(b)', 'def char_poly(s, kP, kD):\n    return P.m * s**2 + (P.b + kD) * s + kP\n\ndef closed_loop(s, kP, kD):\n    return kP / char_poly(s, kP, kD)\n', 'expected', False),
         ('p6', 'Characteristic', 'def L(s, kP, kD):\n    return (1 / P.m) / (s**2 + (P.b + kD) / P.m * s + (P.k + kP) / P.m)\n', 'expected', False),
+        ('ch9', '(a) PD', 'system_type = 0\n\ndef e_step(kP, kD):\n    return 1 / (1 + kP)\n\ndef e_ramp(kP, kD):\n    return np.inf\n\ndef e_parab(kP, kD):\n    return np.inf\n', 'expected', False),
+        ('ch9', '(a) PD', 'system_type = 0\n\ndef e_step(kP, kD):\n    return P.k / (P.k + kP)\n\ndef e_ramp(kP, kD):\n    return 1e9\n\ndef e_parab(kP, kD):\n    return np.inf\n', 'expected ∞', False),
+        ('ch16', '(b)', 'def din_pct(w, kP, kI, kD, sigma):\n    s = 1j * w\n    Pj = (1 / P.m) / (s**2 + P.b / P.m * s + P.k / P.m)\n    Cj = kP + kI / s + kD * s / (sigma * s + 1)\n    return 100 * abs(Pj / (1 + Pj * Cj))\n', 'exact closed-loop', True),
     ],
     'E': [
         ('ch3', '(a)', 'def potential(z, theta):\n    return (3.43 * z + 4.9) * np.sin(theta)\n', 'rather than numbers', False),
@@ -79,6 +89,9 @@ TARGETED = {
         ('ch5', '(b)', 'def Theta_over_F(s):\n    Je = P.m2 * P.ell**2 / 3 + P.m1 * P.ell**2 / 4\n    return P.ell / Je / s**2\n\ndef Z_over_F(s):\n    return 0\n\ndef Z_over_Theta(s):\n    return -P.g / s**2\n', 'expected', False),
         ('ch6', 'A, B', 'Je = P.m2 * P.ell**2 / 3 + P.m1 * P.ell**2 / 4\nA = np.array([[0, 0, 1, 0], [0, 0, 0, 1], [0, -P.g, 0, 0], [-P.m1 * P.g / Je, 0, 0, 0]])\nB = np.array([[0], [0], [0], [P.ell / Je]])\nC = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])\nD = 0\n', 'D has 1 value', False),
         ('p6', 'Characteristic', 'def L(s, kP, kD):\n    g = P.g\n    return -g / (s**3 - g * kD * s**2 - g * kP * s)\n', 'negated', False),
+        ('ch9', '(b) Outer loop: input', 'type_pd = 0\ntype_pid = 1\n\ndef e_dist_pd(kP, kD):\n    return 1 / kP\n', 'magnitude', False),
+        ('ch16', '(b)', 'def din_pct(w, kP, kD, sigma):\n    s = 1j * w\n    return 100 / abs(kP + kD * s / (sigma * s + 1))\n', 'band edge', False),
+        ('ch16', '(e)', 'def e_amp(w, kP, kI, kD, sigma):\n    s = 1j * w\n    return 2 / abs(-P.g / s**2 * (kP + kI / s + kD * s / (sigma * s + 1)))\n', 'poor approximation', True),
     ],
     'F': [
         ('ch2', '(a)', 'def kinetic(z, h, theta, zdot, hdot, thetadot):\n    m = P.mc + 0.5\n    J = P.Jc + 0.5 * P.d**2\n    return 0.5 * m * (zdot**2 + hdot**2) + 0.5 * J * thetadot**2\n', 'rather than numbers', False),
@@ -94,5 +107,8 @@ TARGETED = {
         ('ch6', '(b)', 'M = P.mc + 2 * P.mr\nJ = P.Jc + 2 * P.mr * P.d**2\nA = np.array([[0, 0, 1, 0], [0, 0, 0, 1], [0, -P.g, -P.mu / M, 0], [0, 0, 0, 0]])\nB = np.array([[0], [0], [0], [1 / J]])\nC = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])\nD = 0\n', 'shape 2×1', False),
         ('ch7', '(b)', 'b0 = 1 / (P.mc + 2 * P.mr)\ndef char_poly(s, kP, kD):\n    return 2 * (s**2 + b0 * kD * s + b0 * kP)\ndef closed_loop(s, kP, kD):\n    return 2 * b0 * kP / char_poly(s, kP, kD)\n', 'Matches', True),
         ('p6', '(b) Evans', 'def L_z(s, kP, kD):\n    a = P.mu / (P.mc + 2 * P.mr)\n    b = -P.g\n    return -b / (s**3 + (a + b * kD) * s**2 + b * kP * s)\n', 'expected', False),
+        ('ch9', '(a) Longitudinal', 'type_pd = 2\ntype_pid = 3\ndist_type_pd = 0\ndist_type_pid = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return kD / kP\n\ndef e_parab(kP, kD):\n    return (P.mc + 2 * P.mr) / kP\n\ndef e_dist(kP, kD):\n    return 1 / kP\n', 'derivative on h', False),
+        ('ch9', '(c) Outer', 'type_pd = 1\ntype_pid = 2\ndist_type_pd = 0\ndist_type_pid = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return np.inf\n\ndef e_parab(kP, kI, kD):\n    return np.inf\n', 'expected', False),
+        ('ch16', '(a)', 'def e_ss(kP, kI, kD):\n    return 5 * kD / kI\n', 'implemented loop', False),
     ],
 }

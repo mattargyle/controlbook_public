@@ -163,6 +163,22 @@ WB.chapters = WB.chapters || {};
   };
 
   // ------------------------------------------------------------ Chapter 16 --
+  // A.16 answers are functions of the frequency and the C_PID gains, checked at
+  // random arguments: truth(|PC(jw)|, |C(jw)|) gives the expected percentage.
+  const GAINS = { kP: { label: 'kP', lo: 0.1, hi: 2 }, kI: { label: 'kI', lo: 0.05, hi: 1 }, kD: { label: 'kD', lo: 0.02, hi: 0.5 }, sigma: { label: 'σ', lo: 0.01, hi: 0.1 } };
+  const W_TRACK = { label: 'w', lo: 0.05, hi: 2 }, W_DIN = { label: 'w', lo: 0.001, hi: 0.1 }, W_NOISE = { label: 'w', lo: 50, hi: 2000 };
+  const flat1 = (v) => (Array.isArray(v) ? v[0] : v);
+  function pyCheck(ctx, code, fn, w, truth) {
+    return WB.py.check(ctx, {
+      args: { w, ...GAINS },
+      items: [{ fn, args: ['w', 'kP', 'kI', 'kD', 'sigma'], truth: (p, a) => {
+        const m = ctx.sys.secondOrderModel(p), C = T.pid(a);
+        return truth(T.mag(T.mul(T.tf([m.b0], [1, m.a1, m.a0]), C), a.w), T.mag(C, a.w));
+      } }],
+    }, code);
+  }
+  const PY_LOOP = 'def loop(w, kP, kI, kD, sigma):\n    s = 1j * w\n    J = P.m * P.ell**2\n    Pj = (3 / J) / (s**2 + 3 * P.b / J * s)\n    Cj = kP + kI / s + kD * s / (sigma * s + 1)\n    return Pj, Cj\n';
+
   WB.chapters.ch16 = {
     id: 'ch16', num: 16, tab: 'Ch 16', title: 'Frequency-domain specs', pages: 'pp. 283–301',
     defaults(sys) { const p = sys.problems.ch16; return { ...pidDefaults(sys), wr: p.wr, wdin: p.wdin, wno: p.wno, A: p.parabolaA }; },
@@ -244,22 +260,33 @@ WB.chapters = WB.chapters || {};
     buildProblem(parent, ctx) {
       const s = () => this.specs(ctx);
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
-        { id: 'a', title: '(a) tracking error below ω<sub>r</sub>', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gr }, { v: 'percent' }),
-          solution: () => [{ tex: `B_r = ${tex(s().Br)}\\,\\text{dB},\\; \\gamma_r = ${tex(100 * s().gr)}\\%` }, { html: 'Book (k<sub>I</sub> = 0.25): 44.5 dB, 0.60% (p. 295).' }] },
-        { id: 'b', title: '(b) steady-state error to θ<sub>r</sub> = 5t²', inputs: { v: 'e<sub>ss</sub> [rad]' },
-          check: (v) => {
-            const g = PD().num(v.v), x = s();
-            if (g !== null && M.close(g, x.eParabBook, 0.02)) return { ok: false, msg: 'That matches the book (A/M_a), but L{5t²} = 10/s³, so the error is 2A/M_a.' };
-            return PD().checkNumbers({ v: v.v }, { v: x.eParab }, { v: 'e_ss' });
+        { id: 'a', title: '(a) tracking error below ω<sub>r</sub>',
+          html: 'Percent tracking error for reference content at frequency w (rad/s), as a function of w and the C<sub>PID</sub> gains (dirty derivative σ, as in the controls). The check calls it at random arguments; ω<sub>r</sub> = 0.4 is the book\'s case.',
+          code: { template: 'def track_pct(w, kP, kI, kD, sigma):\n    return ...\n', check: (code) => pyCheck(ctx, code, 'track_pct', W_TRACK, (Lg) => 100 / Lg) },
+          solution: () => [{ tex: `B_r = ${tex(s().Br)}\\,\\text{dB},\; \\gamma_r = ${tex(100 * s().gr)}\\%\;\\text{(current gains)}` }, { html: 'Book (k<sub>I</sub> = 0.25): 44.5 dB, 0.60% (p. 295).' },
+            { code: `${PY_LOOP}\ndef track_pct(w, kP, kI, kD, sigma):\n    Pj, Cj = loop(w, kP, kI, kD, sigma)\n    return 100 / abs(Pj * Cj)` }] },
+        { id: 'b', title: '(b) steady-state error to θ<sub>r</sub> = 5t²',
+          html: 'Steady-state error (rad) as a function of the gains.',
+          code: {
+            template: 'def e_ss(kP, kI, kD):\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: GAINS,
+              items: [{ fn: 'e_ss', args: ['kP', 'kI', 'kD'], truth: (p, a) => { const m = ctx.sys.secondOrderModel(p); return 2 * ctx.st.A * m.a1 / (m.b0 * a.kI); } }],
+              explain: (it, f) => (M.close(flat1(f.e.got), flat1(f.e.want) / 2, 1e-4) ? 'Half the expected value matches the book (A/M_a), but L{5t²} = 10/s³, so the error is 2A/M_a.' : ''),
+            }, code),
           },
-          solution: () => [{ tex: `e_{ss} = \\frac{2A}{M_a} = \\frac{10}{${tex(s().Ma)}} = ${tex(s().eParab)}` }, { html: 'Book: 0.2 using A/M<sub>a</sub> with k<sub>I</sub> = 0.25 (p. 296).' }] },
-        { id: 'c', title: '(c) % of d<sub>in</sub> below 0.01 rad/s in θ', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gdin }, { v: 'percent' }),
-          solution: () => [{ tex: `|C(j0.01)| = ${tex(s().Bdin)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gdin)}\\%` }, { html: 'Book: 28 dB, 4% (k<sub>I</sub> = 0.25).' }] },
-        { id: 'd', title: '(d) % of noise above 100 rad/s in θ', inputs: { v: '%' },
-          check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gn }, { v: 'percent' }),
-          solution: () => [{ tex: `|PC(j100)| = ${tex(-s().Bn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%` }, { html: 'Book: −32.6 dB, 2.3%.' }] },
+          solution: () => [{ tex: `e_{ss} = \\frac{2A}{M_a} = \\frac{10}{${tex(s().Ma)}} = ${tex(s().eParab)}\;\\text{(current gains)}` }, { html: 'Book: 0.2 using A/M<sub>a</sub> with k<sub>I</sub> = 0.25 (p. 296).' },
+            { code: 'def e_ss(kP, kI, kD):\n    b0 = 3 / (P.m * P.ell**2)\n    a1 = 3 * P.b / (P.m * P.ell**2)\n    Ma = b0 * kI / a1           # lim s^2 P C\n    return 2 * 5 / Ma           # r = 5t^2  ->  R = 10/s^3' }] },
+        { id: 'c', title: '(c) % of d<sub>in</sub> below 0.01 rad/s in θ',
+          html: 'Percent of an input disturbance at frequency w (rad/s) that shows up in θ, as a function of w and the gains.',
+          code: { template: 'def din_pct(w, kP, kI, kD, sigma):\n    return ...\n', check: (code) => pyCheck(ctx, code, 'din_pct', W_DIN, (Lg, C) => 100 / C) },
+          solution: () => [{ tex: `|C(j0.01)| = ${tex(s().Bdin)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gdin)}\\%\;\\text{(current gains)}` }, { html: 'Book: 28 dB, 4% (k<sub>I</sub> = 0.25).' },
+            { code: `${PY_LOOP}\ndef din_pct(w, kP, kI, kD, sigma):\n    Pj, Cj = loop(w, kP, kI, kD, sigma)\n    return 100 / abs(Cj)      # |P/(1+PC)| ≈ 1/|C| where |PC| >> 1` }] },
+        { id: 'd', title: '(d) % of noise above 100 rad/s in θ',
+          html: 'Percent of sensor noise at frequency w (rad/s) that shows up in θ, as a function of w and the gains.',
+          code: { template: 'def noise_pct(w, kP, kI, kD, sigma):\n    return ...\n', check: (code) => pyCheck(ctx, code, 'noise_pct', W_NOISE, (Lg) => 100 * Lg) },
+          solution: () => [{ tex: `|PC(j100)| = ${tex(-s().Bn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%\;\\text{(current gains)}` }, { html: 'Book: −32.6 dB, 2.3%.' },
+            { code: `${PY_LOOP}\ndef noise_pct(w, kP, kI, kD, sigma):\n    Pj, Cj = loop(w, kP, kI, kD, sigma)\n    return 100 * abs(Pj * Cj)   # |PC/(1+PC)| ≈ |PC| where |PC| << 1` }] },
       ]);
     },
   };
