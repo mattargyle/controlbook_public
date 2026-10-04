@@ -15,6 +15,30 @@ WB.chapters = WB.chapters || {};
   // Every gain margin, as text (conditionally stable loops have several).
   const gmText = (mg) => (mg.crossings && mg.crossings.length ? mg.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)}`).join(', ') : '∞');
 
+  // Ch 17 checks (all studies) are numbers for a fixed loop, the book's X.10 gains,
+  // so they don't go stale when the gain sliders move.
+  // A gain-margin answer in dB: 'inf' / '∞' when the phase never crosses −180°;
+  // with several phase crossings (conditionally stable), any of them is accepted.
+  function gmCheck(text, mg) {
+    const t = String(text || '').trim().toLowerCase();
+    if (!t) return { ok: false, msg: 'Enter the gain margin in dB (inf if the phase never reaches −180°).' };
+    const inf = /^(\+?inf(inity)?|∞)$/.test(t);
+    const cr = mg.crossings || [];
+    if (!cr.length) return inf ? { ok: true } : { ok: false, msg: 'Check GM: does the phase ever reach −180°?' };
+    if (inf) return { ok: false, msg: 'Check GM: the phase does cross −180°.' };
+    const g = PD().num(t);
+    if (g === null) return { ok: false, msg: 'Enter GM as a number of dB, or inf.' };
+    return cr.some((c) => Math.abs(g - db(c.gm)) <= Math.max(0.1, 0.01 * Math.abs(db(c.gm)))) ? { ok: true } : { ok: false, msg: 'Check GM.' };
+  }
+  // Numbers plus an optional GM answer, combined into one result.
+  function marginCheck(v, truth, labels, mg) {
+    const r = PD().checkNumbers(v, truth, labels);
+    if (!r.ok || !mg) return r;
+    const g = gmCheck(v.gm, mg);
+    return g.ok ? r : g;
+  }
+  const gainsText = (g) => `k<sub>P</sub> = ${fmt(g.kP, 4)}, k<sub>I</sub> = ${fmt(g.kI, 4)}, k<sub>D</sub> = ${fmt(g.kD, 4)}, σ = ${fmt(g.sigma, 3)}`;
+
   const plantTf = (ctx) => T.tf([ctx.model.b0], [1, ctx.model.a1, ctx.model.a0]);
   // C_PID with dirty derivative (p. 313), from the chapter's gains (Work: the student's).
   const pidTf = (ctx) => T.pid({ ...ctx.gains, sigma: ctx.st.sigma });
@@ -299,11 +323,12 @@ WB.chapters = WB.chapters || {};
     simDefaults(sys) { return sys.problems.ch17.sim; },
     gains: pidGains,
     // The margins and bandwidth answer A.17: Work mode shows them once it is solved (or revealed).
-    marginsShown: (ctx) => WB.ui.shown(ctx, 'ch17:m') || shows(ctx, 'ch17', 'a'),
+    marginsShown: (ctx) => WB.ui.shown(ctx, 'ch17:m') || (shows(ctx, 'ch17', 'a') && shows(ctx, 'ch17', 'b')),
     controller: (ctx, o) => WB.pid.makePID(ctx, o),
 
-    loop(ctx) {
-      const Lg = T.mul(plantTf(ctx), pidTf(ctx));
+    // The loop with the slider gains, or with fixed gains g ({kP, kI, kD, sigma}).
+    loop(ctx, g) {
+      const Lg = T.mul(plantTf(ctx), g ? T.pid(g) : pidTf(ctx));
       const Tc = T.feedback(Lg);
       const mg = T.margins(Lg);
       const { mag } = T.bode(Tc, W);
@@ -352,7 +377,7 @@ WB.chapters = WB.chapters || {};
           numbers: isFinite(l.mg.gm) ? `GM = ${tex(db(l.mg.gm))}\\,\\text{dB}` : 'GM = \\infty \\;(\\text{phase never reaches } -180^\\circ)', spoiler: true, answers: PD().partKey(ctx, 'ch17', 'a') },
         { title: 'Open vs. closed loop', page: 'p. 306–307',
           theory: 'T = \\frac{PC}{1+PC}:\\; |PC| \\gg 1 \\Rightarrow |T| \\approx 1,\\; |PC| \\ll 1 \\Rightarrow |T| \\approx |PC|',
-          numbers: `\\omega_{bw} = ${tex(l.bw)}\\;\\text{vs.}\\;\\omega_{co} = ${tex(l.mg.wc)}`, spoiler: true, answers: PD().partKey(ctx, 'ch17', 'a'),
+          numbers: `\\omega_{bw} = ${tex(l.bw)}\\;\\text{vs.}\\;\\omega_{co} = ${tex(l.mg.wc)}`, spoiler: true, answers: PD().partKey(ctx, 'ch17', 'b'),
           note: 'PM ≈ 60° behaves like ζ ≈ 0.707 (Fig. 17-7). A smaller PM gives peaking in |T| and a bandwidth above ω_co.' },
         { title: 'C_PID with dirty derivative', page: 'p. 313',
           theory: 'C(s) = k_P + \\frac{k_I}{s} + \\frac{k_D s}{\\sigma s + 1} = \\frac{(k_D + \\sigma k_P)s^2 + (k_P + \\sigma k_I)s + k_I}{s(\\sigma s + 1)}',
@@ -363,11 +388,23 @@ WB.chapters = WB.chapters || {};
     },
 
     buildProblem(parent, ctx) {
-      const l = () => this.loop(ctx);
+      const g = a10(ctx.sys);
+      const l = () => this.loop(ctx, g);
+      const fixed = `With the book's A.10 gains (${gainsText(g)}), not the sliders.`;
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch17, [
-        { id: 'a', title: 'Margins and bandwidth', inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub>', bw: 'ω<sub>bw</sub>' },
-          check: (v) => { const x = l(); return PD().checkNumbers(v, { pm: x.mg.pm, wc: x.mg.wc, bw: x.bw }, { pm: 'PM', wc: 'ωco', bw: 'ωbw' }); },
-          solution: () => { const x = l(); return [{ tex: `PM = ${tex(x.mg.pm)}^\\circ \\text{ at } ${tex(x.mg.wc)},\\; GM = ${isFinite(x.mg.gm) ? tex(db(x.mg.gm)) + '\\,dB' : '\\infty'},\\; \\omega_{bw} = ${tex(x.bw)}` }, { html: 'Book (k<sub>I</sub> = 0.25): PM 49.0° at 10.8 rad/s, GM ∞, bandwidth ≈ 18 rad/s, a bit above crossover because the PM is small (p. 313–314).' }]; } },
+        { id: 'a', title: '(a) Phase and gain margins under the A.10 PID control',
+          html: `${fixed} Enter GM in dB, or <code>inf</code> if the phase never reaches −180°.`,
+          inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub> [rad/s]', gm: 'GM [dB]' },
+          check: (v) => { const x = l(); return marginCheck(v, { pm: x.mg.pm, wc: x.mg.wc }, { pm: 'PM', wc: 'ωco' }, x.mg); },
+          solution: () => { const x = l(); return [{ tex: `PM = ${tex(x.mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(x.mg.wc)}\\,\\text{rad/s},\\quad GM = ${gmText(x.mg) === '∞' ? '\\infty' : gmText(x.mg).replace(/ dB at /g, '\\,\\text{dB at } ')}` }, { html: 'Book (k<sub>I</sub> = 0.25): PM 49.0° at 10.8 rad/s, GM ∞ (p. 313–314).' }]; } },
+        { id: 'b', title: '(b) Closed-loop bandwidth and how it relates to crossover',
+          html: `${fixed} Plot the open- and closed-loop Bode plots together (drawn above with the slider gains); ω<sub>bw</sub> is where |T| falls 3 dB below its DC value.`,
+          inputs: { bw: 'ω<sub>bw</sub> [rad/s]', ratio: 'ω<sub>bw</sub> / ω<sub>co</sub>' },
+          check: (v) => { const x = l(); return PD().checkNumbers(v, { bw: x.bw, ratio: x.bw / x.mg.wc }, { bw: 'ωbw', ratio: 'ωbw/ωco' }); },
+          solution: () => { const x = l(); return [
+            { tex: `\\omega_{bw} = ${tex(x.bw)}\\,\\text{rad/s} = ${tex(x.bw / x.mg.wc)}\\,\\omega_{co}` },
+            { html: 'The bandwidth sits near crossover: above ω<sub>co</sub> |PC| ≪ 1, so |T| ≈ |PC| falls off with it. With a PM well below 60° the closed loop peaks and ω<sub>bw</sub> lands above ω<sub>co</sub> (Fig. 17-7); the book reports about 18 rad/s for k<sub>I</sub> = 0.25 (p. 314).' },
+          ]; } },
       ]);
     },
   };
@@ -667,5 +704,5 @@ class Controller:
   };
 
   // Bode helpers shared with the B–F frequency chapters.
-  WB.freq = { gmText, marginMarks };
+  WB.freq = { gmText, marginMarks, gmCheck, marginCheck, gainsText };
 })();
