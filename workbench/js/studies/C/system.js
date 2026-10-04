@@ -398,40 +398,6 @@ WB.studies.C = WB.studies.C || { chapters: {} };
   const showsOl = (ctx) => shows(ctx, 'C.5/b') || shows(ctx, 'C.6/a');
 
   // ------------------------------------------------- student controllers --
-  // WB.myCtrl.matchCheck, but the student's run may match any of several reference
-  // runs (C.8(e): with or without the φ_r feedforward of Fig. 8-20; C.18: both
-  // filter conventions), and several outputs can be compared (C.8(e): θ too, since
-  // φ hardly depends on the inner loop). cases: [{ sc, label, refs: [() -> WB.sim
-  // result, ...] }], the first with the nominal parameters; tol in rad.
-  async function matchAny(ctx, code, cases, { tol, t0 = 0, what = 'the design', outputs = [1] }) {
-    const f = (v) => `${M.fmt(v * R2D, 3)}°`;
-    const name = (o) => ctx.sys.outputs[o].label;
-    // largest difference over the compared outputs: {e, t, o}
-    const diff = (mine, ref) => outputs.map((o) => ({ ...WB.myCtrl.maxDiff(mine, ref, { t0, output: o }), o })).reduce((a, b) => (b.e > a.e ? b : a));
-    let worst = 0;
-    for (let i = 0; i < cases.length; i++) {
-      const c = cases[i];
-      const mine = await WB.myCtrl.run(ctx, code, c.sc);
-      if (mine.ok === false) return mine;
-      const refs = c.refs.map((mk) => mk());
-      const ds = refs.map((ref) => diff(mine, ref));
-      const j = ds.reduce((b, d, q) => (d.e < ds[b].e ? q : b), 0), d = ds[j];
-      const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
-      if (!(d.e <= tol)) {
-        if (i > 0) {
-          const keys = ctx.sys.uncertain.map((q) => `P.${q}`).join(', ');
-          return { ok: false, msg: `Matches ${what} with the nominal parameters but not with ${c.label} (${name(d.o)} off by ${f(d.e)}). Compute the gains from ${keys} rather than numbers.`, detail };
-        }
-        const n = mine.t.length - 1, ref = refs[j];
-        const off = mine.r[n] - mine.yAll[1][n], refOff = ref.r[n] - ref.yAll[1][n];
-        let msg = `Your ${name(d.o)} differs from ${what} by ${f(d.e)} at t = ${M.fmt(d.t, 3)} s.`;
-        if (Math.abs(off - refOff) > tol) msg += ` At the end φ is ${f(off)} from φ_r (${what}: ${f(refOff)}).`;
-        return { ok: false, msg, detail };
-      }
-      worst = Math.max(worst, d.e);
-    }
-    return { ok: true, msg: `Your ${outputs.map((o) => `${name(o)}(t)`).join(' and ')} match${outputs.length > 1 ? '' : 'es'} ${what} to within ${f(Math.max(worst, 1e-6))} (${cases.map((c) => c.label).join('; ')}).` };
-  }
   // |φ_r − φ| (deg) at the sample nearest t.
   const phiErrAt = (res, t) => { const k = Math.round(t / (res.t[1] - res.t[0])); return Math.abs(res.r[k] - res.yAll[1][k]) * R2D; };
   // A mismatch {Js: -12, b: 7} as "Js -12%, b +7%", for part texts.
@@ -439,6 +405,6 @@ WB.studies.C = WB.studies.C || { chapters: {} };
 
   WB.studies.C.lib = {
     R2D, ss, wnRule, pairPoles, slcDesign, innerPoles, outerPoles, outerCharPoly, fullLoopPoles,
-    deg, shows, showsOl, matchAny, phiErrAt, misText,
+    deg, shows, showsOl, phiErrAt, misText,
   };
 })();

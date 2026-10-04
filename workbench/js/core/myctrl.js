@@ -230,38 +230,57 @@ WB.myCtrl = (function () {
     return out;
   }
 
-  // Run the student's code on each case and compare the output with a reference
-  // run. cases: [{ sc, ref: () -> WB.sim result (or several), label }], the first with the
-  // nominal parameters; tol in SI. Resolves to {ok, msg, detail?}.
-  async function matchCheck(ctx, code, cases, { tol, t0 = 0, what = 'the design', output = chan(ctx.sys).refs[0].output }) {
-    const out = chan(ctx.sys).outputs[output];
-    const k = out.scale || 1, unit = out.unit === '°' ? '°' : ` ${out.unit}`;
-    const f = (v) => `${M.fmt(v * k, 3)}${unit}`;
-    let worst = 0;
+  // Run the student's code on each case and compare outputs with reference runs.
+  // cases: [{ sc, label, ref: () -> WB.sim result (or several), or refs: [() -> result,
+  // ...] }], the first with the nominal parameters. Several references are equally
+  // valid conventions: the closest one counts. tol (SI): a number for `output`
+  // (default: the primary reference's output) or for each of `outputs`, or
+  // { outputIndex: tol } to compare several outputs at their own tolerances.
+  // Resolves to {ok, msg, detail?}.
+  async function matchCheck(ctx, code, cases, { tol, t0 = 0, what = 'the design', output, outputs } = {}) {
+    const v = chan(ctx.sys);
+    const tols = typeof tol === 'object' ? tol : Object.fromEntries((outputs || [output ?? v.refs[0].output]).map((o) => [o, tol]));
+    const outs = Object.keys(tols).map(Number);
+    const name = (o) => v.outputs[o].label;
+    const f = (o, val) => {
+      const q = v.outputs[o], x = val * (q.scale || 1);
+      if (q.unit === 'm' && Math.abs(x) < 0.1) return `${M.fmt(x * 1000, 3)} mm`;
+      return `${M.fmt(x, 3)}${q.unit === '°' ? '°' : ` ${q.unit}`}`;
+    };
+    // per compared output {o, e, t}, and the worst one relative to its tolerance
+    const compare = (mine, ref) => {
+      const ds = outs.map((o) => ({ o, ...maxDiff(mine, ref, { t0, output: o }) }));
+      return { ds, worst: ds.reduce((a, b) => (b.e / tols[b.o] > a.e / tols[a.o] ? b : a)) };
+    };
+    const worst = {};
     for (let i = 0; i < cases.length; i++) {
       const c = cases[i];
       const mine = await run(ctx, code, c.sc);
       if (mine.ok === false) return mine;
-      // ref() may return several runs (equally valid conventions): use the closest
-      const runs = [].concat(c.ref());
-      const ds = runs.map((rr) => maxDiff(mine, rr, { t0, output }));
-      const best = ds.indexOf(ds.reduce((a, b) => (b.e < a.e ? b : a)));
-      const ref = runs[best], d = ds[best];
+      const refs = c.refs ? c.refs.map((mk) => mk()) : [].concat(c.ref());
+      const cmp = refs.map((rr) => compare(mine, rr));
+      const best = cmp.reduce((bi, x, q) => (x.worst.e / tols[x.worst.o] < cmp[bi].worst.e / tols[cmp[bi].worst.o] ? q : bi), 0);
+      const { ds, worst: d } = cmp[best], ref = refs[best];
       const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
-      if (!(d.e <= tol)) {
+      if (!(d.e <= tols[d.o])) {
         if (i > 0) {
           const keys = ctx.sys.uncertain.map((q) => `P.${q}`).join(', ');
-          return { ok: false, msg: `Matches ${what} with the nominal parameters but not with ${c.label} (off by ${f(d.e)}). Compute the gains from ${keys} rather than numbers.`, detail };
+          return { ok: false, msg: `Matches ${what} with the nominal parameters but not with ${c.label} (${name(d.o)} off by ${f(d.o, d.e)}). Compute the gains from ${keys} rather than numbers.`, detail };
         }
-        const n = mine.t.length - 1;
-        const off = mine.r[n] - mine.yAll[output][n], refOff = ref.r[n] - ref.yAll[output][n];
-        let msg = `Your ${out.label} differs from ${what} by ${f(d.e)} at t = ${M.fmt(d.t, 3)} s.`;
-        if (Math.abs(off - refOff) > tol) msg += ` At the end it is ${f(off)} from the reference (${what}: ${f(refOff)}).`;
+        let msg = `Your ${name(d.o)} differs from ${what} by ${f(d.o, d.e)} at t = ${M.fmt(d.t, 3)} s.`;
+        const ri = v.refs.findIndex((rf) => rf.output === d.o);
+        if (ri >= 0) {
+          const n = mine.t.length - 1;
+          const off = mine.rAll[ri][n] - mine.yAll[d.o][n], refOff = ref.rAll[ri][n] - ref.yAll[d.o][n];
+          if (Math.abs(off - refOff) > tols[d.o]) msg += ` At the end it is ${f(d.o, off)} from its reference (${what}: ${f(d.o, refOff)}).`;
+        }
         return { ok: false, msg, detail };
       }
-      worst = Math.max(worst, d.e);
+      for (const x of ds) worst[x.o] = Math.max(worst[x.o] || 0, x.e);
     }
-    return { ok: true, msg: `Your ${out.label}(t) matches ${what} to within ${f(worst)} (${cases.map((c) => c.label).join('; ')}).` };
+    const names = outs.map((o) => `${name(o)}(t)`);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    return { ok: true, msg: `Your ${list} match${names.length > 1 ? '' : 'es'} ${what} to within ${outs.map((o) => f(o, worst[o])).join(', ')} (${cases.map((c) => c.label).join('; ')}).` };
   }
 
   // ------------------------------------------------- Work-mode simulation --

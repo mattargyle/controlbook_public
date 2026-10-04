@@ -180,35 +180,9 @@
     WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
   }
 
-  // WB.myCtrl.matchCheck with two accepted references per case (cases: [{sc, label,
-  // refs: [() -> result, ...]}]): the problem doesn't say whether the PD adds the
-  // spring's equilibrium force F_e = k z_r (ISSUES.md), so either version passes.
-  async function matchEither(ctx, code, cases, tol) {
-    const f = (v) => `${fmt(v, 3)} m`;
-    let worst = 0;
-    for (let i = 0; i < cases.length; i++) {
-      const c = cases[i];
-      const mine = await WB.myCtrl.run(ctx, code, c.sc);
-      if (mine.ok === false) return mine;
-      const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
-      const runs = c.refs.map((r) => r());
-      const ds = runs.map((ref) => WB.myCtrl.maxDiff(mine, ref));
-      const j = ds[1] && ds[1].e < ds[0].e ? 1 : 0, d = ds[j], ref = runs[j];
-      if (!(d.e <= tol)) {
-        if (i > 0) return { ok: false, msg: `Matches the design with the nominal parameters but not with ${c.label} (off by ${f(d.e)}). Compute the gains from P.m, P.k, P.b rather than numbers.`, detail };
-        const n = mine.t.length - 1;
-        const off = mine.r[n] - mine.y[n], refOff = ref.r[n] - ref.y[n];
-        let msg = `Your z differs from the design by ${f(d.e)} at t = ${fmt(d.t, 3)} s.`;
-        if (Math.abs(off - refOff) > tol) msg += ` At the end it is ${f(off)} from the reference (the design: ${f(refOff)}).`;
-        return { ok: false, msg, detail };
-      }
-      worst = Math.max(worst, d.e);
-    }
-    return { ok: true, msg: `Your z(t) matches the design to within ${f(worst)} (${cases.map((c) => c.label).join('; ')}).` };
-  }
-
   // A student's PD controller (fed the state, as in the Ch 7-8 code) against the
-  // workbench's (Fig. 7-2, derivative on the output, with or without F_e) for a step,
+  // workbench's (Fig. 7-2, derivative on the output, with or without F_e: the problem
+  // doesn't say whether the PD adds the spring's equilibrium force, ISSUES.md) for a step,
   // with the nominal and a second parameter set. gainsFor(p) gives the design's kP, kD.
   function pdMatch(ctx, code, gainsFor, step, tEnd) {
     const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
@@ -221,7 +195,7 @@
       };
       return { sc, label: pc.label, refs: [ref('none'), ref('eq')] };
     });
-    return matchEither(ctx, code, cases, 0.02 * step);
+    return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.02 * step });
   }
 
   // Solution code: D.7(d), the D.8 rise-time design with the given tr line, and D.10(c).

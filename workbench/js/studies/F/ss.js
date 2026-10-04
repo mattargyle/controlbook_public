@@ -793,7 +793,7 @@ class Controller:
               const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(1), STEP(1)], tEnd: 20, feed: 'state' });
               return { sc, label: pc.label, ref: () => refSS(ctx, sc, 'sfi') };
             });
-            const m = await F.matchAll(ctx, code, cases, { tol: { 0: 0.03, 1: 0.03 } });
+            const m = await WB.myCtrl.matchCheck(ctx, code, cases, { tol: { 0: 0.03, 1: 0.03 } });
             if (!m.ok) return m;
             const sc = F.scenario(ctx, { params: { ...ctx.pModel, f_max: WINDUP.fmax }, refs: [STEP(WINDUP.step), STEP(0)], tEnd: WINDUP.tEnd, feed: 'state' });
             const res = await WB.myCtrl.run(ctx, code, sc);

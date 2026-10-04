@@ -151,7 +151,7 @@
   const C10_TOL = 0.5;
 
   // The workbench's cascade with given gains on a check scenario (reference for
-  // lib.matchAny): true-state derivatives, no |θ_r| limit, with or without the
+  // WB.myCtrl.matchCheck): true-state derivatives, no |θ_r| limit, with or without the
   // φ_r feedforward.
   function cascadeRef(ctx, sc, g, ff) {
     const rc = WB.myCtrl.refCtx(ctx, sc);
@@ -594,7 +594,7 @@
               // with or without the φ_r feedforward of Fig. 8-20
               return { sc, label: pc.label, refs: [() => cascadeRef(ctx, sc, g, true), () => cascadeRef(ctx, sc, g, false)] };
             });
-            return lib().matchAny(ctx, code, cases, { tol: 0.03 * E_STEP * DEG, outputs: [0, 1] });
+            return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * E_STEP * DEG, outputs: [0, 1] });
           },
           solution: () => [
             { code: SOL8 },

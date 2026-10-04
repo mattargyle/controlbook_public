@@ -356,7 +356,7 @@ class Controller:
               const g = F.pdFromPoles(ctx.sys.models(pc.params).lon, prob.desiredPoles);
               return { sc, label: pc.label, ref: () => refPID(ctx, sc, { kPh: g.kP, kDh: g.kD }, { lat: 'off' }) };
             });
-            return F.matchAll(ctx, code, cases, { tol: { 1: 0.02 * 2 } });
+            return WB.myCtrl.matchCheck(ctx, code, cases, { tol: { 1: 0.02 * 2 } });
           },
           solution: () => [
             { code: SOL.f7 },
@@ -496,7 +496,7 @@ class Controller:
               const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(2), SQUARE_Z], zOff: 3, tEnd: 20, feed: 'state' });
               return { sc, label: pc.label, ref: () => refPID(ctx, sc, F.refF8(pc.params)) };
             });
-            return F.matchAll(ctx, code, cases, { tol: { 0: 0.02 * 5, 1: 0.02 * 2, 2: 0.05 * M.DEG } });
+            return WB.myCtrl.matchCheck(ctx, code, cases, { tol: { 0: 0.02 * 5, 1: 0.02 * 2, 2: 0.05 * M.DEG } });
           },
           solution: () => [
             { code: SOL.f8('8.0', false) },

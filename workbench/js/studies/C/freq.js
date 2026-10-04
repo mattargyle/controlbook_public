@@ -950,7 +950,7 @@ class Controller:
             const parts = lsParts(ctx);
             // The repo's transferFunction updates the state, then outputs; a filter that outputs first is fine too.
             const refFor = (make) => () => WB.myCtrl.reference(ctx, sc, loopshapeController(WB.myCtrl.refCtx(ctx, sc), parts, make));
-            return lib().matchAny(ctx, code, [{ sc, label: 'nominal parameters', refs: [refFor(T.repoFilter), refFor(T.filter)] }], { tol: 0.03 * 15 * M.DEG, what: 'your design run by the workbench' });
+            return WB.myCtrl.matchCheck(ctx, code, [{ sc, label: 'nominal parameters', refs: [refFor(T.repoFilter), refFor(T.filter)] }], { tol: 0.03 * 15 * M.DEG, what: 'your design run by the workbench' });
           },
           solution: () => [{ code: LS_IMPL_SOL }, { html: 'The repo\'s ctrlLoopshape.py (transferFunction: controllable canonical form, one RK4 step per T<sub>s</sub>) with the rate feedback of the book text (p. 362, p. 366). The repo\'s own controller computes θ̇ but does not use it.' }],
         }),

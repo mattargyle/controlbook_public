@@ -368,35 +368,6 @@ WB.F = (function () {
     return sc;
   }
 
-  // WB.myCtrl.matchCheck on several outputs: tol = {output index: tolerance (SI)}.
-  // cases: [{sc, ref: () -> WB.sim result, label}], the first with the nominal parameters.
-  async function matchAll(ctx, code, cases, { tol, what = 'the design' }) {
-    const outs = ctx.sys.outputs;
-    const f = (i, v) => `${fmt(v * outs[i].scale, 3)}${outs[i].unit === '°' ? '°' : ` ${outs[i].unit}`}`;
-    const worst = {};
-    for (let ci = 0; ci < cases.length; ci++) {
-      const c = cases[ci];
-      const mine = await WB.myCtrl.run(ctx, code, c.sc);
-      if (mine.ok === false) return mine;
-      const ref = c.ref();
-      const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
-      for (const [oi, tl] of Object.entries(tol)) {
-        const d = WB.myCtrl.maxDiff(mine, ref, { output: +oi });
-        if (!(d.e <= tl)) {
-          if (ci > 0) {
-            const keys = ctx.sys.uncertain.map((q) => `P.${q}`).join(', ');
-            return { ok: false, msg: `Matches ${what} with the nominal parameters but not with ${c.label} (${outs[oi].label} off by ${f(oi, d.e)}). Compute the gains from ${keys} rather than numbers.`, detail };
-          }
-          return { ok: false, msg: `Your ${outs[oi].label} differs from ${what} by ${f(oi, d.e)} at t = ${fmt(d.t, 3)} s.`, detail };
-        }
-        worst[oi] = Math.max(worst[oi] || 0, d.e);
-      }
-    }
-    const names = Object.keys(tol).map((oi) => `${outs[oi].label}(t)`);
-    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-    return { ok: true, msg: `Your ${list} match${names.length > 1 ? '' : 'es'} ${what} to within ${Object.entries(worst).map(([oi, e]) => f(oi, e)).join(', ')} (${cases.map((c) => c.label).join('; ')}).` };
-  }
-
   // Estimates: update returns (u, x_hat) with x_hat the whole state (z, h, θ, ż, ḣ, θ̇).
   function needXhat(res) {
     const ok = [0, 1, 2, 3, 4, 5].every((i) => res.extras[`xhat${i}`] && !Array.prototype.some.call(res.extras[`xhat${i}`], (v) => !Number.isFinite(v)));
@@ -482,7 +453,7 @@ WB.F = (function () {
     makePID, pidSplane, pidDrag, W0, gainSliders, readout, metricRow,
     offsetControls, zMetrics, zMetricsSection, separationRows, viewControl,
     useGains, errorBefore, chapter, register, refF8, refF10,
-    plantExtras, scenario, matchAll, needXhat, estErr, bias, endErr, workBanner,
+    plantExtras, scenario, needXhat, estErr, bias, endErr, workBanner,
     showsAnswer, feShown, feOf, compOf, forceLawControl, VARY, ARGS, pyPart, pyError, negated,
     tex, texPole, fmt, fmtPole,
   };
