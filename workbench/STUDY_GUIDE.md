@@ -134,7 +134,7 @@ The result object has a scalar channel 0 (`y, r, u, uDemand, uApplied, yMeas`), 
 
 ## Python answers (`WB.py`, `js/core/py.js`)
 
-Student code runs in Pyodide (Python 3.14 + numpy) in a sandboxed module worker, loaded on the first Check. `P` is a namespace of the parameters (`P.m`, `P.ell`, ... like `<sys>Param.py`) and `np` is imported.
+Student code runs in Pyodide (Python 3.14 + numpy) in a sandboxed Web Worker, loaded on the first Check. `P` is a namespace of the parameters (`P.m`, `P.ell`, ... like `<sys>Param.py`) and `np` is imported.
 
 - `WB.py.check(ctx, spec, code)` evaluates the student's functions (`items: [{fn, args, truth(p, a), compare?}]`) or variables (`{var, truth(p)}`) at random arguments (`args`) for the nominal parameters and four random parameter sets, and compares them with `truth`. `compare: 'offset'` ignores an additive constant (potential energy), `'scale'` accepts any nonzero multiple (characteristic polynomials). `cases: [{label, fix}]` groups points so a failure says which physics is wrong ("only gravity acts"). Complex arguments (`{complex: true, re, im}`) test transfer functions; `WB.py.cx` does the complex arithmetic in `truth`.
 - `WB.py.evaluate(code, samples)` and `WB.py.simulate(code, {fn, params, x0, u, Ts})` are the lower-level calls (see A.4(c) and A.3(e) in `js/chapters/models.js`).

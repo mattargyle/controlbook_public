@@ -31,7 +31,7 @@ class Chrome:
 
         self.proc = subprocess.Popen(
             [chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--remote-debugging-pipe",
-             f"--user-data-dir={self.dir}", "--allow-file-access-from-files", f"--window-size={size}"],
+             f"--user-data-dir={self.dir}", f"--window-size={size}"],  # no file-access flags: test as users run it
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=fds, close_fds=False)
         os.close(to_chrome_r)
         os.close(from_chrome_w)

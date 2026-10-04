@@ -148,6 +148,10 @@ def wb_simulate(payload):
 
   // Runs inside the worker (stringified; it can't see this file's closure).
   function workerMain(BASE, HASH, HARNESS) {
+    // This is a classic worker (see start()). Pyodide refuses those, detecting
+    // them by whether importScripts works; it needs only fetch and import(),
+    // which classic workers have, so disable importScripts first.
+    self.importScripts = () => { throw new TypeError('importScripts is disabled'); };
     const realFetch = self.fetch.bind(self);
     // The loader fetches the wasm and stdlib itself: add their pinned hashes.
     self.fetch = (url, opts = {}) => {
@@ -205,10 +209,11 @@ def wb_simulate(payload):
     if (readyP) return readyP;
     setState('loading');
     readyP = (async () => {
-      // Pyodide needs a module worker.
+      // A classic worker: Chrome won't start a module worker from a Blob URL on a
+      // page opened from disk (file://), which is how the workbench is usually used.
       const src = `(${workerMain.toString()})(${JSON.stringify(BASE)}, ${JSON.stringify(HASH)}, ${JSON.stringify(HARNESS)});`;
       const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-      worker = new Worker(url, { type: 'module' });
+      worker = new Worker(url);
       await new Promise((resolve, reject) => {
         // A blocked download can leave Pyodide waiting forever.
         setTimeout(() => reject(new Error('timed out while loading')), 120000);
@@ -219,7 +224,7 @@ def wb_simulate(payload):
           const p = pending.get(m.id);
           if (p) { pending.delete(m.id); p.resolve(m.out); }
         };
-        worker.onerror = (e) => reject(new Error(e.message || 'worker error'));
+        worker.onerror = (e) => reject(new Error(e.message || 'the worker failed to start'));
       });
       setState('ready');
     })().catch((e) => {
