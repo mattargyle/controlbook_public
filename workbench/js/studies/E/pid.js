@@ -950,7 +950,8 @@ ${gate ? '        # anti-windup: integrate only while the block is nearly still\
           theory: '\\text{integrate } e_z \\text{ only while } |\\dot{\\hat z}| < \\bar v' },
         { title: 'Gains from the knobs (E.8 formulas)', page: 'p. 387 · E.8', answers: [`${ids(ctx).e8}/b`, `${ids(ctx).e8}/d`],
           theory: 'k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g},\\quad \\omega_n = 2.2/t_r',
-          numbers: `k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)},\\quad k_{I,crit} = ${tex(-ctx.pModel.g * d.kDz * d.kPz)}` },
+          // Work mode: the knob defaults are the workbench's E.10 tuning, not the problem's.
+          numbers: ctx.S.mode === 'work' ? null : `k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)},\\quad k_{I,crit} = ${tex(-ctx.pModel.g * d.kDz * d.kPz)}` },
         separationCard(ctx),
       ];
     },

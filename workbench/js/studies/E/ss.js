@@ -387,7 +387,8 @@ class Controller:
     return {
       title: 'Desired closed-loop poles', page: 'p. 190 (B.11), p. 113 · Eq. 8.5',
       theory: '\\Delta^d = (s^2 + 2\\zeta_\\theta\\omega_{n_\\theta}s + \\omega_{n_\\theta}^2)(s^2 + 2\\zeta_z\\omega_{n_z}s + \\omega_{n_z}^2)' + (level === 'sf' ? '' : '(s - p_I)') + ',\\quad \\omega_n = \\frac{2.2}{t_r}',
-      numbers: `p = ${d.poles.map((q) => texPole(q)).join(',\\;')}`,
+      // Work mode: the knob poles are the workbench's tuning, not the problem's.
+      numbers: ctx.S.mode === 'work' ? null : `p = ${d.poles.map((q) => texPole(q)).join(',\\;')}`,
       spoiler: true,
       note: 'E.11(a): every pole needs ωₙ > ωₙ,z = 0.22 rad/s and ζ > 0.707 (the E.8 outer loop).',
     };
@@ -507,8 +508,9 @@ class Controller:
           theory: 'K = (\\alpha - a_A)\\,\\mathcal{A}_A^{-1}\\,\\mathcal{C}_{A,B}^{-1},\\quad \\Delta_{ol}(s) = \\det(sI - A)' },
         { title: 'Reference gain', page: 'p. 182 · Eq. 11.35',
           theory: 'k_r = \\frac{-1}{C_r(A - BK)^{-1}B},\\quad C_r = \\begin{bmatrix}1 & 0 & 0 & 0\\end{bmatrix}' },
-        { title: 'Gains for the pole knobs', page: 'p. 389 · E.11(d)', answers: `${pid(ctx, 'ch11')}/d`,
-          theory: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))},\\quad K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}` },
+        // Explore only: the knob poles are the workbench's tuning, not the problem's.
+        ...(ctx.S.mode === 'work' ? [] : [{ title: 'Gains for the pole knobs', page: 'p. 389 · E.11(d)', answers: `${pid(ctx, 'ch11')}/d`,
+          theory: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))},\\quad K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}` }]),
         { title: 'Control law', page: 'p. 183 · Eq. 11.38', answers: `${pid(ctx, 'ch11')}/e`,
           theory: 'F = F_{ff} - K(x - x_e) + k_r(z_r - z_e)',
           numbers: ctx.S.mode === 'work' ? null : `F = F_{ff} - ${texMat([g.K])}\\tilde x + ${tex(g.kr)}\\,\\tilde z_r` },
@@ -609,8 +611,9 @@ class Controller:
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains and control law', page: 'p. 199–201', answers: `${pid(ctx, 'ch12')}/a2`,
           theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad F = F_{ff} - K\\tilde x - k_I\\textstyle\\int_0^t (z_r - z)\\,d\\tau' },
-        { title: 'Gains for the pole knobs', page: 'p. 389 · E.12(a)', answers: `${pid(ctx, 'ch12')}/a`,
-          theory: `A_1 = ${texMat(A1)},\\quad K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}` },
+        // Explore only: the knob poles are the workbench's tuning, not the problem's.
+        ...(ctx.S.mode === 'work' ? [] : [{ title: 'Gains for the pole knobs', page: 'p. 389 · E.12(a)', answers: `${pid(ctx, 'ch12')}/a`,
+          theory: `A_1 = ${texMat(A1)},\\quad K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}` }]),
       ];
     },
     buildProblem(parent, ctx) {
@@ -730,7 +733,7 @@ class Controller:
           theory: '\\text{with two outputs } L \\text{ is } 4\\times2 \\text{ and not unique: any } L \\text{ with the desired eig}(A - LC) \\text{ works}' },
         { title: ctx.S.mode === 'explore' ? 'Decoupled observer gain for the block and beam' : 'Observer gain for the block and beam', page: 'p. 225 (B.13 uses place(Aᵀ, Cᵀ)ᵀ)', answers: `${pid(ctx, 'ch13')}/c`,
           theory: 'L =\\begin{bmatrix}\\beta_{z1} & 0\\\\ 0 & \\beta_{\\theta1}\\\\ \\beta_{z0} & a_{32}\\\\ a_{41} & \\beta_{\\theta0}\\end{bmatrix} \\Rightarrow A - LC = \\text{blockdiag}\\left(\\begin{bmatrix}-\\beta_{z1} & 1\\\\ -\\beta_{z0} & 0\\end{bmatrix}, \\begin{bmatrix}-\\beta_{\\theta1} & 1\\\\ -\\beta_{\\theta0} & 0\\end{bmatrix}\\right)',
-          numbers: `q = ${d.obsPoles.map((q) => texPole(q)).join(',\\;')},\\quad L = ${texMat(d.L)}`,
+          numbers: ctx.S.mode === 'work' ? null : `q = ${d.obsPoles.map((q) => texPole(q)).join(',\\;')},\\quad L = ${texMat(d.L)}`,
           note:'With two outputs L is not unique: python\'s place gives a different, dense L with the same eigenvalues. Any L with the right eig(A − LC) answers (c).' },
         { title: 'Separation principle', page: 'p. 222–223',
           theory: '\\text{eig} = \\text{eig}(A_1 - B_1K_1) \\cup \\text{eig}(A - LC)',
@@ -848,7 +851,7 @@ class Controller:
           theory: '\\dot{\\hat x} = A\\hat x + B(u - F_{ff} + \\hat d) + L(\\tilde y - C\\hat x),\\quad \\dot{\\hat d} = L_d(\\tilde y - C\\hat x),\\quad \\tilde F = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
         { title: ctx.S.mode === 'explore' ? 'Decoupled gains: a z block and a θ–d block' : 'Disturbance-observer gain of the block and beam', page: 'p. 241', answers: `${pid(ctx, 'ch14')}/b`,
           theory: '\\theta\\text{–}d \\text{ block: } s^3 + \\beta_2 s^2 + \\beta_1 s + b_0 L_d = (s^2 + 2\\zeta\\omega s + \\omega^2)(s - p_d)',
-          numbers: `L_2 = ${texMat(d.L)}` },
+          numbers: ctx.S.mode === 'work' ? null : `L_2 = ${texMat(d.L)}` },
         polesCard(ctx, d, 'dobs'),
       ];
     },
