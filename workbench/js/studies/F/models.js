@@ -2,7 +2,7 @@
 // equilibria and linearization, transfer functions, state-space models.
 // Open-loop experiments: the rotor forces come from an input program in (F, τ).
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const F = WB.F;
@@ -41,18 +41,18 @@
   function progControls(parent, ctx, key, label, unit, ampMax) {
     segmented(parent, {
       label, options: ['zero', 'const', 'pulse', 'doublet', 'square', 'sine'].map((v) => ({ value: v, label: SHAPES[v] })),
-      get: () => ctx.st[key].shape, set: (v) => { ctx.st[key].shape = v; ctx.update(); },
+      ...bind(ctx, 'shape', () => ctx.st[key]),
     });
     const off = () => ctx.st[key].shape === 'zero';
-    slider(parent, { label: 'amplitude', unit, min: -ampMax, max: ampMax, step: ampMax / 400, sig: 3, get: () => ctx.st[key].amp, set: (v) => { ctx.st[key].amp = v; ctx.update(); }, disabled: off });
-    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.01, max: 2, step: 0.005, sig: 3, get: () => ctx.st[key].freq, set: (v) => { ctx.st[key].freq = v; ctx.update(); }, disabled: () => !['square', 'sine'].includes(ctx.st[key].shape) });
-    slider(parent, { label: 'width', unit: 's', min: 0.05, max: 5, step: 0.05, sig: 3, get: () => ctx.st[key].width, set: (v) => { ctx.st[key].width = v; ctx.update(); }, disabled: () => !['pulse', 'doublet'].includes(ctx.st[key].shape) });
+    slider(parent, { label: 'amplitude', unit, min: -ampMax, max: ampMax, step: ampMax / 400, sig: 3, ...bind(ctx, 'amp', () => ctx.st[key]), disabled: off });
+    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.01, max: 2, step: 0.005, sig: 3, ...bind(ctx, 'freq', () => ctx.st[key]), disabled: () => !['square', 'sine'].includes(ctx.st[key].shape) });
+    slider(parent, { label: 'width', unit: 's', min: 0.05, max: 5, step: 0.05, sig: 3, ...bind(ctx, 'width', () => ctx.st[key]), disabled: () => !['pulse', 'doublet'].includes(ctx.st[key].shape) });
   }
   function hoverControls(parent, ctx) {
     segmented(parent, {
       label: 'Add hover force F<sub>e</sub>',
       options: [{ value: true, label: 'F = F<sub>e</sub> + F̃' }, { value: false, label: 'F = F̃ only' }],
-      get: () => ctx.st.hover, set: (v) => { ctx.st.hover = v; ctx.update(); },
+      ...bind(ctx, 'hover'),
     });
   }
   const olBase = { openLoop: true, metrics: false, lateralMetrics: false, controller: (ctx, o) => openLoop(ctx, o), reference: () => () => [NaN, 0] };
@@ -97,11 +97,11 @@
     simulate(ctx) { return prescribed(ctx); },
     buildControls(parent, ctx) {
       const sec = section(parent, 'Prescribed motion (sinusoids at f)', 'F.2(b) p. 395');
-      slider(sec, { label: 'z amplitude', unit: 'm', min: 0, max: 6, step: 0.05, sig: 3, get: () => ctx.st.Az, set: (v) => { ctx.st.Az = v; ctx.update(); } });
-      slider(sec, { label: 'h mean', unit: 'm', min: 0, max: 8, step: 0.05, sig: 3, get: () => ctx.st.h0, set: (v) => { ctx.st.h0 = v; ctx.update(); } });
-      slider(sec, { label: 'h amplitude', unit: 'm', min: 0, max: 4, step: 0.05, sig: 3, get: () => ctx.st.Ah, set: (v) => { ctx.st.Ah = v; ctx.update(); } });
-      slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 60, step: 0.5, sig: 3, get: () => ctx.st.Ath, set: (v) => { ctx.st.Ath = v; ctx.update(); } });
-      slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 1, step: 0.01, sig: 3, get: () => ctx.st.f, set: (v) => { ctx.st.f = v; ctx.update(); } });
+      slider(sec, { label: 'z amplitude', unit: 'm', min: 0, max: 6, step: 0.05, sig: 3, ...bind(ctx, 'Az') });
+      slider(sec, { label: 'h mean', unit: 'm', min: 0, max: 8, step: 0.05, sig: 3, ...bind(ctx, 'h0') });
+      slider(sec, { label: 'h amplitude', unit: 'm', min: 0, max: 4, step: 0.05, sig: 3, ...bind(ctx, 'Ah') });
+      slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 60, step: 0.5, sig: 3, ...bind(ctx, 'Ath') });
+      slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 1, step: 0.01, sig: 3, ...bind(ctx, 'f') });
       sec.append(el('p', { class: 'muted small', text: 'No dynamics here: the motion is imposed, as in an hw02 animation test, so the rotor forces are zero. The plot below splits K into translation, pod rotation and rotor rotation.' }));
     },
     extraPlot(ctx, res) {
@@ -253,15 +253,15 @@
       segmented(sec, {
         label: 'Force law',
         options: [{ value: 'eq', label: 'F = F<sub>e</sub> + F̃ (Jacobian)' }, { value: 'fl', label: 'F = (F<sub>e</sub> + F̃)/cos θ' }],
-        get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+        ...bind(ctx, 'comp'),
       });
       progControls(sec, ctx, 'inF', 'Force F̃(t)', 'N', 5);
       progControls(sec, ctx, 'inT', 'Torque τ̃(t)', 'N·m', 0.05);
-      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch4eig')) sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the eigenvalues in the s-plane', onclick: () => { ctx.app.reveal('F:ch4eig'); ctx.update(); } }));
+      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch4eig')) sec.append(WB.ui.revealButton(ctx, 'F:ch4eig', 'Reveal the eigenvalues in the s-plane'));
       sec.append(el('p', { class: 'muted small', text: 'Start at hover, nudge with F̃ and τ̃, and compare with the linearized model (dashed). Set θ(0) in the left panel to see how the linearization of sin θ and cos θ degrades with angle.' }));
     },
     splane(ctx) {
-      if (!F.shown(ctx, 'F:ch4eig')) return null;   // eigenvalues answer F.4(b)
+      if (!WB.ui.shown(ctx, 'F:ch4eig')) return null;   // eigenvalues answer F.4(b)
       const m = ctx.sys.models(ctx.pModel);
       const mk = [...L.eig(m.lonSS.A).map((q) => ({ ...q, kind: 'ol', label: 'eig A_lon' })), ...L.eig(m.latSS.A).map((q) => ({ ...q, kind: 'cl', label: 'eig A_lat' }))];
       return { markers: mk, fitR: 0.3, legendNames: { ol: 'eig of A_lon', cl: 'eig of A_lat' } };
@@ -344,11 +344,11 @@
       tfInputSection(parent, ctx, 'F.5 p. 396');
       if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch5poles')) {
         const sec = section(parent, 's-plane', 'p. 70');
-        sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the poles in the s-plane', onclick: () => { ctx.app.reveal('F:ch5poles'); ctx.update(); } }));
+        sec.append(WB.ui.revealButton(ctx, 'F:ch5poles', 'Reveal the poles in the s-plane'));
       }
     },
     // the poles are the F.5 answer: hidden in Work mode until revealed
-    splane(ctx) { return F.shown(ctx, 'F:ch5poles') ? tfSplane(ctx) : null; },
+    splane(ctx) { return WB.ui.shown(ctx, 'F:ch5poles') ? tfSplane(ctx) : null; },
     math(ctx) {
       const p = ctx.pModel, m = ctx.sys.models(p);
       return [
@@ -400,10 +400,10 @@
       tfInputSection(parent, ctx, 'F.6 p. 396');
       if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch6poles')) {
         const sec = section(parent, 's-plane', 'p. 85');
-        sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the eigenvalues in the s-plane', onclick: () => { ctx.app.reveal('F:ch6poles'); ctx.update(); } }));
+        sec.append(WB.ui.revealButton(ctx, 'F:ch6poles', 'Reveal the eigenvalues in the s-plane'));
       }
     },
-    splane(ctx) { return F.shown(ctx, 'F:ch6poles') ? tfSplane(ctx) : null; },   // eig(A) answers F.6
+    splane(ctx) { return WB.ui.shown(ctx, 'F:ch6poles') ? tfSplane(ctx) : null; },   // eig(A) answers F.6
     extraPlot(ctx, res) {
       return { opts: { title: 'velocities ż, ḣ', yLabel: 'velocity [m/s]', unit: 'm/s' }, data: { series: [
         { label: 'ḣ', y: res.x.map((x) => x[4]), color: '--series-3', width: 1.5 },

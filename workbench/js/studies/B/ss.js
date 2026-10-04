@@ -6,7 +6,7 @@
 // Gains are placed with the port of scipy's place_poles (core/place_yt.js), so the
 // two-output observer gains match the repo's ctrlObserver.py exactly.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt } = M;
@@ -85,7 +85,7 @@
 
   const polesRevealed = (ctx) => !!(ctx.app && ctx.app.isRevealed(`B:${ctx.S.chapter}:poles`));
   function revealPoles(parent, ctx, what) {
-    const btn = el('button', { type: 'button', class: 'btn btn-quiet', text: `Reveal ${what} in the s-plane`, onclick: () => { ctx.app.reveal(`B:${ctx.S.chapter}:poles`); ctx.update(); } });
+    const btn = WB.ui.revealButton(ctx, `B:${ctx.S.chapter}:poles`, `Reveal ${what} in the s-plane`);
     parent.append(btn);
     WB.ui.addRefresher(() => { btn.hidden = polesRevealed(ctx); });
   }
@@ -107,24 +107,19 @@
   }
 
   // ------------------------------------------------------------- controls --
-  function workSliders(parent, ctx, keys) {
-    const spec = { K1: ['K<sub>1</sub> (z)', -40, 10], K2: ['K<sub>2</sub> (θ)', -150, 10], K3: ['K<sub>3</sub> (ż)', -40, 10], K4: ['K<sub>4</sub> (θ̇)', -40, 10], kr: ['k<sub>r</sub>', -40, 10], ki: ['k<sub>I</sub>', -20, 30] };
-    for (const k of keys) {
-      const [label, min, max] = spec[k];
-      slider(parent, { label, min, max, step: (max - min) / 4000, sig: 4, get: () => ctx.st.w[k], set: (v) => { ctx.st.w[k] = v; ctx.update(); } });
-    }
-  }
+  const WORK_SPEC = { K1: ['K<sub>1</sub> (z)', -40, 10], K2: ['K<sub>2</sub> (θ)', -150, 10], K3: ['K<sub>3</sub> (ż)', -40, 10], K4: ['K<sub>4</sub> (θ̇)', -40, 10], kr: ['k<sub>r</sub>', -40, 10], ki: ['k<sub>I</sub>', -20, 30] };
+  const workSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, WORK_SPEC, keys);
   function knobs(parent, ctx, { pI = false } = {}) {
-    slider(parent, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.05, max: 2, step: 0.005, get: () => ctx.st.trTh, set: (v) => { ctx.st.trTh = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 0.99, step: 0.005, get: () => ctx.st.zetaTh, set: (v) => { ctx.st.zetaTh = v; ctx.update(); } });
-    slider(parent, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1.2, max: 20, step: 0.1, sig: 3, get: () => ctx.st.M, set: (v) => { ctx.st.M = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>z</sub>', min: 0.2, max: 0.99, step: 0.005, get: () => ctx.st.zetaZ, set: (v) => { ctx.st.zetaZ = v; ctx.update(); } });
+    slider(parent, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.05, max: 2, step: 0.005, ...bind(ctx, 'trTh') });
+    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 0.99, step: 0.005, ...bind(ctx, 'zetaTh') });
+    slider(parent, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1.2, max: 20, step: 0.1, sig: 3, ...bind(ctx, 'M') });
+    slider(parent, { label: 'ζ<sub>z</sub>', min: 0.2, max: 0.99, step: 0.005, ...bind(ctx, 'zetaZ') });
     segmented(parent, {
       label: 'ω<sub>n</sub> from t<sub>r</sub>',
       options: [{ value: '2.2', label: '2.2 / t<sub>r</sub> (B.8)' }, { value: 'tp', label: 'π/(2t<sub>r</sub>√(1−ζ²)) (listings)' }],
-      get: () => ctx.st.rule, set: (v) => { ctx.st.rule = v; ctx.update(); },
+      ...bind(ctx, 'rule'),
     });
-    if (pI) slider(parent, { label: 'p<sub>I</sub>', min: -15, max: -0.05, step: 0.01, sig: 3, get: () => ctx.st.pI, set: (v) => { ctx.st.pI = v; ctx.update(); } });
+    if (pI) slider(parent, { label: 'p<sub>I</sub>', min: -15, max: -0.05, step: 0.01, sig: 3, ...bind(ctx, 'pI') });
   }
   function presets(parent, ctx, prob) {
     const row = el('div', { class: 'btn-row' });
@@ -133,39 +128,24 @@
     parent.append(row);
   }
   function obsKnobs(parent, ctx, withD) {
-    slider(parent, { label: 'speed factor', unit: '×', min: 1, max: 40, step: 0.1, sig: 3, hint: 't_r,obs = t_r / factor for each pair (repo: 10)', get: () => ctx.st.obsFactor, set: (v) => { ctx.st.obsFactor = v; ctx.update(); } });
+    slider(parent, { label: 'speed factor', unit: '×', min: 1, max: 40, step: 0.1, sig: 3, hint: 't_r,obs = t_r / factor for each pair (repo: 10)', ...bind(ctx, 'obsFactor') });
     segmented(parent, {
       label: 'observer ω<sub>n</sub> rule',
       options: [{ value: '2.2', label: '2.2 / t<sub>r</sub>' }, { value: 'tp', label: 'π/(2t<sub>r</sub>√(1−ζ²))' }],
-      get: () => ctx.st.obsRule, set: (v) => { ctx.st.obsRule = v; ctx.update(); },
+      ...bind(ctx, 'obsRule'),
     });
-    if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -30, max: -0.05, step: 0.01, sig: 3, hint: 'disturbance-estimate pole (repo: −1)', get: () => ctx.st.pD, set: (v) => { ctx.st.pD = v; ctx.update(); } });
+    if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -30, max: -0.05, step: 0.01, sig: 3, hint: 'disturbance-estimate pole (repo: −1)', ...bind(ctx, 'pD') });
   }
   function xhatKnobs(parent, ctx) {
-    slider(parent, { label: 'ẑ(0)', unit: 'm', min: -1, max: 1, step: 0.01, sig: 3, get: () => ctx.st.xhat0.z, set: (v) => { ctx.st.xhat0.z = v; ctx.update(); } });
-    slider(parent, { label: 'θ̂(0)', unit: '°', min: -20, max: 20, step: 0.5, sig: 3, hint: 'initial estimate (the true state starts at the left-panel values)', get: () => ctx.st.xhat0.th, set: (v) => { ctx.st.xhat0.th = v; ctx.update(); } });
+    slider(parent, { label: 'ẑ(0)', unit: 'm', min: -1, max: 1, step: 0.01, sig: 3, ...bind(ctx, 'z', () => ctx.st.xhat0) });
+    slider(parent, { label: 'θ̂(0)', unit: '°', min: -20, max: 20, step: 0.5, sig: 3, hint: 'initial estimate (the true state starts at the left-panel values)', ...bind(ctx, 'th', () => ctx.st.xhat0) });
   }
   function readout(parent, ctx, keys) {
-    const box = el('div', { class: 'readout wrap' });
-    parent.append(box);
-    WB.ui.addRefresher(() => {
+    WB.ui.readout(parent, () => {
       const g = ctx.gains;
       const vals = { K1: g.K[0], K2: g.K[1], K3: g.K[2], K4: g.K[3], kr: g.kr, ki: g.ki };
-      box.replaceChildren(...keys.map((k) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: fmt(vals[k], 4) }))));
+      return keys.map((k) => [k, vals[k]]);
     });
-  }
-  function useGains(ctx, keys) {
-    return {
-      label: 'Use my gains',
-      run: (v) => {
-        const vals = keys.map((k) => PD().num(v[k]));
-        if (vals.some((x) => x === null)) return { ok: false, msg: `Enter ${keys.join(', ')} first.` };
-        ctx.app.setMode('work');
-        keys.forEach((k, i) => { ctx.st.w[k] = vals[i]; });
-        ctx.update();
-        return null;
-      },
-    };
   }
 
   // ----------------------------------------------------------- math cards --
@@ -232,8 +212,8 @@
   // error just before the second reference switch
   function errBeforeSwitch(ctx) {
     const res = ctx.app.result(), S = ctx.S;
-    const tSw = S.sim.type === 'square' ? S.sim.tStep + 1 / S.sim.frequency : S.sim.tEnd;
-    const i = Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts));
+    const tSw = WB.sim.switchTime(S, 2);
+    const i = WB.sim.indexBefore(S, res, tSw);
     return { e: Math.abs(res.rAll[0][i] - res.yAll[0][i]), t: res.t[i] };
   }
 
@@ -258,7 +238,7 @@
         readout(sec, ctx, [...KEYS, 'kr']);
       }
       const ex = section(parent, 'Extra plot');
-      segmented(ex, { options: [{ value: 'zd', label: 'ż' }, { value: 'thd', label: 'θ̇' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(ex, { options: [{ value: 'zd', label: 'ż' }, { value: 'thd', label: 'θ̇' }], ...bind(ctx, 'extra') });
     },
     extraPlot(ctx, res) {
       const zd = ctx.st.extra === 'zd';
@@ -302,7 +282,7 @@
           id: 'd', title: '(d) K and k<sub>r</sub> for the (a) poles',
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', kr: 'k<sub>r</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], kr: r.kr }, {}); },
-          actions: [useGains(ctx, [...KEYS, 'kr'])],
+          actions: [WB.design.useGains(ctx, [...KEYS, 'kr'])],
           solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_r = ${tex(r.kr)}` }, { html: 'The book prints K = (−1.5050, −24.9399, −1.9847, −3.5829), k<sub>r</sub> = −1.5050 (p. 190). Those are exactly the gains for ℓ = 0.5 m; with the stated ℓ = 1 m the answer is the one above. Note k<sub>r</sub> = K<sub>1</sub>: the plant has a free integrator in z, so unity DC gain needs the reference to enter like the z feedback.' }]; },
         },
         {
@@ -333,7 +313,7 @@
       segmented(sec, {
         label: 'Anti-windup (B.12a)',
         options: [{ value: 'clamp', label: 'hold integrator while F saturates' }, { value: 'none', label: 'none (listing)' }],
-        get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+        ...bind(ctx, 'antiwindup'),
       });
       if (ctx.S.mode === 'work') {
         workSliders(sec, ctx, [...KEYS, 'ki']);
@@ -344,7 +324,7 @@
         readout(sec, ctx, [...KEYS, 'ki']);
       }
       const ex = section(parent, 'Extra plot');
-      segmented(ex, { options: [{ value: 'int', label: 'integrator' }, { value: 'thd', label: 'θ̇' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(ex, { options: [{ value: 'int', label: 'integrator' }, { value: 'thd', label: 'θ̇' }], ...bind(ctx, 'extra') });
     },
     extraPlot(ctx, res) {
       if (ctx.st.extra === 'int') return { opts: { title: 'integrator x_I(t)', yLabel: 'x_I [m·s]', unit: 'm·s' }, data: { series: [{ label: 'x_I = ∫(z_r − z)', y: Array.from(res.extras.integrator || []), color: '--series-1' }] } };
@@ -373,7 +353,7 @@
           id: 'a', title: '(a) K and k<sub>I</sub> for the B.11 poles with p<sub>I</sub> = −2',
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', ki: 'k<sub>I</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], ki: r.ki }, { ki: 'kI' }); },
-          actions: [useGains(ctx, [...KEYS, 'ki'])],
+          actions: [WB.design.useGains(ctx, [...KEYS, 'ki'])],
           solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` }, { html: 'The book prints K = (−5.3744, −32.1057, −4.5745, −5.1545), k<sub>I</sub> = 3.0101 (p. 208): the ℓ = 0.5 m gains. Its Step 2 text names p<sub>I</sub> = −10 and different B.11 poles, but the polynomial it then uses has (s + 2) and the B.8 poles.' }]; },
         },
         {
@@ -402,7 +382,7 @@
       if (ctx.S.mode === 'explore') readout(ob, ctx, [...KEYS, 'ki']);
       xhatKnobs(ob, ctx);
       const ex = section(parent, 'Extra plot');
-      segmented(ex, { options: [{ value: 'zd', label: 'ż, ż̂' }, { value: 'thd', label: 'θ̇, θ̇̂' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(ex, { options: [{ value: 'zd', label: 'ż, ż̂' }, { value: 'thd', label: 'θ̇, θ̇̂' }], ...bind(ctx, 'extra') });
     },
     math(ctx) {
       const g = ctx.gains, d = lib().ssDesign(ctx.ss, 'obs', tuning(ctx.st));
@@ -466,7 +446,7 @@
       segmented(sec, {
         label: 'Disturbance observer',
         options: [{ value: true, label: 'on' }, { value: false, label: 'off (B.14a)' }],
-        get: () => ctx.st.dobs, set: (v) => { ctx.st.dobs = v; ctx.update(); },
+        ...bind(ctx, 'dobs'),
       });
       if (ctx.S.mode === 'work') { workSliders(sec, ctx, [...KEYS, 'ki']); revealPoles(sec, ctx, 'the target and observer poles'); }
       else { knobs(sec, ctx, { pI: true }); presets(sec, ctx, ctx.sys.problems.ch14); }
@@ -475,7 +455,7 @@
       if (ctx.S.mode === 'explore') readout(ob, ctx, [...KEYS, 'ki']);
       xhatKnobs(ob, ctx);
       const ex = section(parent, 'Extra plot');
-      segmented(ex, { options: [{ value: 'd', label: 'd, d̂' }, { value: 'zd', label: 'ż, ż̂' }, { value: 'thd', label: 'θ̇, θ̇̂' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(ex, { options: [{ value: 'd', label: 'd, d̂' }, { value: 'zd', label: 'ż, ż̂' }, { value: 'thd', label: 'θ̇, θ̇̂' }], ...bind(ctx, 'extra') });
     },
     math(ctx) {
       const g = ctx.gains;

@@ -3,7 +3,7 @@
 // equilibria (C.4), the transfer matrix and the cascade approximation (C.5), and
 // the state-space model with the star-tracker/strain-gauge outputs (C.6).
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt } = M;
@@ -20,11 +20,11 @@
     segmented(parent, {
       label: 'Body torque τ(t)',
       options: shapes.map((s) => ({ value: s, label: names[s] })),
-      get: () => ctx.st.inp.shape, set: (v) => { ctx.st.inp.shape = v; ctx.update(); },
+      ...bind(ctx, 'shape', () => ctx.st.inp),
     });
-    slider(parent, { label: 'amplitude', unit: 'N·m', min: -5, max: 5, step: 0.01, sig: 3, get: () => ctx.st.inp.amp, set: (v) => { ctx.st.inp.amp = v; ctx.update(); }, disabled: () => ctx.st.inp.shape === 'zero' });
-    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.005, max: 1, step: 0.005, sig: 3, get: () => ctx.st.inp.freq, set: (v) => { ctx.st.inp.freq = v; ctx.update(); }, disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
-    slider(parent, { label: 'width', unit: 's', min: 0.1, max: 20, step: 0.1, sig: 3, get: () => ctx.st.inp.width, set: (v) => { ctx.st.inp.width = v; ctx.update(); }, disabled: () => ctx.st.inp.shape !== 'pulse' });
+    slider(parent, { label: 'amplitude', unit: 'N·m', min: -5, max: 5, step: 0.01, sig: 3, ...bind(ctx, 'amp', () => ctx.st.inp), disabled: () => ctx.st.inp.shape === 'zero' });
+    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.005, max: 1, step: 0.005, sig: 3, ...bind(ctx, 'freq', () => ctx.st.inp), disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
+    slider(parent, { label: 'width', unit: 's', min: 0.1, max: 20, step: 0.1, sig: 3, ...bind(ctx, 'width', () => ctx.st.inp), disabled: () => ctx.st.inp.shape !== 'pulse' });
   }
 
   const common = {
@@ -72,10 +72,10 @@
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Prescribed motion', 'pp. 38–39 · Listing 2.6');
-      slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 360, step: 1, sig: 3, get: () => ctx.st.Ath, set: (v) => { ctx.st.Ath = v; ctx.update(); } });
-      slider(sec, { label: 'φ amplitude', unit: '°', min: 0, max: 360, step: 0.1, sig: 3, get: () => ctx.st.Aph, set: (v) => { ctx.st.Aph = v; ctx.update(); } });
-      slider(sec, { label: 'f', unit: 'Hz', min: 0.01, max: 1, step: 0.01, sig: 3, get: () => ctx.st.f, set: (v) => { ctx.st.f = v; ctx.update(); } });
-      slider(sec, { label: 'φ lags θ by', unit: '°', min: 0, max: 180, step: 1, sig: 3, get: () => ctx.st.lag, set: (v) => { ctx.st.lag = v; ctx.update(); } });
+      slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 360, step: 1, sig: 3, ...bind(ctx, 'Ath') });
+      slider(sec, { label: 'φ amplitude', unit: '°', min: 0, max: 360, step: 0.1, sig: 3, ...bind(ctx, 'Aph') });
+      slider(sec, { label: 'f', unit: 'Hz', min: 0.01, max: 1, step: 0.01, sig: 3, ...bind(ctx, 'f') });
+      slider(sec, { label: 'φ lags θ by', unit: '°', min: 0, max: 180, step: 1, sig: 3, ...bind(ctx, 'lag') });
       sec.append(el('p', { class: 'muted small', text: 'No dynamics here: the angles are imposed, as in hw02_satelliteSim.py (which uses θ = 2π sin(0.2πt) rad and φ = 0.5 sin(0.2πt) rad). The plot below splits K into the body and panel parts.' }));
     },
 
@@ -221,7 +221,7 @@
     outputSeries(ctx, res, sc, oi) {
       if (oi !== 0 || ctx.st.inp.shape !== 'zero') return [];
       const fa = this.finalAngle(ctx);
-      if (!(ctx.S.mode === 'explore' || ctx.app.isRevealed('C:ch4:final'))) return [];
+      if (!(WB.ui.shown(ctx, 'C:ch4:final'))) return [];
       return [{ label: '(Jsθ₀ + Jpφ₀)/(Js + Jp)', y: Array.from(res.t, () => fa), color: '--ref', dash: [6, 4], width: 1.5 }];
     },
 
@@ -318,7 +318,7 @@
       segmented(sec, {
         label: 'Dashed overlay',
         options: [{ value: 'cascade', label: 'cascade approximation (d–e)' }, { value: 'none', label: 'none' }],
-        get: () => ctx.st.overlay, set: (v) => { ctx.st.overlay = v; ctx.update(); },
+        ...bind(ctx, 'overlay'),
       });
       sec.append(el('p', { class: 'muted small', text: 'The dashed traces are the cascade approximation of parts (d) and (e) (Fig. 5-3) driven by the same torque. Compare them with the full model, and vary Jp/Js in the left panel.' }));
     },

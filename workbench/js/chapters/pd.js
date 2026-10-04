@@ -11,7 +11,7 @@ window.WB = window.WB || {};
 WB.chapters = WB.chapters || {};
 
 (function () {
-  const { el, slider, segmented } = WB.ui;
+  const { el, slider, segmented, bind } = WB.ui;
   const M = WB.math;
   const { tex, texPole, fmt, fmtPole } = M;
 
@@ -53,7 +53,7 @@ WB.chapters = WB.chapters || {};
         { value: 'output', label: `output ${sys.sym.yText} (Fig. 7-2)` },
         { value: 'error', label: 'error e (Fig. 7-1)' },
       ],
-      get: () => ctx.st.arch, set: (v) => { ctx.st.arch = v; ctx.update(); },
+      ...bind(ctx, 'arch'),
     });
     segmented(parent, {
       label: 'Gravity compensation',
@@ -62,32 +62,22 @@ WB.chapters = WB.chapters || {};
         { value: 'eq', label: `${sys.sym.uText}<sub>e</sub> at ${sys.sym.yText}<sub>e</sub>=0`, title: 'τ = τ_e + τ̃' },
         { value: 'none', label: 'none' },
       ],
-      get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+      ...bind(ctx, 'comp'),
     });
   }
 
   function workGainSliders(parent, ctx) {
     slider(parent, {
       label: 'k<sub>P</sub>', min: 0, max: 2, step: 0.001, sig: 4,
-      get: () => ctx.st.kP, set: (v) => { ctx.st.kP = v; ctx.update(); },
+      ...bind(ctx, 'kP'),
     });
     slider(parent, {
       label: 'k<sub>D</sub>', min: 0, max: 0.5, step: 0.0005, sig: 4,
-      get: () => ctx.st.kD, set: (v) => { ctx.st.kD = v; ctx.update(); },
+      ...bind(ctx, 'kD'),
     });
   }
 
-  function gainReadout(parent, ctx) {
-    const box = el('div', { class: 'readout' });
-    parent.append(box);
-    WB.ui.addRefresher(() => {
-      const { kP, kD } = ctx.gains;
-      box.replaceChildren(
-        el('div', {}, el('span', { class: 'ro-label', text: 'kP' }), el('strong', { text: fmt(kP, 4) })),
-        el('div', {}, el('span', { class: 'ro-label', text: 'kD' }), el('strong', { text: fmt(kD, 4) })),
-      );
-    });
-  }
+  const gainReadout = (parent, ctx) => WB.ui.readout(parent, () => [['kP', ctx.gains.kP], ['kD', ctx.gains.kD]], { wrap: false });
 
   function baseMarkers(ctx, draggable) {
     const { model } = ctx;
@@ -301,19 +291,7 @@ WB.chapters = WB.chapters || {};
     return bad.length ? { ok: false, msg: `Check ${bad.join(', ')}.` } : { ok: true, msg: 'Within 1%.' };
   }
 
-  function useGainsAction(ctx) {
-    return {
-      label: 'Use my gains',
-      run: (vals) => {
-        const kP = num(vals.kP), kD = num(vals.kD);
-        if (kP === null || kD === null) return { ok: false, msg: 'Enter kP and kD first.' };
-        ctx.app.setMode('work');
-        ctx.st.kP = kP; ctx.st.kD = kD;
-        ctx.update();
-        return null;
-      },
-    };
-  }
+  const useGainsAction = (ctx) => WB.design.useGains(ctx, ['kP', 'kD'], { target: () => ctx.st, msg: 'Enter kP and kD first.' });
 
   // ------------------------------------------------------------- Chapter 7 --
   WB.chapters.ch7 = {
@@ -356,14 +334,14 @@ WB.chapters = WB.chapters || {};
       segmented(des, {
         label: 'Pole pair',
         options: [{ value: 'real', label: 'two real' }, { value: 'complex', label: 'complex pair' }],
-        get: () => ctx.st.form, set: (v) => { ctx.st.form = v; ctx.update(); },
+        ...bind(ctx, 'form'),
       });
       const realOnly = () => ctx.st.form !== 'real';
       const cplxOnly = () => ctx.st.form !== 'complex';
-      slider(des, { label: 'p<sub>1</sub>', min: -20, max: 0, step: 0.01, get: () => ctx.st.p1, set: (v) => { ctx.st.p1 = v; ctx.update(); }, disabled: realOnly });
-      slider(des, { label: 'p<sub>2</sub>', min: -20, max: 0, step: 0.01, get: () => ctx.st.p2, set: (v) => { ctx.st.p2 = v; ctx.update(); }, disabled: realOnly });
-      slider(des, { label: '−σ', min: -20, max: 0, step: 0.01, get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); }, disabled: cplxOnly });
-      slider(des, { label: 'ω<sub>d</sub>', unit: 'rad/s', min: 0, max: 20, step: 0.01, get: () => ctx.st.wd, set: (v) => { ctx.st.wd = v; ctx.update(); }, disabled: cplxOnly });
+      slider(des, { label: 'p<sub>1</sub>', min: -20, max: 0, step: 0.01, ...bind(ctx, 'p1'), disabled: realOnly });
+      slider(des, { label: 'p<sub>2</sub>', min: -20, max: 0, step: 0.01, ...bind(ctx, 'p2'), disabled: realOnly });
+      slider(des, { label: '−σ', min: -20, max: 0, step: 0.01, ...bind(ctx, 'sigma'), disabled: cplxOnly });
+      slider(des, { label: 'ω<sub>d</sub>', unit: 'rad/s', min: 0, max: 20, step: 0.01, ...bind(ctx, 'wd'), disabled: cplxOnly });
       des.append(el('p', { class: 'muted small', text: 'Or drag a closed-loop pole in the s-plane. Drag off the real axis for a complex pair.' }));
       gainReadout(des, ctx);
     },
@@ -489,15 +467,15 @@ WB.chapters = WB.chapters || {};
       sharedControls(sec, ctx);
       if (ctx.S.mode === 'work') workGainSliders(sec, ctx);
       const spec = WB.ui.section(parent, ctx.S.mode === 'work' ? 'Specs (targets)' : 'Design knobs', 'p. 113 · Eq. 8.5');
-      slider(spec, { label: 't<sub>r</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, get: () => ctx.st.tr, set: (v) => { ctx.st.tr = v; ctx.update(); } });
-      slider(spec, { label: 'ζ', min: 0.1, max: 2, step: 0.005, get: () => ctx.st.zeta, set: (v) => { ctx.st.zeta = v; ctx.update(); } });
+      slider(spec, { label: 't<sub>r</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, ...bind(ctx, 'tr') });
+      slider(spec, { label: 'ζ', min: 0.1, max: 2, step: 0.005, ...bind(ctx, 'zeta') });
       segmented(spec, {
         label: 'ω<sub>n</sub> from t<sub>r</sub>',
         options: [
           { value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5, exact for ζ = 0.707' },
           { value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))', title: 't_r ≈ t_p / 2 (p. 113); used in ctrlPID.py' },
         ],
-        get: () => ctx.st.rule, set: (v) => { ctx.st.rule = v; ctx.update(); },
+        ...bind(ctx, 'rule'),
       });
       if (ctx.S.mode === 'explore') {
         spec.append(el('p', { class: 'muted small', text: 'Drag a closed-loop pole: its distance from the origin sets ωₙ and its angle sets ζ.' }));

@@ -7,7 +7,7 @@ WB.studies = WB.studies || {};
 WB.studies.F = WB.studies.F || { chapters: {} };
 
 WB.F = (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texPole, fmt, fmtPole } = M;
@@ -207,28 +207,11 @@ WB.F = (function () {
     kPth: ['k<sub>P<sub>θ</sub></sub>', 0, 3], kDth: ['k<sub>D<sub>θ</sub></sub>', 0, 1],
     kPz: ['k<sub>P<sub>z</sub></sub>', -0.1, 0], kDz: ['k<sub>D<sub>z</sub></sub>', -0.3, 0], kIz: ['k<sub>I<sub>z</sub></sub>', -0.01, 0],
   };
-  function gainSliders(parent, ctx, keys, obj = () => ctx.st.w) {
-    for (const key of keys) {
-      const [label, min, max] = GAIN_SPEC[key];
-      slider(parent, { label, min, max, step: (max - min) / 4000, sig: 4, get: () => obj()[key], set: (v) => { obj()[key] = v; ctx.update(); } });
-    }
-  }
+  const gainSliders = (parent, ctx, keys, obj = () => ctx.st.w) => WB.ui.gainSliders(parent, ctx, GAIN_SPEC, keys, { obj });
   function readout(parent, ctx, keys, get = () => ctx.gains) {
-    const box = el('div', { class: 'readout wrap' });
-    parent.append(box);
-    WB.ui.addRefresher(() => {
-      const g = get();
-      box.replaceChildren(...keys.map((k) => el('div', {}, el('span', { class: 'ro-label', text: k.label || k }), el('strong', { text: fmt(g[k.key || k], 4) }))));
-    });
-    return box;
+    return WB.ui.readout(parent, () => { const g = get(); return keys.map((k) => [k.label || k, g[k.key || k]]); });
   }
-  function metricRow(label, value) {
-    return el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: label }), el('strong', { text: value }));
-  }
-  function revealButton(ctx, key, text) {
-    return el('button', { type: 'button', class: 'btn btn-quiet', text, onclick: () => { ctx.app.reveal(key); WB.ui.refreshAll(); } });
-  }
-  const shown = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isRevealed(key);
+  const metricRow = WB.ui.metric;
 
   // Reference offsets (the left panel only sets amplitudes).
   function offsetControls(parent, ctx) {
@@ -284,30 +267,18 @@ WB.F = (function () {
     const labels = { lon: 'altitude', lat: 'lateral (both)', inner: 'inner θ', outer: 'outer z' };
     segmented(parent, {
       label: 's-plane shows', options: options.map((o) => ({ value: o, label: labels[o] })),
-      get: () => ctx.st.view, set: (v) => { ctx.st.view = v; ctx.update(); },
+      ...bind(ctx, 'view'),
     });
   }
 
   // ------------------------------------------------------ problem helpers --
   const PD = () => WB.pd;
-  function useGains(ctx, map, target = () => ctx.st.w) {
-    return {
-      label: 'Use my gains',
-      run: (vals) => {
-        const got = Object.fromEntries(Object.entries(map).map(([inKey, gKey]) => [gKey, PD().num(vals[inKey])]));
-        if (Object.values(got).some((v) => v === null)) return { ok: false, msg: 'Fill in every gain first.' };
-        ctx.app.setMode('work');
-        Object.assign(target(), got);
-        ctx.update();
-        return null;
-      },
-    };
-  }
+  const useGains = (ctx, map, target = () => ctx.st.w) => WB.design.useGains(ctx, map, { target, msg: 'Fill in every gain first.' });
 
   // Simulated check helper: the error just before t (s) on output oi vs ref ri.
   function errorBefore(ctx, tSw, oi, ri) {
     const res = ctx.app.result(), S = ctx.S;
-    const i = Math.max(0, Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts)));
+    const i = WB.sim.indexBefore(S, res, tSw);
     return res.rAll[ri][i] - res.yAll[oi][i];
   }
 
@@ -361,7 +332,7 @@ WB.F = (function () {
   return {
     RAD, distValues, reference, simulate, linearPlant, linearSim,
     pdFromPoles, polesWZ, designSLC, lonPoly, innerPoly, outerPoly, exactLatPoly, kDCof, rootsOf, wnOfPair,
-    makePID, pidSplane, pidDrag, W0, gainSliders, readout, metricRow, revealButton, shown,
+    makePID, pidSplane, pidDrag, W0, gainSliders, readout, metricRow,
     offsetControls, zMetrics, zMetricsSection, separationRows, viewControl,
     useGains, errorBefore, chapter, register, refF8, refF10,
     tex, texPole, fmt, fmtPole,

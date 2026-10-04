@@ -6,7 +6,7 @@
 // from placeholder gains (not the D.10 answer); "Load my D.10 gains" copies the
 // Work-mode gains from the D.10 tab.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const T = WB.tf;
@@ -68,7 +68,7 @@
     lib.gainSlider(sec, ctx, 'kP', 'k<sub>P</sub>', 20);
     lib.gainSlider(sec, ctx, 'kI', 'k<sub>I</sub>', 10);
     lib.gainSlider(sec, ctx, 'kD', 'k<sub>D</sub>', 30);
-    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); } });
+    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma') });
     const row = el('div', { class: 'btn-row' },
       el('button', { type: 'button', class: 'btn btn-quiet', text: 'Load my D.10 gains', title: 'Copy the Work-mode kP, kI, kD from the D.10 tab', onclick: () => {
         const w = ctx.S.ch.ch10;
@@ -97,10 +97,6 @@
     return { markers: mk, fitR: 3 };
   }
   const marginMarks = (mg) => WB.freq.marginMarks(mg);
-  const revealed = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isRevealed(key);
-  function revealButton(ctx, key, text) {
-    return el('button', { type: 'button', class: 'btn btn-quiet', text, onclick: () => { ctx.app.reveal(key); ctx.update(); } });
-  }
 
   // ---------------------------------------------------------------- D.15 --
   CH.ch15 = {
@@ -115,24 +111,24 @@
     linearSim(ctx, c) { return lib.linearSim(ctx, c, (cx, o) => this.controller(cx, o)); },
     linearLabel: 'linear model (with transient)',
     outputSeries(ctx, res, sc) {
-      if (!revealed(ctx, 'D:ch15:bode')) return [];
+      if (!WB.ui.shown(ctx, 'D:ch15:bode')) return [];
       const g = T.at(plantTf(ctx), ctx.st.w0), mag = L.C.abs(g), ph = L.C.arg(g);
       return [{ label: 'A|P(jω₀)| sin(ω₀t + ∠P)', y: sc(Array.from(res.t, (t) => ctx.st.A * mag * Math.sin(ctx.st.w0 * t + ph))), color: '--series-3', dash: [2, 3], width: 2 }];
     },
     buildControls(parent, ctx) {
       const sec = section(parent, 'Sinusoidal input F̃ = A sin(ω₀t)', 'p. 264 · Eq. 15.4');
-      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 20, log: true, sig: 3, get: () => ctx.st.w0, set: (v) => { ctx.st.w0 = v; ctx.update(); } });
-      slider(sec, { label: 'A', unit: 'N', min: 0, max: 6, step: 0.01, sig: 3, get: () => ctx.st.A, set: (v) => { ctx.st.A = v; ctx.update(); } });
-      segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => ctx.st.asym, set: (v) => { ctx.st.asym = v; ctx.update(); } });
+      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 20, log: true, sig: 3, ...bind(ctx, 'w0') });
+      slider(sec, { label: 'A', unit: 'N', min: 0, max: 6, step: 0.01, sig: 3, ...bind(ctx, 'A') });
+      segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'asym') });
       lib.note(sec, 'After the transient (it decays like e^(−ζωₙt), slowly for this plant) z is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀). Sweep ω₀ and watch the amplitude to find the resonance.');
       if (ctx.S.mode === 'work') {
-        const b = revealButton(ctx, 'D:ch15:bode', 'Reveal the Bode plot (compare with your sketch)');
+        const b = WB.ui.revealButton(ctx, 'D:ch15:bode', 'Reveal the Bode plot (compare with your sketch)');
         WB.ui.addRefresher(() => { b.hidden = ctx.app.isRevealed('D:ch15:bode'); });
         sec.append(b);
       }
     },
     bode(ctx) {
-      if (!revealed(ctx, 'D:ch15:bode')) return null;
+      if (!WB.ui.shown(ctx, 'D:ch15:bode')) return null;
       const P = plantTf(ctx), { mag, phase } = T.bode(P, W);
       const lines = [{ label: 'P(jω)', mag, phase, color: '--series-1' }];
       const b = ans.bode(ctx.pModel);
@@ -145,7 +141,7 @@
       return { title: 'Bode plot of P(s)', w: W, lines, marks: [{ w: ctx.st.w0, label: `ω₀: ${fmt(db(L.C.abs(g)), 3)} dB, ${fmt(L.C.arg(g) * 180 / Math.PI, 3)}°`, color: '--series-3' }] };
     },
     splane(ctx) {
-      if (!revealed(ctx, 'D:ch15:bode')) return null;
+      if (!WB.ui.shown(ctx, 'D:ch15:bode')) return null;
       return { markers: L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` })) };
     },
     math(ctx) {
@@ -201,19 +197,19 @@
     buildControls(parent, ctx) {
       pidControls(parent, ctx);
       const sec = section(parent, 'Spec frequencies', 'p. 285–291');
-      slider(sec, { label: 'ω<sub>d,in</sub>', unit: 'rad/s', min: 0.001, max: 1, log: true, sig: 3, get: () => ctx.st.wdin, set: (v) => { ctx.st.wdin = v; ctx.update(); } });
-      slider(sec, { label: 'ω<sub>no</sub>', unit: 'rad/s', min: 10, max: 5000, log: true, sig: 3, get: () => ctx.st.wno, set: (v) => { ctx.st.wno = v; ctx.update(); } });
+      slider(sec, { label: 'ω<sub>d,in</sub>', unit: 'rad/s', min: 0.001, max: 1, log: true, sig: 3, ...bind(ctx, 'wdin') });
+      slider(sec, { label: 'ω<sub>no</sub>', unit: 'rad/s', min: 10, max: 5000, log: true, sig: 3, ...bind(ctx, 'wno') });
       const box = el('div', { class: 'metrics' });
       sec.append(box);
       WB.ui.addRefresher(() => {
         const s = specs(ctx);
-        const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
-        box.replaceChildren(...(revealed(ctx, 'D:ch16:specs') ? [
+        const row = WB.ui.metric;
+        box.replaceChildren(...(WB.ui.shown(ctx, 'D:ch16:specs') ? [
           row('unit-ramp error k/k_I', `${fmt(s.ramp, 3)} m`),
           row('d_in below ω_d,in: 1/|C|', `${fmt(-s.Bdin, 3)} dB → ${fmt(100 * s.gdin, 3)} %`),
           row('exact |P/(1+PC)| at ω_d,in', `${fmt(100 * s.gdinExact, 3)} %`),
           row('noise above ω_no: |PC|', `${fmt(db(s.gn), 3)} dB → ${fmt(100 * s.gn, 3)} %`),
-        ] : [el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the spec readouts', onclick: () => { ctx.app.reveal('D:ch16:specs'); WB.ui.refreshAll(); } })]));
+        ] : [WB.ui.revealButton(ctx, 'D:ch16:specs', 'Reveal the spec readouts')]));
       });
     },
 
@@ -289,20 +285,20 @@
       sec.append(box);
       WB.ui.addRefresher(() => {
         const l = loop(ctx);
-        const row = (a, b) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: a }), el('strong', { text: b }));
-        box.replaceChildren(...(revealed(ctx, 'D:ch17:m') ? [
+        const row = WB.ui.metric;
+        box.replaceChildren(...(WB.ui.shown(ctx, 'D:ch17:m') ? [
           row('phase margin (smallest)', `${fmt(l.mg.pm, 3)}° at ω_co = ${fmt(l.mg.wc, 3)} rad/s`),
           ...(l.mg.gcs.length > 1 ? [row('all gain crossovers', l.mg.gcs.map((c) => `${fmt(c.pm, 3)}° at ${fmt(c.w, 3)}`).join(', '))] : []),
           row('gain margin(s)', gmText(l.mg)),
           row('closed-loop bandwidth (first −3 dB)', `${fmt(l.bw, 3)} rad/s`),
           row('final −3 dB roll-off of |T|', `${fmt(l.bwLast, 3)} rad/s`),
           row('closed-loop peak |T|', `${fmt(l.peak, 3)} dB`),
-        ] : [el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the margins', onclick: () => { ctx.app.reveal('D:ch17:m'); WB.ui.refreshAll(); } })]));
+        ] : [WB.ui.revealButton(ctx, 'D:ch17:m', 'Reveal the margins')]));
       });
     },
 
     bode(ctx) {
-      const l = loop(ctx), show = revealed(ctx, 'D:ch17:m');
+      const l = loop(ctx), show = WB.ui.shown(ctx, 'D:ch17:m');
       const marks = show ? marginMarks(l.mg) : [];
       if (show && isFinite(l.bw)) marks.push({ w: l.bw, label: `−3 dB ${fmt(l.bw, 3)}`, color: '--series-2' });
       if (show && l.bwN > 1) marks.push({ w: l.bwLast, label: `−3 dB ${fmt(l.bwLast, 3)}`, color: '--series-2' });
@@ -429,47 +425,46 @@
       lib.note(pre, 'C(s) = k · PI · lead · lag · LPF · LPF. The reference design is in the problem panel under Show solution.');
 
       const g = section(parent, 'Gain k', 'p. 324');
-      slider(g, { label: 'k', min: 0.01, max: 1000, log: true, sig: 4, get: () => ctx.st.k, set: (v) => { ctx.st.k = v; ctx.update(); } });
-      const onOff = (sec, key) => segmented(sec, { options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], get: () => ctx.st[key].on, set: (v) => { ctx.st[key].on = v; ctx.update(); } });
+      slider(g, { label: 'k', min: 0.01, max: 1000, log: true, sig: 4, ...bind(ctx, 'k') });
+      const onOff = (sec, key) => WB.ui.onOff(sec, ctx, () => ctx.st[key]);
       const off = (key) => () => !ctx.st[key].on;
       const pi = section(parent, blocks.pi.label, blocks.pi.page);
       onOff(pi, 'pi');
-      slider(pi, { label: 'z<sub>I</sub>', unit: 'rad/s', min: 0.005, max: 20, log: true, sig: 3, get: () => ctx.st.pi.z, set: (v) => { ctx.st.pi.z = v; ctx.update(); }, disabled: off('pi') });
+      slider(pi, { label: 'z<sub>I</sub>', unit: 'rad/s', min: 0.005, max: 20, log: true, sig: 3, ...bind(ctx, 'z', () => ctx.st.pi), disabled: off('pi') });
       const lead = section(parent, blocks.lead.label, blocks.lead.page);
       onOff(lead, 'lead');
-      slider(lead, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.1, max: 200, log: true, sig: 3, get: () => ctx.st.lead.w, set: (v) => { ctx.st.lead.w = v; ctx.update(); }, disabled: off('lead') });
-      slider(lead, { label: 'M', min: 1.01, max: 100, log: true, sig: 3, get: () => ctx.st.lead.M, set: (v) => { ctx.st.lead.M = v; ctx.update(); }, disabled: off('lead') });
+      slider(lead, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.1, max: 200, log: true, sig: 3, ...bind(ctx, 'w', () => ctx.st.lead), disabled: off('lead') });
+      slider(lead, { label: 'M', min: 1.01, max: 100, log: true, sig: 3, ...bind(ctx, 'M', () => ctx.st.lead), disabled: off('lead') });
       const leadPhase = el('p', { class: 'muted small' });
       lead.append(leadPhase);
       WB.ui.addRefresher(() => { const Mx = ctx.st.lead.M; leadPhase.textContent = `max phase added: sin⁻¹((M−1)/(M+1)) = ${fmt(Math.asin((Mx - 1) / (Mx + 1)) * 180 / Math.PI, 3)}° at ω_lead`; });
       const lag = section(parent, blocks.lag.label, blocks.lag.page);
       onOff(lag, 'lag');
-      slider(lag, { label: 'z', unit: 'rad/s', min: 0.005, max: 20, log: true, sig: 3, get: () => ctx.st.lag.z, set: (v) => { ctx.st.lag.z = v; ctx.update(); }, disabled: off('lag') });
-      slider(lag, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, get: () => ctx.st.lag.M, set: (v) => { ctx.st.lag.M = v; ctx.update(); }, disabled: off('lag') });
+      slider(lag, { label: 'z', unit: 'rad/s', min: 0.005, max: 20, log: true, sig: 3, ...bind(ctx, 'z', () => ctx.st.lag), disabled: off('lag') });
+      slider(lag, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, ...bind(ctx, 'M', () => ctx.st.lag), disabled: off('lag') });
       for (const key of ['lpf1', 'lpf2']) {
         const s = section(parent, blocks[key].label, blocks[key].page);
         onOff(s, key);
-        slider(s, { label: 'p', unit: 'rad/s', min: 1, max: 5000, log: true, sig: 3, get: () => ctx.st[key].p, set: (v) => { ctx.st[key].p = v; ctx.update(); }, disabled: off(key) });
+        slider(s, { label: 'p', unit: 'rad/s', min: 1, max: 5000, log: true, sig: 3, ...bind(ctx, 'p', () => ctx.st[key]), disabled: off(key) });
       }
       const pf = section(parent, 'Prefilter F(s) = p/(s + p)', 'p. 336 · Eq. 18.5–18.7');
       onOff(pf, 'pf');
-      slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, get: () => ctx.st.pf.p, set: (v) => { ctx.st.pf.p = v; ctx.update(); }, disabled: off('pf') });
-      segmented(pf, { label: 'Bode: closed loop F·T', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => ctx.st.showT, set: (v) => { ctx.st.showT = v; ctx.update(); } });
+      slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'p', () => ctx.st.pf), disabled: off('pf') });
+      segmented(pf, { label: 'Bode: closed loop F·T', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT') });
 
       const sp = section(parent, 'D.18 specs', 'p. 383');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
       WB.ui.addRefresher(() => {
         const d = this.design(ctx);
-        const row = (label, ok, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: label }), el('strong', { text: v }),
-          el('span', { class: 'status ' + (ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: ok ? '✓' : '✗' }), el('span', { text: ok ? 'met' : 'not met' })));
+        const row = WB.ui.specRow;
         box.replaceChildren(
           row('integrator in C (rejects constant d_in)', d.integOk, d.integOk ? 'yes' : 'no'),
           row('|PC| ≥ 1/0.03 for ω ≤ 0.1', d.lowOk, `min ${fmt(db(d.lowMin), 3)} dB (need ${fmt(db(1 / 0.03), 3)})`),
           row('|PC| ≤ 0.001 for ω ≥ 500', d.highOk, `max ${fmt(db(d.highMax), 3)} dB (need −60)`),
           row('PM ≈ 60° (±5°)', d.pmOk, `${fmt(d.mg.pm, 3)}° at ${fmt(d.mg.wc, 3)} rad/s${d.mg.gcs.length > 1 ? ` (${d.mg.gcs.length} crossovers)` : ''}`),
           row('closed loop stable', d.stable, d.stable ? 'yes' : 'no'),
-          el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: 'gain margin(s)' }), el('strong', { text: gmText(d.mg) })),
+          WB.ui.metric('gain margin(s)', gmText(d.mg)),
         );
       });
     },

@@ -160,10 +160,27 @@ WB.design = (function () {
   const problemPanel = (...a) => WB.pd.problemPanel(...a);
   const checkNumbers = (...a) => WB.pd.checkNumbers(...a);
   const num = (s) => WB.pd.num(s);
+  // Problem-part action that copies answers into the Work-mode gains and switches
+  // to Work mode. keys: answer names that equal gain names, or {answer: gain}.
+  // extra is assigned along with them (e.g. a gain the problem leaves at 0).
+  function useGains(ctx, keys, { target = () => ctx.st.w, extra = {}, msg } = {}) {
+    const map = Array.isArray(keys) ? Object.fromEntries(keys.map((k) => [k, k])) : keys;
+    return {
+      label: 'Use my gains',
+      run: (v) => {
+        const got = Object.fromEntries(Object.entries(map).map(([a, g]) => [g, num(v[a])]));
+        if (Object.values(got).some((x) => x === null)) return { ok: false, msg: msg || `Enter ${Object.keys(map).join(', ')} first.` };
+        ctx.app.setMode('work');
+        Object.assign(target(), got, extra);
+        ctx.update();
+        return null;
+      },
+    };
+  }
 
   return {
     wnFromTr, trFromWn, polesFromWnZeta, pdGains, dirtyCoeffs, pidBlock,
     place, refGain, augmentIntegrator, augmentDisturbance, observerGain, observer, linearPlant,
-    problemPanel, checkNumbers, num,
+    problemPanel, checkNumbers, num, useGains,
   };
 })();

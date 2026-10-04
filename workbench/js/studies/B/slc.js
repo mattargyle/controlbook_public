@@ -8,7 +8,7 @@
 //   explore - gains come from t_r,θ, ζ_θ, the bandwidth separation M and ζ_z;
 //             drag the inner (blue) or outer (green) poles.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const T = WB.tf;
@@ -107,31 +107,21 @@
   }
 
   // ------------------------------------------------------------- controls --
-  function workSliders(parent, ctx, keys) {
-    const spec = {
-      kPth: ['k<sub>Pθ</sub>', -300, 0], kDth: ['k<sub>Dθ</sub>', -40, 0],
-      kPz: ['k<sub>Pz</sub>', -1, 0.5], kDz: ['k<sub>Dz</sub>', -1.5, 0.5], kIz: ['k<sub>Iz</sub>', -0.5, 0.2],
-    };
-    for (const k of keys) {
-      const [label, min, max] = spec[k];
-      slider(parent, { label, min, max, step: (max - min) / 2000, sig: 4, get: () => ctx.st.w[k], set: (v) => { ctx.st.w[k] = v; ctx.update(); } });
-    }
-  }
+  const WORK_SPEC = {
+    kPth: ['k<sub>Pθ</sub>', -300, 0], kDth: ['k<sub>Dθ</sub>', -40, 0],
+    kPz: ['k<sub>Pz</sub>', -1, 0.5], kDz: ['k<sub>Dz</sub>', -1.5, 0.5], kIz: ['k<sub>Iz</sub>', -0.5, 0.2],
+  };
+  const workSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, WORK_SPEC, keys, { steps: 2000 });
   function knobSliders(parent, ctx, { kI = false } = {}) {
-    slider(parent, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.05, max: 2, step: 0.005, get: () => ctx.st.trTh, set: (v) => { ctx.st.trTh = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 1.5, step: 0.005, get: () => ctx.st.zetaTh, set: (v) => { ctx.st.zetaTh = v; ctx.update(); } });
-    slider(parent, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1.5, max: 30, step: 0.1, sig: 3, hint: 'bandwidth separation between the loops (p. 118)', get: () => ctx.st.M, set: (v) => { ctx.st.M = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>z</sub>', min: 0.2, max: 1.5, step: 0.005, get: () => ctx.st.zetaZ, set: (v) => { ctx.st.zetaZ = v; ctx.update(); } });
-    if (kI) slider(parent, { label: 'k<sub>Iz</sub>', min: -0.5, max: 0.2, step: 0.0005, sig: 3, get: () => ctx.st.kIz, set: (v) => { ctx.st.kIz = v; ctx.update(); } });
+    slider(parent, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.05, max: 2, step: 0.005, ...bind(ctx, 'trTh') });
+    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zetaTh') });
+    slider(parent, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1.5, max: 30, step: 0.1, sig: 3, hint: 'bandwidth separation between the loops (p. 118)', ...bind(ctx, 'M') });
+    slider(parent, { label: 'ζ<sub>z</sub>', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zetaZ') });
+    if (kI) slider(parent, { label: 'k<sub>Iz</sub>', min: -0.5, max: 0.2, step: 0.0005, sig: 3, ...bind(ctx, 'kIz') });
   }
   function readout(parent, ctx, keys) {
-    const box = el('div', { class: 'readout wrap' });
-    parent.append(box);
     const names = { kPth: 'kPθ', kDth: 'kDθ', kDC: 'kDC', kPz: 'kPz', kDz: 'kDz', kIz: 'kIz' };
-    WB.ui.addRefresher(() => {
-      const g = ctx.gains;
-      box.replaceChildren(...keys.map((k) => el('div', {}, el('span', { class: 'ro-label', text: names[k] }), el('strong', { text: fmt(g[k], 4) }))));
-    });
+    WB.ui.readout(parent, () => keys.map((k) => [names[k], ctx.gains[k]]));
   }
   // Inner/outer poles and the separation between them.
   function separationPanel(parent, ctx, { withI = false } = {}) {
@@ -141,30 +131,17 @@
     WB.ui.addRefresher(() => {
       const g = ctx.gains;
       const pi = pairInfo(innerPoles(ctx, g)), po = pairInfo(outerPoles(ctx, g, ctx.st.filter, withI));
-      const show = ctx.S.mode === 'explore' || ctx.app.isRevealed(`B:${ctx.S.chapter}:sep`);
-      const row = (a, b) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: a }), el('strong', { text: b }));
+      const show = WB.ui.shown(ctx, `B:${ctx.S.chapter}:sep`);
+      const row = WB.ui.metric;
       box.replaceChildren(...(show ? [
         row('inner loop ωn, ζ', `${fmt(pi.wn, 3)} rad/s, ${fmt(pi.zeta, 3)}`),
         row('outer loop ωn, ζ', `${fmt(po.wn, 3)} rad/s, ${fmt(po.zeta, 3)}`),
         row('separation ωn,in / ωn,out', `${fmt(pi.wn / po.wn, 3)}×`),
         row('inner DC gain kDC', fmt(g.kDC, 4)),
-      ] : [el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the loop poles and separation', onclick: () => { ctx.app.reveal(`B:${ctx.S.chapter}:sep`); WB.ui.refreshAll(); } })]));
+      ] : [WB.ui.revealButton(ctx, `B:${ctx.S.chapter}:sep`, 'Reveal the loop poles and separation')]));
     });
   }
 
-  function useGains(ctx, keys) {
-    return {
-      label: 'Use my gains',
-      run: (v) => {
-        const vals = keys.map((k) => PD().num(v[k]));
-        if (vals.some((x) => x === null)) return { ok: false, msg: `Enter ${keys.join(', ')} first.` };
-        ctx.app.setMode('work');
-        keys.forEach((k, i) => { ctx.st.w[k] = vals[i]; });
-        ctx.update();
-        return null;
-      },
-    };
-  }
 
   // Linear design model: Eq. 6.17 with the same controller (no saturation).
   function linearSim(ctx, common, makeCtrl) {
@@ -247,7 +224,7 @@
       segmented(sec, {
         label: 'Zero-canceling filter',
         options: [{ value: true, label: 'on (B.8d)' }, { value: false, label: 'off' }],
-        get: () => ctx.st.filter, set: (v) => { ctx.st.filter = v; ctx.update(); },
+        ...bind(ctx, 'filter'),
       });
       if (ctx.S.mode === 'work') {
         workSliders(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz']);
@@ -257,7 +234,7 @@
         segmented(sec, {
           label: 'Outer gains from',
           options: [{ value: 'book', label: 'Eq. 8.12–8.13' }, { value: 'listing', label: 'Listing 8.3 (ctrlPD.py)' }],
-          get: () => ctx.st.formula, set: (v) => { ctx.st.formula = v; ctx.update(); },
+          ...bind(ctx, 'formula'),
         });
         sec.append(el('div', { class: 'btn-row' },
           el('button', { type: 'button', class: 'btn btn-quiet', text: 'B.8(b) spec', onclick: () => { Object.assign(ctx.st, { trTh: 0.5, zetaTh: 0.707, M: 10, zetaZ: 0.707, formula: 'book' }); ctx.update(); } }),
@@ -267,7 +244,7 @@
       }
       separationPanel(parent, ctx);
       const ex = section(parent, 'Extra plot');
-      segmented(ex, { options: [{ value: 'thetaR', label: 'inner loop: θ_r vs θ' }, { value: 'zdot', label: 'ż' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(ex, { options: [{ value: 'thetaR', label: 'inner loop: θ_r vs θ' }, { value: 'zdot', label: 'ż' }], ...bind(ctx, 'extra') });
     },
 
     extraPlot(ctx, res) {
@@ -318,7 +295,7 @@
           html: 'Filter F(s) = k<sub>F</sub>/(s + p<sub>F</sub>).',
           inputs: { kF: 'k<sub>F</sub>', pF: 'p<sub>F</sub>', kPz: 'k<sub>Pz</sub>', kDz: 'k<sub>Dz</sub>' },
           check: (v) => { const r = ref(), zf = lib().zcFilter(ctx.pModel, r.kDC, 0.01); return PD().checkNumbers(v, { kF: zf.a, pF: zf.b, kPz: r.kPz, kDz: r.kDz }, { kF: 'kF', pF: 'pF', kPz: 'kPz', kDz: 'kDz' }); },
-          actions: [useGains(ctx, ['kPz', 'kDz'])],
+          actions: [WB.design.useGains(ctx, ['kPz', 'kDz'])],
           solution: () => {
             const r = ref(), zf = lib().zcFilter(ctx.pModel, r.kDC, 0.01);
             return [
@@ -372,7 +349,7 @@
       segmented(sec, {
         label: 'Reference shape (amplitude = size [m], slope [m/s], or coefficient [m/s²])',
         options: [{ value: 'step', label: 'step' }, { value: 'ramp', label: 'ramp' }, { value: 'parabola', label: 'parabola' }],
-        get: () => ctx.st.input, set: (v) => { ctx.st.input = v; ctx.update(); },
+        ...bind(ctx, 'input'),
       });
       if (ctx.S.mode === 'work') workSliders(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz', 'kIz']);
       else { knobSliders(sec, ctx, { kI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kDC', 'kPz', 'kDz', 'kIz']); }
@@ -388,8 +365,8 @@
       const res = ctx.app.result();
       const n = res ? res.t.length - 1 : 0;
       const eEnd = res ? res.rAll[0][n] - res.yAll[0][n] : NaN;
-      const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
-      const show = ctx.S.mode === 'explore' || ctx.app.isRevealed('B:ch9:type');
+      const row = WB.ui.metric;
+      const show = WB.ui.shown(ctx, 'B:ch9:type');
       const rows = [];
       if (show) {
         rows.push(row('inner loop: type (tracking, disturbance)', 'type 0, type 0'));
@@ -399,7 +376,7 @@
         if (!a.hasI) rows.push(row('outer parabola error 1/M_a (book model)', fmt(1 / a.Ma, 4)));
         rows.push(row('outer disturbance type', a.hasI ? 'type 1' : 'type 0'));
       } else {
-        rows.push(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the predicted types and errors', onclick: () => { ctx.app.reveal('B:ch9:type'); WB.ui.refreshAll(); } }));
+        rows.push(WB.ui.revealButton(ctx, 'B:ch9:type', 'Reveal the predicted types and errors'));
       }
       rows.push(row('simulated error r − z at t_end', isFinite(eEnd) ? `${fmt(eEnd, 3)} m` : '—'));
       box.replaceChildren(...rows);
@@ -491,13 +468,13 @@
       else { knobSliders(sec, ctx, { kI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kDC', 'kPz', 'kDz', 'kIz']); }
       separationPanel(parent, ctx, { withI: true });
       const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.4, p. 165');
-      segmented(imp, { label: 'ż, θ̇ for the D terms', options: [{ value: 'dirty', label: 'dirty derivatives of z, θ' }, { value: 'state', label: 'true ż, θ̇ (cheating)' }], get: () => ctx.st.deriv, set: (v) => { ctx.st.deriv = v; ctx.update(); } });
-      slider(imp, { label: 'σ', unit: 's', min: 0.002, max: 0.3, step: 0.001, sig: 3, get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); }, disabled: () => ctx.st.deriv !== 'dirty' });
-      segmented(imp, { label: 'Anti-windup', options: [{ value: true, label: 'integrate when |ż| < v̄' }, { value: false, label: 'none' }], get: () => ctx.st.gate, set: (v) => { ctx.st.gate = v; ctx.update(); } });
-      slider(imp, { label: 'v̄', unit: 'm/s', min: 0.005, max: 1, step: 0.005, sig: 3, get: () => ctx.st.vbar, set: (v) => { ctx.st.vbar = v; ctx.update(); }, disabled: () => !ctx.st.gate });
-      slider(imp, { label: 'θ<sub>max</sub>', unit: '°', min: 5, max: 90, step: 1, sig: 3, hint: 'saturation on r_θ before the filter', get: () => ctx.st.thetaMax, set: (v) => { ctx.st.thetaMax = v; ctx.update(); } });
-      segmented(imp, { label: 'Zero-canceling filter', options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], get: () => ctx.st.filter, set: (v) => { ctx.st.filter = v; ctx.update(); } });
-      segmented(imp, { label: 'Extra plot', options: [{ value: 'thetaR', label: 'θ_r vs θ' }, { value: 'zdot', label: 'ż estimate' }, { value: 'int', label: 'integrator' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(imp, { label: 'ż, θ̇ for the D terms', options: [{ value: 'dirty', label: 'dirty derivatives of z, θ' }, { value: 'state', label: 'true ż, θ̇ (cheating)' }], ...bind(ctx, 'deriv') });
+      slider(imp, { label: 'σ', unit: 's', min: 0.002, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma'), disabled: () => ctx.st.deriv !== 'dirty' });
+      segmented(imp, { label: 'Anti-windup', options: [{ value: true, label: 'integrate when |ż| < v̄' }, { value: false, label: 'none' }], ...bind(ctx, 'gate') });
+      slider(imp, { label: 'v̄', unit: 'm/s', min: 0.005, max: 1, step: 0.005, sig: 3, ...bind(ctx, 'vbar'), disabled: () => !ctx.st.gate });
+      slider(imp, { label: 'θ<sub>max</sub>', unit: '°', min: 5, max: 90, step: 1, sig: 3, hint: 'saturation on r_θ before the filter', ...bind(ctx, 'thetaMax') });
+      segmented(imp, { label: 'Zero-canceling filter', options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], ...bind(ctx, 'filter') });
+      segmented(imp, { label: 'Extra plot', options: [{ value: 'thetaR', label: 'θ_r vs θ' }, { value: 'zdot', label: 'ż estimate' }, { value: 'int', label: 'integrator' }], ...bind(ctx, 'extra') });
     },
 
     extraPlot(ctx, res) {
@@ -551,7 +528,7 @@
           id: 'c1', title: `(c) Gains for the listing's t<sub>r,θ</sub> = ${pr.trTh} s, ζ<sub>θ</sub> = ${pr.zetaTh}, M = ${pr.M}, ζ<sub>z</sub> = ${pr.zetaZ}`,
           inputs: { kPth: 'k<sub>Pθ</sub>', kDth: 'k<sub>Dθ</sub>', kDC: 'k<sub>DC</sub>', kPz: 'k<sub>Pz</sub>', kDz: 'k<sub>Dz</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { kPth: r.kPth, kDth: r.kDth, kDC: r.kDC, kPz: r.kPz, kDz: r.kDz }, { kPth: 'kPθ', kDth: 'kDθ', kDC: 'kDC', kPz: 'kPz', kDz: 'kDz' }); },
-          actions: [useGains(ctx, ['kPth', 'kDth', 'kPz', 'kDz'])],
+          actions: [WB.design.useGains(ctx, ['kPth', 'kDth', 'kPz', 'kDz'])],
           solution: () => { const r = ref(); return [{ tex: `k_{P\\theta} = ${tex(r.kPth)},\\; k_{D\\theta} = ${tex(r.kDth)},\\; k_{DC} = ${tex(r.kDC)},\\; k_{Pz} = ${tex(r.kPz)},\\; k_{Dz} = ${tex(r.kDz)}` }, { html: 'Listing 10.3 (p. 163–164). B.10 says "use B.8", but the listing changes t<sub>r,θ</sub> from 0.5 to 0.2 s and fixes M = 10.' }]; },
         },
         {
@@ -565,8 +542,8 @@
           html: 'Checks the current simulation with the plant mismatch in the left panel: |z − r| just before the second reference switch must be under 1 cm.',
           check: () => {
             const res = ctx.app.result(), S = ctx.S;
-            const tSw = S.sim.type === 'square' ? S.sim.tStep + 1 / S.sim.frequency : S.sim.tEnd;
-            const i = Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts));
+            const tSw = WB.sim.switchTime(S, 2);
+            const i = WB.sim.indexBefore(S, res, tSw);
             const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]);
             const msg = `|z − r| = ${fmt(e * 100, 3)} cm at t = ${fmt(res.t[i], 4)} s (kIz = ${fmt(ctx.gains.kIz, 3)}).`;
             if (!(Math.abs(ctx.gains.kIz) > 0)) return { ok: false, msg: 'kIz = 0. ' + msg };
@@ -618,11 +595,11 @@
       segmented(sec, {
         label: 'Outer-loop model',
         options: [{ value: 'filter', label: 'k_DC + zero-canceling filter (B.8, B.10)' }, { value: 'book', label: 'k_DC only (Fig. 6-9)' }],
-        get: () => ctx.st.model, set: (v) => { ctx.st.model = v; ctx.update(); },
+        ...bind(ctx, 'model'),
       });
       knobSliders(sec, ctx);
-      slider(sec, { label: 'κ = −k<sub>Iz</sub>', min: 0, max: 1, step: 0.0005, sig: 3, get: () => ctx.st.kappa, set: (v) => { ctx.st.kappa = v; ctx.update(); } });
-      slider(sec, { label: 'locus to κ =', min: 0.05, max: 10, log: true, sig: 3, get: () => ctx.st.kMax, set: (v) => { ctx.st.kMax = v; ctx.update(); } });
+      slider(sec, { label: 'κ = −k<sub>Iz</sub>', min: 0, max: 1, step: 0.0005, sig: 3, ...bind(ctx, 'kappa') });
+      slider(sec, { label: 'locus to κ =', min: 0.05, max: 10, log: true, sig: 3, ...bind(ctx, 'kMax') });
       sec.append(el('p', { class: 'muted small', text: 'k_Pz and k_Dz are negative for this plant, so the useful integrator gain is negative too; the locus is drawn for k_Iz = −κ, κ ≥ 0. Drag a closed-loop pole along it to set κ.' }));
       // the PD gains are the B.10 answers: show them only in Explore mode
       readout(sec, ctx, ctx.S.mode === 'explore' ? ['kPth', 'kDth', 'kDC', 'kPz', 'kDz', 'kIz'] : ['kIz']);

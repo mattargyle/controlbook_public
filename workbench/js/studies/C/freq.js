@@ -2,7 +2,7 @@
 // specifications and stability margins of the C.10 PD/PID loops, and
 // loopshaping both loops of the successive-loop-closure design.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const T = WB.tf;
@@ -56,16 +56,16 @@
     const st = ctx.st;
     const sec = section(parent, 'C.10 loops: PD inner, PID outer', 'p. 167 · hw16.py');
     for (const [key, label, min, max] of [['kPth', 'k<sub>P<sub>θ</sub></sub>', 0, 400], ['kDth', 'k<sub>D<sub>θ</sub></sub>', 0, 150], ['kPphi', 'k<sub>P<sub>φ</sub></sub>', 0, 5], ['kIphi', 'k<sub>I<sub>φ</sub></sub>', 0, 2], ['kDphi', 'k<sub>D<sub>φ</sub></sub>', 0, 30]]) {
-      slider(sec, { label, min, max, step: (max - min) / 4000, sig: 4, get: () => st[key], set: (v) => { st[key] = v; ctx.update(); } });
+      slider(sec, { label, min, max, step: (max - min) / 4000, sig: 4, ...bind(ctx, key, () => st) });
     }
-    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, get: () => st.sigma, set: (v) => { st.sigma = v; ctx.update(); } });
+    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma', () => st) });
     sec.append(el('div', { class: 'btn-row' },
       el('button', { type: 'button', class: 'btn btn-quiet', text: 'C.10 gains (repo)', onclick: () => { Object.assign(st, pick(c10(ctx.sys, bookParams(ctx.sys)))); ctx.update(); } }),
       el('button', { type: 'button', class: 'btn btn-quiet', text: 'book figures (C.8 loops)', title: 't_rθ = 1 s, M = 10, ζ = 0.9, k_I = 0.15', onclick: () => { Object.assign(st, pick(c8fig(ctx.sys, bookParams(ctx.sys)))); ctx.update(); } })));
     segmented(sec, {
       label: 'Bode plot',
       options: [{ value: 'inner', label: 'inner loop (θ)' }, { value: 'outer', label: 'outer loop (φ)' }],
-      get: () => st.view, set: (v) => { st.view = v; ctx.update(); },
+      ...bind(ctx, 'view', () => st),
     });
     return sec;
   }
@@ -111,17 +111,17 @@
     },
     buildControls(parent, ctx) {
       const sec = section(parent, 'Sinusoidal torque τ = A sin(ω₀t)', 'p. 264 · Eq. 15.4');
-      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.02, max: 20, log: true, sig: 3, get: () => ctx.st.w0, set: (v) => { ctx.st.w0 = v; ctx.update(); } });
-      slider(sec, { label: 'A', unit: 'N·m', min: 0, max: 1, step: 0.005, sig: 3, get: () => ctx.st.A, set: (v) => { ctx.st.A = v; ctx.update(); } });
+      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.02, max: 20, log: true, sig: 3, ...bind(ctx, 'w0') });
+      slider(sec, { label: 'A', unit: 'N·m', min: 0, max: 1, step: 0.005, sig: 3, ...bind(ctx, 'A') });
       segmented(sec, {
         label: 'Bode plot',
         options: [{ value: 'inner', label: 'P_in: τ → θ' }, { value: 'outer', label: 'P_out: θ → φ' }],
-        get: () => ctx.st.view, set: (v) => { ctx.st.view = v; ctx.update(); },
+        ...bind(ctx, 'view'),
       });
       segmented(sec, {
         label: 'Also show the exact transfer function (Eq. 5.6)',
         options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }],
-        get: () => ctx.st.exact, set: (v) => { ctx.st.exact = v; ctx.update(); },
+        ...bind(ctx, 'exact'),
       });
       sec.append(el('p', { class: 'muted small', text: 'The double integrator makes θ drift after the start-up transient; the dotted prediction includes that drift. Sweep ω₀ to find the panel mode.' }));
     },
@@ -205,27 +205,27 @@
     buildControls(parent, ctx) {
       gainControls(parent, ctx);
       const sec = section(parent, 'Spec frequencies', 'p. 298');
-      slider(sec, { label: 'parabola A (θ_r = At²)', unit: 'rad/s²', min: 0.1, max: 50, step: 0.1, sig: 3, get: () => ctx.st.A, set: (v) => { ctx.st.A = v; ctx.update(); } });
-      slider(sec, { label: 'ω<sub>d,in</sub>', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, get: () => ctx.st.wdin, set: (v) => { ctx.st.wdin = v; ctx.update(); } });
-      slider(sec, { label: 'ω<sub>no</sub>', unit: 'rad/s', min: 0.5, max: 1000, log: true, sig: 3, get: () => ctx.st.wno, set: (v) => { ctx.st.wno = v; ctx.update(); } });
+      slider(sec, { label: 'parabola A (θ_r = At²)', unit: 'rad/s²', min: 0.1, max: 50, step: 0.1, sig: 3, ...bind(ctx, 'A') });
+      slider(sec, { label: 'ω<sub>d,in</sub>', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, ...bind(ctx, 'wdin') });
+      slider(sec, { label: 'ω<sub>no</sub>', unit: 'rad/s', min: 0.5, max: 1000, log: true, sig: 3, ...bind(ctx, 'wno') });
       const box = el('div', { class: 'metrics' });
       sec.append(box);
       WB.ui.addRefresher(() => {
         const s = this.specs(ctx);
-        const show = ctx.S.mode === 'explore' || ctx.app.isRevealed('C:ch16:specs');
-        const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
+        const show = WB.ui.shown(ctx, 'C:ch16:specs');
+        const row = WB.ui.metric;
         box.replaceChildren(...(show ? [
           row('inner: M_a = lim s²PC (type 2)', `${fmt(s.Ma, 4)} (${fmt(s.B2, 3)} dB)`),
           row('inner: e_ss for θ_r = At²', `${fmt(s.eParab, 4)} rad`),
           row('inner: d_in below ω_d,in, |C_in|', `${fmt(s.Bdin, 3)} dB → ${fmt(100 * s.gdin, 3)} %`),
           row('outer: noise above ω_no, |PC|', `${fmt(-s.Bn, 3)} dB → ${fmt(100 * s.gn, 3)} %`),
-        ] : [el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the spec readouts', onclick: () => { ctx.app.reveal('C:ch16:specs'); WB.ui.refreshAll(); } })]));
+        ] : [WB.ui.revealButton(ctx, 'C:ch16:specs', 'Reveal the spec readouts')]));
       });
     },
 
     bode(ctx) {
       const p = ctx.pModel, s = this.specs(ctx), st = ctx.st;
-      const show = ctx.S.mode === 'explore' || ctx.app.isRevealed('C:ch16:specs');
+      const show = WB.ui.shown(ctx, 'C:ch16:specs');
       if (st.view === 'inner') {
         const inv = T.tf([1], [1, 0, 0]);
         return { title: 'Inner loop: P_in and P_in·C_in', w: W, lines: [
@@ -298,8 +298,8 @@
       sec.append(box);
       WB.ui.addRefresher(() => {
         const l = loops(ctx);
-        const show = ctx.S.mode === 'explore' || ctx.app.isRevealed('C:ch17:m');
-        const row = (a, b) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: a }), el('strong', { text: b }));
+        const show = WB.ui.shown(ctx, 'C:ch17:m');
+        const row = WB.ui.metric;
         box.replaceChildren(...(show ? [
           row('inner PM', `${fmt(l.mgIn.pm, 3)}° at ω_co = ${fmt(l.mgIn.wc, 3)} rad/s`),
           row('inner GM', gmText(l.mgIn)),
@@ -308,13 +308,13 @@
           row('outer GM', gmText(l.mgOut)),
           row('outer bandwidth', `${fmt(l.bwOut, 3)} rad/s`),
           row('separation ω_bw,in / ω_bw,out', `${fmt(l.bwIn / l.bwOut, 3)}×`),
-        ] : [el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the margins', onclick: () => { ctx.app.reveal('C:ch17:m'); WB.ui.refreshAll(); } })]));
+        ] : [WB.ui.revealButton(ctx, 'C:ch17:m', 'Reveal the margins')]));
       });
     },
 
     bode(ctx) {
       const l = loops(ctx), inner = ctx.st.view === 'inner';
-      const show = ctx.S.mode === 'explore' || ctx.app.isRevealed('C:ch17:m');
+      const show = WB.ui.shown(ctx, 'C:ch17:m');
       const Lg = inner ? l.Lin : l.Lout, Tc = inner ? l.Tin : l.Tout, mg = inner ? l.mgIn : l.mgOut, bw = inner ? l.bwIn : l.bwOut;
       const marks = show ? marginMarks(mg) : [];
       if (show && isFinite(bw)) marks.push({ w: bw, label: `bandwidth ${fmt(bw, 3)}`, color: '--series-2' });
@@ -491,14 +491,14 @@
       segmented(pre, {
         label: 'Rate-feedback gains k<sub>D<sub>θ</sub></sub>, k<sub>D<sub>φ</sub></sub>',
         options: [{ value: 'c10', label: 'C.10 (problem, repo)' }, { value: 'c8', label: 'C.8 loops (book figures)' }],
-        get: () => st.kd, set: (v) => { st.kd = v; ctx.update(); },
+        ...bind(ctx, 'kd', () => st),
       });
       segmented(pre, {
         label: 'Edit and plot',
         options: [{ value: 'inner', label: 'inner loop C_in' }, { value: 'outer', label: 'outer loop C_out' }],
-        get: () => st.loop, set: (v) => { st.loop = v; ctx.update(); },
+        ...bind(ctx, 'loop', () => st),
       });
-      const onOff = (sec, obj) => segmented(sec, { options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], get: () => obj().on, set: (v) => { obj().on = v; ctx.update(); } });
+      const onOff = (sec, obj) => WB.ui.onOff(sec, ctx, () => obj());
       const leadPhase = (sec, obj) => {
         const ptxt = el('p', { class: 'muted small' }); sec.append(ptxt);
         WB.ui.addRefresher(() => { const Mx = obj().M; ptxt.textContent = `max phase added: sin⁻¹((M−1)/(M+1)) = ${fmt(Math.asin((Mx - 1) / (Mx + 1)) * R2D, 3)}°`; });
@@ -508,56 +508,55 @@
         segmented(s0, {
           label: 'Rate feedback τ = −k<sub>D<sub>θ</sub></sub>θ̇ + τ′',
           options: [{ value: true, label: 'on (book text)' }, { value: false, label: 'off: 1/((Js+Jp)s²) (repo)' }],
-          get: () => st.inner.rate, set: (v) => { st.inner.rate = v; ctx.update(); },
+          ...bind(ctx, 'rate', () => st.inner),
         });
-        slider(s0, { label: 'k', min: 0.01, max: 1000, log: true, sig: 4, get: () => st.inner.k, set: (v) => { st.inner.k = v; ctx.update(); } });
+        slider(s0, { label: 'k', min: 0.01, max: 1000, log: true, sig: 4, ...bind(ctx, 'k', () => st.inner) });
         const s1 = section(parent, 'Lead M(s + ω/√M)/(s + ω√M)', 'p. 328 · Eq. 18.2');
         onOff(s1, () => st.inner.lead);
-        slider(s1, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.01, max: 100, log: true, sig: 3, get: () => st.inner.lead.w, set: (v) => { st.inner.lead.w = v; ctx.update(); }, disabled: () => !st.inner.lead.on });
-        slider(s1, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, get: () => st.inner.lead.M, set: (v) => { st.inner.lead.M = v; ctx.update(); }, disabled: () => !st.inner.lead.on });
+        slider(s1, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.01, max: 100, log: true, sig: 3, ...bind(ctx, 'w', () => st.inner.lead), disabled: () => !st.inner.lead.on });
+        slider(s1, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, ...bind(ctx, 'M', () => st.inner.lead), disabled: () => !st.inner.lead.on });
         leadPhase(s1, () => st.inner.lead);
         const s2 = section(parent, 'Low-pass p/(s + p)', 'p. 325');
         onOff(s2, () => st.inner.lpf);
-        slider(s2, { label: 'p', unit: 'rad/s', min: 0.1, max: 1000, log: true, sig: 3, get: () => st.inner.lpf.p, set: (v) => { st.inner.lpf.p = v; ctx.update(); }, disabled: () => !st.inner.lpf.on });
+        slider(s2, { label: 'p', unit: 'rad/s', min: 0.1, max: 1000, log: true, sig: 3, ...bind(ctx, 'p', () => st.inner.lpf), disabled: () => !st.inner.lpf.on });
       } else {
         const s0 = section(parent, 'Outer plant', 'p. 366');
         segmented(s0, {
           label: 'Model of θ_r′ → φ',
           options: [{ value: 'book', label: 'derived on p. 366' }, { value: 'repo', label: 'loopShapingOuter.py' }],
-          get: () => st.model, set: (v) => { st.model = v; ctx.update(); },
+          ...bind(ctx, 'model', () => st),
         });
         s0.append(el('p', { class: 'muted small', text: 'The listing\'s model has DC gain 1/k = 10 instead of 1; the book\'s figures were made with it. The simulation always uses the real satellite.' }));
-        slider(s0, { label: 'k', min: 1e-4, max: 10, log: true, sig: 4, get: () => st.outer.k, set: (v) => { st.outer.k = v; ctx.update(); } });
+        slider(s0, { label: 'k', min: 1e-4, max: 10, log: true, sig: 4, ...bind(ctx, 'k', () => st.outer) });
         const o = st.outer;
         const si = section(parent, 'Integral (s + k_I)/s', 'p. 362');
         onOff(si, () => o.int);
-        slider(si, { label: 'k<sub>I</sub>', min: 0.001, max: 2, log: true, sig: 3, get: () => o.int.ki, set: (v) => { o.int.ki = v; ctx.update(); }, disabled: () => !o.int.on });
+        slider(si, { label: 'k<sub>I</sub>', min: 0.001, max: 2, log: true, sig: 3, ...bind(ctx, 'ki', () => o.int), disabled: () => !o.int.on });
         const sl = section(parent, 'Lead M(s + ω/√M)/(s + ω√M)', 'p. 328 · Eq. 18.2');
         onOff(sl, () => o.lead);
-        slider(sl, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.005, max: 10, log: true, sig: 3, get: () => o.lead.w, set: (v) => { o.lead.w = v; ctx.update(); }, disabled: () => !o.lead.on });
-        slider(sl, { label: 'M', min: 1.01, max: 300, log: true, sig: 3, get: () => o.lead.M, set: (v) => { o.lead.M = v; ctx.update(); }, disabled: () => !o.lead.on });
+        slider(sl, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.005, max: 10, log: true, sig: 3, ...bind(ctx, 'w', () => o.lead), disabled: () => !o.lead.on });
+        slider(sl, { label: 'M', min: 1.01, max: 300, log: true, sig: 3, ...bind(ctx, 'M', () => o.lead), disabled: () => !o.lead.on });
         leadPhase(sl, () => o.lead);
         const sg = section(parent, 'Lag (s + z)/(s + z/M)', 'p. 325 · Eq. 18.1');
         onOff(sg, () => o.lag);
-        slider(sg, { label: 'z', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, get: () => o.lag.z, set: (v) => { o.lag.z = v; ctx.update(); }, disabled: () => !o.lag.on });
-        slider(sg, { label: 'M', min: 1.01, max: 300, log: true, sig: 3, get: () => o.lag.M, set: (v) => { o.lag.M = v; ctx.update(); }, disabled: () => !o.lag.on });
+        slider(sg, { label: 'z', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, ...bind(ctx, 'z', () => o.lag), disabled: () => !o.lag.on });
+        slider(sg, { label: 'M', min: 1.01, max: 300, log: true, sig: 3, ...bind(ctx, 'M', () => o.lag), disabled: () => !o.lag.on });
         for (const key of ['lpf1', 'lpf2']) {
           const s = section(parent, `Low-pass ${key === 'lpf1' ? 1 : 2}: p/(s + p)`, 'p. 325');
           onOff(s, () => o[key]);
-          slider(s, { label: 'p', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, get: () => o[key].p, set: (v) => { o[key].p = v; ctx.update(); }, disabled: () => !o[key].on });
+          slider(s, { label: 'p', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, ...bind(ctx, 'p', () => o[key]), disabled: () => !o[key].on });
         }
         const pf = section(parent, 'Prefilter F(s) = p/(s + p)', 'p. 336 · Eq. 18.5–18.7');
         onOff(pf, () => o.pf);
-        slider(pf, { label: 'p', unit: 'rad/s', min: 0.01, max: 10, log: true, sig: 3, get: () => o.pf.p, set: (v) => { o.pf.p = v; ctx.update(); }, disabled: () => !o.pf.on });
-        segmented(pf, { label: 'Bode: closed loop F·T', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => st.showT, set: (v) => { st.showT = v; ctx.update(); } });
+        slider(pf, { label: 'p', unit: 'rad/s', min: 0.01, max: 10, log: true, sig: 3, ...bind(ctx, 'p', () => o.pf), disabled: () => !o.pf.on });
+        segmented(pf, { label: 'Bode: closed loop F·T', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT', () => st) });
       }
       const sp = section(parent, 'C.18 specs', 'p. 361–362');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
       WB.ui.addRefresher(() => {
         const d = this.design(ctx);
-        const row = (label, ok, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: label }), el('strong', { text: v }),
-          el('span', { class: 'status ' + (ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: ok ? '✓' : '✗' }), el('span', { text: ok ? 'met' : 'not met' })));
+        const row = WB.ui.specRow;
         box.replaceChildren(
           row('inner: |PC| ≥ 1/0.01 below 0.01 rad/s', d.inner.track, `${fmt(db(d.inner.lowI), 3)} dB`),
           row('inner: |PC| ≤ 0.01 above 20 rad/s', d.inner.noise, `${fmt(db(d.inner.highI), 3)} dB`),

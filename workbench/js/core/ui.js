@@ -148,6 +148,54 @@ WB.ui = (function () {
     return { row, refresh };
   }
 
+  // ------------------------------------------------- chapter-panel helpers --
+  // get/set for a slider or segmented control bound to obj()[key] (default ctx.st);
+  // every change re-renders through ctx.update().
+  function bind(ctx, key, obj = () => ctx.st) {
+    return { get: () => obj()[key], set: (v) => { obj()[key] = v; ctx.update(); } };
+  }
+
+  // One slider per key from spec = {key: [label, min, max]}, bound to obj() (default
+  // the Work-mode gains ctx.st.w). steps sets the slider resolution.
+  function gainSliders(parent, ctx, spec, keys, { obj = () => ctx.st.w, steps = 4000 } = {}) {
+    return keys.map((k) => {
+      const [label, min, max] = spec[k];
+      return slider(parent, { label, min, max, step: (max - min) / steps, sig: 4, ...bind(ctx, k, obj) });
+    });
+  }
+
+  // on/off segmented control for a compensator block (obj() returns the block).
+  function onOff(parent, ctx, obj, label) {
+    return segmented(parent, { label, options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], ...bind(ctx, 'on', obj) });
+  }
+
+  // A label/value row; status = {ok, text} adds a ✓/✗ badge.
+  function metric(label, value, status) {
+    const r = el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: label }), el('strong', { text: value ?? '' }));
+    if (status) r.append(el('span', { class: 'status ' + (status.ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: status.ok ? '✓' : '✗' }), el('span', { text: status.text })));
+    return r;
+  }
+  // A spec-check row: met / not met.
+  const specRow = (label, ok, value) => metric(label, value, { ok, text: ok ? 'met' : 'not met' });
+
+  // Live readout box; rows() returns [[label, value], ...] (numbers shown to 4 figures).
+  function readout(parent, rows, { wrap = true } = {}) {
+    const box = el('div', { class: wrap ? 'readout wrap' : 'readout' });
+    parent.append(box);
+    addRefresher(() => box.replaceChildren(...rows().map(([k, v]) =>
+      el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: typeof v === 'number' ? WB.math.fmt(v, 4) : v })))));
+    return box;
+  }
+
+  // Work-mode spoilers: true in Explore mode or once `key` has been revealed.
+  const shown = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isRevealed(key);
+  // A Reveal button for `key`. hideWhenShown removes it once revealed (or in Explore).
+  function revealButton(ctx, key, text, { hideWhenShown = false } = {}) {
+    const b = el('button', { type: 'button', class: 'btn btn-quiet', text, onclick: () => { ctx.app.reveal(key); ctx.update(); } });
+    if (hideWhenShown) addRefresher(() => { b.hidden = shown(ctx, key); });
+    return b;
+  }
+
   function refreshAll() {
     for (const r of refreshers) r();
   }
@@ -186,7 +234,10 @@ WB.ui = (function () {
     },
   };
 
-  return { el, section, pageChip, linkPages, linkifyNode, slider, segmented, refreshAll, clearRefreshers, addRefresher, renderTex, store };
+  return {
+    el, section, pageChip, linkPages, linkifyNode, slider, segmented, refreshAll, clearRefreshers, addRefresher, renderTex, store,
+    bind, gainSliders, onOff, metric, specRow, readout, shown, revealButton,
+  };
 })();
 
 // Load a study's scripts during page parse (classic scripts, works from file://).

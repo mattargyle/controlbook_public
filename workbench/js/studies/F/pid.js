@@ -6,7 +6,7 @@
 // specs, and every derived number is behind Reveal / Show solution.
 // Explore mode: gains come from the specs (t_r, ζ, separation M); drag the poles.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const F = WB.F;
@@ -43,18 +43,17 @@
   }
   function knobSections(parent, ctx, { lon = true, lat = true, title = 'Design knobs' } = {}) {
     const k = ctx.st.k;
-    const set = (key) => (v) => { k[key] = v; ctx.update(); };
     if (lon) {
       const s1 = section(parent, `${title}: altitude`, 'p. 113 · Eq. 8.5');
-      slider(s1, { label: 't<sub>r,h</sub>', unit: 's', min: 0.5, max: 20, step: 0.01, sig: 3, get: () => k.trh, set: set('trh') });
-      slider(s1, { label: 'ζ<sub>h</sub>', min: 0.2, max: 1.5, step: 0.005, sig: 3, get: () => k.zetah, set: set('zetah') });
+      slider(s1, { label: 't<sub>r,h</sub>', unit: 's', min: 0.5, max: 20, step: 0.01, sig: 3, ...bind(ctx, 'trh', () => k) });
+      slider(s1, { label: 'ζ<sub>h</sub>', min: 0.2, max: 1.5, step: 0.005, sig: 3, ...bind(ctx, 'zetah', () => k) });
     }
     if (lat) {
       const s2 = section(parent, `${title}: lateral`, 'p. 118 · §8.1.4');
-      slider(s2, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, sig: 3, get: () => k.trth, set: set('trth') });
-      slider(s2, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 1.5, step: 0.005, sig: 3, get: () => k.zetath, set: set('zetath') });
-      slider(s2, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1, max: 30, step: 0.1, sig: 3, get: () => k.Msep, set: set('Msep'), hint: 'bandwidth separation (5–10 is the rule of thumb, p. 118)' });
-      slider(s2, { label: 'ζ<sub>z</sub>', min: 0.2, max: 1.5, step: 0.005, sig: 3, get: () => k.zetaz, set: set('zetaz') });
+      slider(s2, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, sig: 3, ...bind(ctx, 'trth', () => k) });
+      slider(s2, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 1.5, step: 0.005, sig: 3, ...bind(ctx, 'zetath', () => k) });
+      slider(s2, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1, max: 30, step: 0.1, sig: 3, ...bind(ctx, 'Msep', () => k), hint: 'bandwidth separation (5–10 is the rule of thumb, p. 118)' });
+      slider(s2, { label: 'ζ<sub>z</sub>', min: 0.2, max: 1.5, step: 0.005, sig: 3, ...bind(ctx, 'zetaz', () => k) });
     }
   }
   function separationSection(parent, ctx) {
@@ -63,13 +62,13 @@
     sec.append(box);
     WB.ui.addRefresher(() => {
       const r = F.separationRows(ctx, ctx.gains);
-      const show = F.shown(ctx, 'F:sep');
+      const show = WB.ui.shown(ctx, 'F:sep');
       box.replaceChildren(...(show ? [
         F.metricRow('inner ω_n,θ', `${fmt(r.wi, 3)} rad/s`),
         F.metricRow('outer ω_n,z (k_DC model)', `${fmt(r.wo, 3)} rad/s`),
         F.metricRow('separation ω_n,θ/ω_n,z ≈ t_r,z/t_r,θ', `${fmt(r.ratio, 3)}`),
         F.metricRow('inner DC gain k_DC,θ', `${fmt(r.kDC, 4)}`),
-      ] : [F.revealButton(ctx, 'F:sep', 'Reveal the loop poles and separation')]));
+      ] : [WB.ui.revealButton(ctx, 'F:sep', 'Reveal the loop poles and separation')]));
     });
   }
 
@@ -135,7 +134,7 @@
       segmented(sec, {
         label: 'Force law',
         options: [{ value: 'eq', label: 'F = F<sub>e</sub> + F̃' }, { value: 'fl', label: 'F = (F<sub>e</sub> + F̃)/cos θ' }],
-        get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+        ...bind(ctx, 'comp'),
       });
       if (ctx.S.mode === 'work') {
         F.gainSliders(sec, ctx, ['kPh', 'kDh']);
@@ -143,12 +142,11 @@
         return;
       }
       const des = section(parent, 'Desired closed-loop poles', 'p. 100');
-      segmented(des, { label: 'Pole pair', options: [{ value: 'real', label: 'two real' }, { value: 'complex', label: 'complex pair' }], get: () => ctx.st.form, set: (v) => { ctx.st.form = v; ctx.update(); } });
-      const set = (key) => (v) => { ctx.st[key] = v; ctx.update(); };
-      slider(des, { label: 'p<sub>1</sub>', min: -2, max: 0, step: 0.001, get: () => ctx.st.p1, set: set('p1'), disabled: () => ctx.st.form !== 'real' });
-      slider(des, { label: 'p<sub>2</sub>', min: -2, max: 0, step: 0.001, get: () => ctx.st.p2, set: set('p2'), disabled: () => ctx.st.form !== 'real' });
-      slider(des, { label: '−σ', min: -2, max: 0, step: 0.001, get: () => ctx.st.sigma, set: set('sigma'), disabled: () => ctx.st.form !== 'complex' });
-      slider(des, { label: 'ω<sub>d</sub>', unit: 'rad/s', min: 0, max: 2, step: 0.001, get: () => ctx.st.wd, set: set('wd'), disabled: () => ctx.st.form !== 'complex' });
+      segmented(des, { label: 'Pole pair', options: [{ value: 'real', label: 'two real' }, { value: 'complex', label: 'complex pair' }], ...bind(ctx, 'form') });
+      slider(des, { label: 'p<sub>1</sub>', min: -2, max: 0, step: 0.001, ...bind(ctx, 'p1'), disabled: () => ctx.st.form !== 'real' });
+      slider(des, { label: 'p<sub>2</sub>', min: -2, max: 0, step: 0.001, ...bind(ctx, 'p2'), disabled: () => ctx.st.form !== 'real' });
+      slider(des, { label: '−σ', min: -2, max: 0, step: 0.001, ...bind(ctx, 'sigma'), disabled: () => ctx.st.form !== 'complex' });
+      slider(des, { label: 'ω<sub>d</sub>', unit: 'rad/s', min: 0, max: 2, step: 0.001, ...bind(ctx, 'wd'), disabled: () => ctx.st.form !== 'complex' });
       F.readout(des, ctx, [{ key: 'kPh', label: 'kP' }, { key: 'kDh', label: 'kD' }]);
     },
     splane(ctx) {
@@ -455,15 +453,15 @@
       segmented(sec, {
         label: 'Reference shape for h<sub>r</sub> and z<sub>r</sub> (amplitude = size, slope, or curvature r̈)',
         options: [{ value: 'step', label: 'step' }, { value: 'ramp', label: 'ramp' }, { value: 'parabola', label: 'parabola' }],
-        get: () => ctx.st.input, set: (v) => { ctx.st.input = v; ctx.update(); },
+        ...bind(ctx, 'input'),
       });
       F.viewControl(sec, ctx);
       if (ctx.S.mode === 'work') workSections(parent, ctx, { kI: true });
       else {
         knobSections(parent, ctx);
         const ki = section(parent, 'Integrators', 'p. 142');
-        slider(ki, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, get: () => ctx.st.k.kIh, set: (v) => { ctx.st.k.kIh = v; ctx.update(); } });
-        slider(ki, { label: 'k<sub>I<sub>z</sub></sub>', min: -0.003, max: 0, step: 0.00001, sig: 3, get: () => ctx.st.k.kIz, set: (v) => { ctx.st.k.kIz = v; ctx.update(); } });
+        slider(ki, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, ...bind(ctx, 'kIh', () => ctx.st.k) });
+        slider(ki, { label: 'k<sub>I<sub>z</sub></sub>', min: -0.003, max: 0, step: 0.00001, sig: 3, ...bind(ctx, 'kIz', () => ctx.st.k) });
       }
       const ty = section(parent, 'System type (current gains)', 'p. 141 · Table 9-1');
       const box = el('div', { class: 'metrics' });
@@ -472,7 +470,7 @@
         const A = this.analysis(ctx);
         const res = ctx.app.result();
         const n = res ? res.t.length - 1 : 0;
-        const show = F.shown(ctx, 'F:ch9type');
+        const show = WB.ui.shown(ctx, 'F:ch9type');
         const rows = [];
         if (show) {
           for (const [key, name] of [['lon', 'altitude'], ['inner', 'inner θ'], ['outer', 'outer z']]) {
@@ -482,7 +480,7 @@
             rows.push(F.metricRow(`${name}: e ramp, parab (D on y)`, `${efmt(im.ramp)}, ${efmt(im.parab)}`));
             rows.push(F.metricRow(`${name}: d_in type, e per unit step d`, `${b.dType}, ${efmt(b.dStep)}`));
           }
-        } else rows.push(F.revealButton(ctx, 'F:ch9type', 'Reveal the predicted types and errors'));
+        } else rows.push(WB.ui.revealButton(ctx, 'F:ch9type', 'Reveal the predicted types and errors'));
         if (res) {
           rows.push(F.metricRow('simulated h_r − h at t_end', `${fmt(res.rAll[0][n] - res.yAll[1][n], 3)} m`));
           rows.push(F.metricRow('simulated z_r − z at t_end', `${fmt(res.rAll[1][n] - res.yAll[0][n], 3)} m`));
@@ -596,11 +594,11 @@
     gains(ctx) { return { ...this.pdGains(ctx), kIh: ctx.st.kIh, kIz: ctx.st.kIz }; },
     buildControls(parent, ctx) {
       const sec = section(parent, 'PID: PD from F.8, then add k_I', 'p. 470 · F.P.6 p. 398');
-      segmented(sec, { label: 'Root locus of', options: [{ value: 'lon', label: 'altitude vs. k<sub>I<sub>h</sub></sub>' }, { value: 'outer', label: 'outer z vs. k<sub>I<sub>z</sub></sub>' }], get: () => ctx.st.view, set: (v) => { ctx.st.view = v; ctx.update(); } });
+      segmented(sec, { label: 'Root locus of', options: [{ value: 'lon', label: 'altitude vs. k<sub>I<sub>h</sub></sub>' }, { value: 'outer', label: 'outer z vs. k<sub>I<sub>z</sub></sub>' }], ...bind(ctx, 'view') });
       sec.append(el('p', { class: 'muted small', text: ctx.S.mode === 'work' ? 'Work mode uses your own F.8 gains from the Ch 8 tab.' : 'Explore mode uses the F.8 design from the specs below.' }));
-      slider(sec, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, get: () => ctx.st.kIh, set: (v) => { ctx.st.kIh = v; ctx.update(); } });
-      slider(sec, { label: 'k<sub>I<sub>z</sub></sub>', min: -0.003, max: 0, step: 0.00001, sig: 3, get: () => ctx.st.kIz, set: (v) => { ctx.st.kIz = v; ctx.update(); } });
-      slider(sec, { label: 'locus to', unit: '× k_I,crit', min: 0.2, max: 4, step: 0.1, sig: 2, get: () => ctx.st.kMaxFactor, set: (v) => { ctx.st.kMaxFactor = v; ctx.update(); } });
+      slider(sec, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, ...bind(ctx, 'kIh') });
+      slider(sec, { label: 'k<sub>I<sub>z</sub></sub>', min: -0.003, max: 0, step: 0.00001, sig: 3, ...bind(ctx, 'kIz') });
+      slider(sec, { label: 'locus to', unit: '× k_I,crit', min: 0.2, max: 4, step: 0.1, sig: 2, ...bind(ctx, 'kMaxFactor') });
       sec.append(el('p', { class: 'muted small', text: 'Drag a closed-loop pole along the locus to set k_I.' }));
       F.readout(sec, ctx, [{ key: 'kPh', label: 'kP,h' }, { key: 'kDh', label: 'kD,h' }, { key: 'kPz', label: 'kP,z' }, { key: 'kDz', label: 'kD,z' }]);
       if (ctx.S.mode === 'explore') knobSections(parent, ctx, { title: 'F.8 specs' });
@@ -681,19 +679,19 @@
     gains(ctx) { return ctx.S.mode === 'work' ? pick(ctx.st.w, ALL) : F.designSLC(ctx.pModel, ctx.st.k); },
     buildControls(parent, ctx) {
       const sec = section(parent, 'Implementation', 'p. 157 · Eq. 10.4, p. 163');
-      segmented(sec, { label: 'Rates for the D terms', options: [{ value: 'dirty', label: 'dirty derivative of y' }, { value: 'state', label: 'true rates (cheating)' }], get: () => ctx.st.deriv, set: (v) => { ctx.st.deriv = v; ctx.update(); } });
-      slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.5, step: 0.001, sig: 3, get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); }, disabled: () => ctx.st.deriv !== 'dirty' });
-      segmented(sec, { label: 'Anti-windup', options: [{ value: 'gate', label: 'integrate when |ẏ| < v̄' }, { value: 'none', label: 'none' }], get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); } });
-      slider(sec, { label: 'v̄<sub>h</sub>', unit: 'm/s', min: 0.01, max: 2, step: 0.01, sig: 3, get: () => ctx.st.vbarH, set: (v) => { ctx.st.vbarH = v; ctx.update(); }, disabled: () => ctx.st.antiwindup !== 'gate' });
-      slider(sec, { label: 'v̄<sub>z</sub>', unit: 'm/s', min: 0.01, max: 2, step: 0.01, sig: 3, get: () => ctx.st.vbarZ, set: (v) => { ctx.st.vbarZ = v; ctx.update(); }, disabled: () => ctx.st.antiwindup !== 'gate' });
-      segmented(sec, { label: 'Extra plot', options: [{ value: 'int', label: 'integrators' }, { value: 'rates', label: 'ḣ estimate' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(sec, { label: 'Rates for the D terms', options: [{ value: 'dirty', label: 'dirty derivative of y' }, { value: 'state', label: 'true rates (cheating)' }], ...bind(ctx, 'deriv') });
+      slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.5, step: 0.001, sig: 3, ...bind(ctx, 'sigma'), disabled: () => ctx.st.deriv !== 'dirty' });
+      segmented(sec, { label: 'Anti-windup', options: [{ value: 'gate', label: 'integrate when |ẏ| < v̄' }, { value: 'none', label: 'none' }], ...bind(ctx, 'antiwindup') });
+      slider(sec, { label: 'v̄<sub>h</sub>', unit: 'm/s', min: 0.01, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'vbarH'), disabled: () => ctx.st.antiwindup !== 'gate' });
+      slider(sec, { label: 'v̄<sub>z</sub>', unit: 'm/s', min: 0.01, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'vbarZ'), disabled: () => ctx.st.antiwindup !== 'gate' });
+      segmented(sec, { label: 'Extra plot', options: [{ value: 'int', label: 'integrators' }, { value: 'rates', label: 'ḣ estimate' }], ...bind(ctx, 'extra') });
       F.viewControl(sec, ctx);
       if (ctx.S.mode === 'work') workSections(parent, ctx, { kI: true });
       else {
         knobSections(parent, ctx);
         const ki = section(parent, 'Integrators', 'p. 160 · §10.1.3');
-        slider(ki, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, get: () => ctx.st.k.kIh, set: (v) => { ctx.st.k.kIh = v; ctx.update(); } });
-        slider(ki, { label: 'k<sub>I<sub>z</sub></sub>', min: -0.003, max: 0, step: 0.00001, sig: 3, get: () => ctx.st.k.kIz, set: (v) => { ctx.st.k.kIz = v; ctx.update(); } });
+        slider(ki, { label: 'k<sub>I<sub>h</sub></sub>', min: 0, max: 0.05, step: 0.0001, sig: 3, ...bind(ctx, 'kIh', () => ctx.st.k) });
+        slider(ki, { label: 'k<sub>I<sub>z</sub></sub>', min: -0.003, max: 0, step: 0.00001, sig: 3, ...bind(ctx, 'kIz', () => ctx.st.k) });
         F.readout(ki, ctx, ALL.map((k) => ({ key: k, label: k })));
       }
     },

@@ -9,7 +9,7 @@
 // Fig. 7-2 exactly (the default through D.P.6; D.10 defaults to 'eq'). Neither
 // changes the closed-loop poles. See ISSUES.md.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const T = WB.tf;
@@ -81,14 +81,14 @@
         { value: 'eq', label: 'F = k z<sub>r</sub> + F̃', title: 'equilibrium force F_e = k z_e with z_e = z_r' },
         { value: 'none', label: 'none (Fig. 7-2)', title: 'F = F̃: pure PD/PID' },
       ],
-      get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+      ...bind(ctx, 'comp'),
     });
   }
   function archControl(parent, ctx) {
     segmented(parent, {
       label: 'Derivative acts on',
       options: [{ value: 'output', label: 'output z (Fig. 7-2)' }, { value: 'error', label: 'error e (Fig. 7-1)' }],
-      get: () => ctx.st.arch, set: (v) => { ctx.st.arch = v; ctx.update(); },
+      ...bind(ctx, 'arch'),
     });
   }
   const R = { kP: 20, kD: 30, kI: 10 };
@@ -97,8 +97,8 @@
     for (const k of keys) lib.gainSlider(parent, ctx, k, lab[k], R[k]);
   }
   function specSliders(parent, ctx, { kI } = {}) {
-    slider(parent, { label: 't<sub>r</sub>', unit: 's', min: 0.2, max: 6, step: 0.005, sig: 4, get: () => ctx.st.tr, set: (v) => { ctx.st.tr = v; ctx.update(); } });
-    slider(parent, { label: 'ζ', min: 0.1, max: 2, step: 0.005, get: () => ctx.st.zeta, set: (v) => { ctx.st.zeta = v; ctx.update(); } });
+    slider(parent, { label: 't<sub>r</sub>', unit: 's', min: 0.2, max: 6, step: 0.005, sig: 4, ...bind(ctx, 'tr') });
+    slider(parent, { label: 'ζ', min: 0.1, max: 2, step: 0.005, ...bind(ctx, 'zeta') });
     if (kI) lib.gainSlider(parent, ctx, 'kIx', 'k<sub>I</sub>', R.kI);
   }
   // Gains from (t_r, ζ) with ω_n = 2.2/t_r (Eq. 8.5), plus the explore k_I.
@@ -185,13 +185,13 @@
       const des = section(parent, 'Desired closed-loop poles', 'p. 100');
       segmented(des, {
         label: 'Pole pair', options: [{ value: 'real', label: 'two real' }, { value: 'complex', label: 'complex pair' }],
-        get: () => ctx.st.form, set: (v) => { ctx.st.form = v; ctx.update(); },
+        ...bind(ctx, 'form'),
       });
       const dis = (f) => () => ctx.st.form !== f;
-      slider(des, { label: 'p<sub>1</sub>', min: -6, max: 0, step: 0.01, get: () => ctx.st.p1, set: (v) => { ctx.st.p1 = v; ctx.update(); }, disabled: dis('real') });
-      slider(des, { label: 'p<sub>2</sub>', min: -6, max: 0, step: 0.01, get: () => ctx.st.p2, set: (v) => { ctx.st.p2 = v; ctx.update(); }, disabled: dis('real') });
-      slider(des, { label: '−σ', min: -6, max: 0, step: 0.01, get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); }, disabled: dis('complex') });
-      slider(des, { label: 'ω<sub>d</sub>', unit: 'rad/s', min: 0, max: 6, step: 0.01, get: () => ctx.st.wd, set: (v) => { ctx.st.wd = v; ctx.update(); }, disabled: dis('complex') });
+      slider(des, { label: 'p<sub>1</sub>', min: -6, max: 0, step: 0.01, ...bind(ctx, 'p1'), disabled: dis('real') });
+      slider(des, { label: 'p<sub>2</sub>', min: -6, max: 0, step: 0.01, ...bind(ctx, 'p2'), disabled: dis('real') });
+      slider(des, { label: '−σ', min: -6, max: 0, step: 0.01, ...bind(ctx, 'sigma'), disabled: dis('complex') });
+      slider(des, { label: 'ω<sub>d</sub>', unit: 'rad/s', min: 0, max: 6, step: 0.01, ...bind(ctx, 'wd'), disabled: dis('complex') });
       lib.note(des, 'Or drag a closed-loop pole. Drag off the real axis for a complex pair.');
       readout(des, ctx, ['kP', 'kD']);
     },
@@ -456,7 +456,7 @@
       segmented(sec, {
         label: 'Reference shape (amplitude = size, slope, or coefficient)',
         options: [{ value: 'step', label: 'step' }, { value: 'ramp', label: 'ramp' }, { value: 'parabola', label: 'parabola' }],
-        get: () => ctx.st.input, set: (v) => { ctx.st.input = v; ctx.update(); },
+        ...bind(ctx, 'input'),
       });
       if (ctx.S.mode === 'work') gainSliders(sec, ctx, ['kP', 'kI', 'kD']);
       else { specSliders(sec, ctx, { kI: true }); readout(sec, ctx); }
@@ -480,8 +480,8 @@
       const n = res ? res.r.length - 1 : 0;
       const iD = res ? Math.min(n, Math.max(0, Math.round(S.sim.tDist / S.sim.Ts) - 1)) : 0;
       const eEnd = res ? res.r[n] - res.y[n] : NaN, eBefore = res && S.sim.dist && S.sim.tDist > S.sim.tStep ? res.r[iD] - res.y[iD] : NaN;
-      const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
-      const show = S.mode === 'explore' || ctx.app.isRevealed('D:ch9:type');
+      const row = WB.ui.metric;
+      const show = WB.ui.shown(ctx, 'D:ch9:type');
       const rows = [];
       if (show) {
         rows.push(row('reference tracking type', eq ? `type ${a.type} loop; type ${e.type} with F = k z_r + F̃` : `type ${a.type}`));
@@ -489,7 +489,7 @@
         rows.push(row('input-disturbance type', `type ${a.distType}`));
         rows.push(row(`predicted extra e from d = ${fmt(S.sim.dist, 3)} N`, `${fmt(Math.abs(S.sim.dist) * a.dist, 3)} m`));
       } else {
-        rows.push(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the predicted type and errors', onclick: () => { ctx.app.reveal('D:ch9:type'); WB.ui.refreshAll(); } }));
+        rows.push(WB.ui.revealButton(ctx, 'D:ch9:type', 'Reveal the predicted type and errors'));
       }
       if (isFinite(eBefore)) rows.push(row('simulated r − z just before d starts', `${fmt(eBefore, 3)} m`));
       rows.push(row('simulated r − z at t_end', isFinite(eEnd) ? `${fmt(eEnd, 3)} m` : '—'));
@@ -581,7 +581,7 @@
       const sec = section(parent, 'PD from D.8, then add k_I', 'p. 466');
       compControl(sec, ctx);
       if (ctx.S.mode === 'work') { gainSliders(sec, ctx, ['kP', 'kD']); lib.gainSlider(sec, ctx, 'kIx', 'k<sub>I</sub>', R.kI); } else specSliders(sec, ctx, { kI: true });
-      slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.1, max: 3, step: 0.05, sig: 2, get: () => ctx.st.kMaxFactor, set: (v) => { ctx.st.kMaxFactor = v; ctx.update(); } });
+      slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.1, max: 3, step: 0.05, sig: 2, ...bind(ctx, 'kMaxFactor') });
       lib.note(sec, ctx.S.mode === 'work' ? 'Enter your D.8 gains (problem panel: Use my gains), then drag a closed-loop pole along the locus to set k_I.' : 'Drag a closed-loop pole along the locus to set k_I.');
       if (ctx.S.mode === 'explore') readout(sec, ctx);
     },
@@ -695,9 +695,9 @@
       segmented(imp, {
         label: 'ż for the D term',
         options: [{ value: 'dirty', label: 'dirty derivative of z (D.10b)' }, { value: 'state', label: 'true ż (cheating)' }],
-        get: () => ctx.st.deriv, set: (v) => { ctx.st.deriv = v; ctx.update(); },
+        ...bind(ctx, 'deriv'),
       });
-      slider(imp, { label: 'σ', unit: 's', min: 0.002, max: 0.5, step: 0.001, sig: 3, hint: 'dirty-derivative bandwidth is 1/σ rad/s', get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); }, disabled: () => ctx.st.deriv !== 'dirty' });
+      slider(imp, { label: 'σ', unit: 's', min: 0.002, max: 0.5, step: 0.001, sig: 3, hint: 'dirty-derivative bandwidth is 1/σ rad/s', ...bind(ctx, 'sigma'), disabled: () => ctx.st.deriv !== 'dirty' });
       segmented(imp, {
         label: 'Anti-windup',
         options: [
@@ -705,12 +705,12 @@
           { value: 'backcalc', label: 'back-calculation', title: 'u_I += (u_sat − u_unsat)/k_I, p. 158' },
           { value: 'none', label: 'none' },
         ],
-        get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+        ...bind(ctx, 'antiwindup'),
       });
-      slider(imp, { label: 'v̄', unit: 'm/s', min: 0.005, max: 1, step: 0.005, sig: 3, get: () => ctx.st.vbar, set: (v) => { ctx.st.vbar = v; ctx.update(); }, disabled: () => ctx.st.antiwindup !== 'gate' });
+      slider(imp, { label: 'v̄', unit: 'm/s', min: 0.005, max: 1, step: 0.005, sig: 3, ...bind(ctx, 'vbar'), disabled: () => ctx.st.antiwindup !== 'gate' });
       segmented(imp, {
         label: 'Extra plot', options: [{ value: 'deriv', label: 'ż estimate' }, { value: 'int', label: 'integrator' }],
-        get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); },
+        ...bind(ctx, 'extra'),
       });
     },
 

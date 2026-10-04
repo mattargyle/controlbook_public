@@ -3,7 +3,7 @@
 // and Jacobian linearization (B.4), the transfer-function cascade (B.5), and the
 // state-space model (B.6). All open loop: the force is a prescribed input.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt } = M;
@@ -19,11 +19,11 @@
     segmented(parent, {
       label: title,
       options: Object.keys(names).map((s) => ({ value: s, label: names[s] })),
-      get: () => ctx.st.inp.shape, set: (v) => { ctx.st.inp.shape = v; ctx.update(); },
+      ...bind(ctx, 'shape', () => ctx.st.inp),
     });
-    slider(parent, { label: 'amplitude', unit: 'N', min: -ampMax, max: ampMax, step: ampMax / 500, sig: 3, get: () => ctx.st.inp.amp, set: (v) => { ctx.st.inp.amp = v; ctx.update(); }, disabled: () => ctx.st.inp.shape === 'zero' });
-    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.01, max: 3, step: 0.01, sig: 3, get: () => ctx.st.inp.freq, set: (v) => { ctx.st.inp.freq = v; ctx.update(); }, disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
-    slider(parent, { label: 'width', unit: 's', min: 0.02, max: 3, step: 0.01, sig: 3, get: () => ctx.st.inp.width, set: (v) => { ctx.st.inp.width = v; ctx.update(); }, disabled: () => ctx.st.inp.shape !== 'pulse' });
+    slider(parent, { label: 'amplitude', unit: 'N', min: -ampMax, max: ampMax, step: ampMax / 500, sig: 3, ...bind(ctx, 'amp', () => ctx.st.inp), disabled: () => ctx.st.inp.shape === 'zero' });
+    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.01, max: 3, step: 0.01, sig: 3, ...bind(ctx, 'freq', () => ctx.st.inp), disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
+    slider(parent, { label: 'width', unit: 's', min: 0.02, max: 3, step: 0.01, sig: 3, ...bind(ctx, 'width', () => ctx.st.inp), disabled: () => ctx.st.inp.shape !== 'pulse' });
   }
 
   const common = {
@@ -86,10 +86,10 @@
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Prescribed motion', 'p. 31 · B.2(b)');
-      slider(sec, { label: 'z amplitude', unit: 'm', min: 0, max: 1.5, step: 0.01, sig: 3, get: () => ctx.st.Az, set: (v) => { ctx.st.Az = v; ctx.update(); } });
-      slider(sec, { label: 'z frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, get: () => ctx.st.fz, set: (v) => { ctx.st.fz = v; ctx.update(); } });
-      slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 90, step: 1, sig: 3, get: () => ctx.st.Ath, set: (v) => { ctx.st.Ath = v; ctx.update(); } });
-      slider(sec, { label: 'θ frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, get: () => ctx.st.fth, set: (v) => { ctx.st.fth = v; ctx.update(); } });
+      slider(sec, { label: 'z amplitude', unit: 'm', min: 0, max: 1.5, step: 0.01, sig: 3, ...bind(ctx, 'Az') });
+      slider(sec, { label: 'z frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'fz') });
+      slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 90, step: 1, sig: 3, ...bind(ctx, 'Ath') });
+      slider(sec, { label: 'θ frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'fth') });
       sec.append(el('p', { class: 'muted small', text: 'z(t) = A_z sin(2πf_z t) and θ(t) = A_θ sin(2πf_θ t). No dynamics here: the motion is imposed, as in hw02_pendulumSim.py (which uses a square wave for θ). The plot below splits K into the cart, the rod\'s translation, and the rod\'s rotation.' }));
     },
 
@@ -154,7 +154,7 @@
       segmented(sec, {
         label: 'Extra plot',
         options: [{ value: 'energy', label: 'energy balance' }, { value: 'zd', label: 'ż' }, { value: 'thd', label: 'θ̇' }],
-        get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); },
+        ...bind(ctx, 'extra'),
       });
       sec.append(el('p', { class: 'muted small', text: 'hw03_pendulumSim.py pushes the cart with F = sin(2πt) N. Nothing holds the pendulum up, so it falls and swings under the track. The energy plot checks the EOM: E(t) − E(0) must equal the work done by F minus the friction loss.' }));
     },
@@ -250,9 +250,9 @@
       segmented(sec, {
         label: 'Equilibrium θ<sub>e</sub> = kπ',
         options: [{ value: 0, label: 'k even: upright (0°)' }, { value: 180, label: 'k odd: hanging (180°)' }],
-        get: () => ctx.st.thetaE, set: (v) => { ctx.st.thetaE = v; ctx.update(); },
+        ...bind(ctx, 'thetaE'),
       });
-      slider(sec, { label: 'δθ(0)', unit: '°', min: -30, max: 30, step: 0.5, sig: 3, hint: 'initial offset from θₑ (z(0) is in the left panel)', get: () => ctx.st.dth0, set: (v) => { ctx.st.dth0 = v; ctx.update(); } });
+      slider(sec, { label: 'δθ(0)', unit: '°', min: -30, max: 30, step: 0.5, sig: 3, hint: 'initial offset from θₑ (z(0) is in the left panel)', ...bind(ctx, 'dth0') });
       const inp = section(parent, 'Input F̃(t) (F_e = 0)', 'p. 66');
       inputControls(inp, ctx, { title: 'Input force F̃(t)', ampMax: 2 });
       inp.append(el('p', { class: 'muted small', text: 'Upright, a 2° tilt grows like e^{4.2t}: the linear model tracks the nonlinear one for a fraction of a second, then they part. Hanging, both oscillate and agree for small angles.' }));
@@ -344,7 +344,7 @@
     buildControls(parent, ctx) {
       pulseSection(parent, ctx, 'Input F̃(t)', 'p. 75');
       const md = section(parent, 'Linear model', 'p. 76');
-      segmented(md, { label: 'Damping in the dashed model', options: [{ value: true, label: 'b = 0 (B.5b)' }, { value: false, label: 'with b' }], get: () => ctx.st.b0, set: (v) => { ctx.st.b0 = v; ctx.update(); } });
+      segmented(md, { label: 'Damping in the dashed model', options: [{ value: true, label: 'b = 0 (B.5b)' }, { value: false, label: 'with b' }], ...bind(ctx, 'b0') });
     },
     splane: tfMarkers,
     math(ctx) {
@@ -404,7 +404,7 @@
     buildControls(parent, ctx) {
       pulseSection(parent, ctx, 'Input ũ = F̃(t)', 'p. 89');
       const ex = section(parent, 'Extra plot');
-      segmented(ex, { options: [{ value: 'zd', label: 'x₃ = ż' }, { value: 'thd', label: 'x₄ = θ̇' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(ex, { options: [{ value: 'zd', label: 'x₃ = ż' }, { value: 'thd', label: 'x₄ = θ̇' }], ...bind(ctx, 'extra') });
     },
     splane(ctx) {
       const { A } = ctx.sys.stateSpace(ctx.pModel);

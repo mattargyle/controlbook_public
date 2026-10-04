@@ -4,7 +4,7 @@
 // the state-space model (D.6). Derived results stay in `symbolic`/`numbers`
 // (hidden in Work mode); `theory` lines show only the book's general formulas.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt } = M;
@@ -33,13 +33,13 @@
     const names = { zero: 'none', const: 'constant', pulse: 'pulse', square: 'square', sine: 'sine' };
     segmented(parent, {
       label, options: Object.keys(names).map((s) => ({ value: s, label: names[s] })),
-      get: () => ctx.st.inp.shape, set: (v) => { ctx.st.inp.shape = v; ctx.update(); },
+      ...bind(ctx, 'shape', () => ctx.st.inp),
     });
-    slider(parent, { label: 'amplitude', unit: 'N', min: -6, max: 6, step: 0.01, sig: 3, get: () => ctx.st.inp.amp, set: (v) => { ctx.st.inp.amp = v; ctx.update(); }, disabled: () => ctx.st.inp.shape === 'zero' });
-    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.005, max: 1, step: 0.005, sig: 3, get: () => ctx.st.inp.freq, set: (v) => { ctx.st.inp.freq = v; ctx.update(); }, disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
-    slider(parent, { label: 'width', unit: 's', min: 0.1, max: 10, step: 0.1, sig: 3, get: () => ctx.st.inp.width, set: (v) => { ctx.st.inp.width = v; ctx.update(); }, disabled: () => ctx.st.inp.shape !== 'pulse' });
+    slider(parent, { label: 'amplitude', unit: 'N', min: -6, max: 6, step: 0.01, sig: 3, ...bind(ctx, 'amp', () => ctx.st.inp), disabled: () => ctx.st.inp.shape === 'zero' });
+    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.005, max: 1, step: 0.005, sig: 3, ...bind(ctx, 'freq', () => ctx.st.inp), disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
+    slider(parent, { label: 'width', unit: 's', min: 0.1, max: 10, step: 0.1, sig: 3, ...bind(ctx, 'width', () => ctx.st.inp), disabled: () => ctx.st.inp.shape !== 'pulse' });
     if (comps) {
-      segmented(parent, { label: 'Added to F<sub>in</sub>', options: comps, get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); } });
+      segmented(parent, { label: 'Added to F<sub>in</sub>', options: comps, ...bind(ctx, 'comp') });
     }
   }
 
@@ -53,10 +53,7 @@
     return { markers: L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `${label} ${i + 1}` })) };
   }
   function revealPolesButton(parent, ctx) {
-    if (ctx.S.mode !== 'work') return;
-    const b = el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the s-plane (eigenvalues)', onclick: () => { ctx.app.reveal('D:poles'); ctx.update(); } });
-    WB.ui.addRefresher(() => { b.hidden = ctx.app.isRevealed('D:poles'); });
-    parent.append(b);
+    if (ctx.S.mode === 'work') parent.append(WB.ui.revealButton(ctx, 'D:poles', 'Reveal the s-plane (eigenvalues)', { hideWhenShown: true }));
   }
   const zSeries = (res) => res.x.map((x) => x[1]);
 
@@ -84,13 +81,13 @@
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Prescribed motion z(t) = A sin(2πft)', 'p. 378 · D.2(b)');
-      slider(sec, { label: 'A', unit: 'm', min: 0, max: 2, step: 0.01, sig: 3, get: () => ctx.st.A, set: (v) => { ctx.st.A = v; ctx.update(); } });
-      slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, get: () => ctx.st.f, set: (v) => { ctx.st.f = v; ctx.update(); } });
+      slider(sec, { label: 'A', unit: 'm', min: 0, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'A') });
+      slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'f') });
       lib.note(sec, 'No dynamics here: the motion is imposed, as in a hw02 animation script. The plot below shows the kinetic energy along that motion.');
     },
 
     extraPlot(ctx, res) {
-      const show = ctx.S.mode === 'explore' || ctx.app.isRevealed('D:ch2:K');
+      const show = WB.ui.shown(ctx, 'D:ch2:K');
       if (!show) return { opts: { title: 'ż(t)', yLabel: 'ż [m/s]', unit: 'm/s' }, data: { series: [{ label: 'ż', y: zSeries(res), color: '--series-1' }] } };
       return { opts: { title: 'kinetic energy K(t)', yLabel: 'K [J]', unit: 'J' }, data: { series: [{ label: 'K', y: Array.from(res.extras.K), color: '--series-1' }] } };
     },
@@ -243,16 +240,16 @@
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Operating point', 'p. 59–60');
-      slider(sec, { label: 'z<sub>e</sub>', unit: 'm', min: -1, max: 2, step: 0.01, sig: 3, get: () => ctx.st.zE, set: (v) => { ctx.st.zE = v; ctx.update(); } });
-      slider(sec, { label: 'δz(0)', unit: 'm', min: -1, max: 1, step: 0.01, sig: 3, hint: 'initial offset from zₑ', get: () => ctx.st.dz0, set: (v) => { ctx.st.dz0 = v; ctx.update(); } });
+      slider(sec, { label: 'z<sub>e</sub>', unit: 'm', min: -1, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'zE') });
+      slider(sec, { label: 'δz(0)', unit: 'm', min: -1, max: 1, step: 0.01, sig: 3, hint: 'initial offset from zₑ', ...bind(ctx, 'dz0') });
       segmented(sec, {
         label: 'Linearization',
         options: [{ value: 'jacobian', label: 'Jacobian: F = F<sub>e</sub> + F̃' }, { value: 'fl', label: 'feedback: F = F<sub>fl</sub>(z) + F̃' }],
-        get: () => ctx.st.method, set: (v) => { ctx.st.method = v; ctx.update(); },
+        ...bind(ctx, 'method'),
       });
       if (ctx.S.mode === 'work') {
-        slider(sec, { label: 'your F<sub>e</sub>', unit: 'N', min: -10, max: 10, step: 0.01, sig: 3, get: () => ctx.st.FeW, set: (v) => { ctx.st.FeW = v; ctx.update(); }, disabled: () => ctx.st.method !== 'jacobian' });
-        slider(sec, { label: 'your c (F = cz + F̃)', unit: 'N/m', min: -10, max: 10, step: 0.01, sig: 3, get: () => ctx.st.cW, set: (v) => { ctx.st.cW = v; ctx.update(); }, disabled: () => ctx.st.method !== 'fl' });
+        slider(sec, { label: 'your F<sub>e</sub>', unit: 'N', min: -10, max: 10, step: 0.01, sig: 3, ...bind(ctx, 'FeW'), disabled: () => ctx.st.method !== 'jacobian' });
+        slider(sec, { label: 'your c (F = cz + F̃)', unit: 'N/m', min: -10, max: 10, step: 0.01, sig: 3, ...bind(ctx, 'cW'), disabled: () => ctx.st.method !== 'fl' });
         lib.note(sec, 'Work mode applies your F_e (Jacobian) or your c (feedback). Test an answer: with the right F_e the mass settles at zₑ. Explore applies the correct values.');
       } else {
         lib.note(sec, 'Explore applies the correct equilibrium or feedback-linearizing force.');

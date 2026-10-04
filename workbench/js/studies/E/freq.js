@@ -11,7 +11,7 @@ WB.studies = WB.studies || {};
 WB.studies.E = WB.studies.E || { chapters: {} };
 
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const T = WB.tf;
@@ -50,7 +50,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     sec.append(el('div', { class: 'btn-row' },
       el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.8 specs', onclick: () => { Object.assign(ctx.st, { trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0 }); ctx.update(); } }),
       el('button', { type: 'button', class: 'btn btn-quiet', text: 'E.10 sample design', title: 'the robust design from the E.10 solution', onclick: () => { Object.assign(ctx.st, E10_SAMPLE); ctx.update(); } })));
-    const show = () => ctx.S.mode === 'explore' || ctx.app.isRevealed(`E:${ctx.S.chapter}:gains`);
+    const show = () => WB.ui.shown(ctx, `E:${ctx.S.chapter}:gains`);
     const box = el('div');
     sec.append(box);
     WB.ui.addRefresher(() => {
@@ -58,26 +58,24 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         const g = loopsOf(ctx).g;
         box.replaceChildren(el('div', { class: 'readout wrap' }, ...[['kPθ', g.kPth], ['kDθ', g.kDth], ['kPz', g.kPz], ['kDz', g.kDz], ['kIz', g.kIz], ['kIθ', g.kIth]].map(([k, v]) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: fmt(v, 4) })))));
       } else {
-        box.replaceChildren(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the gains', onclick: () => { ctx.app.reveal(`E:${ctx.S.chapter}:gains`); ctx.update(); } }));
+        box.replaceChildren(WB.ui.revealButton(ctx, `E:${ctx.S.chapter}:gains`, 'Reveal the gains'));
       }
     });
     return sec;
   }
   // Closed-loop poles from the designed gains would give away E.8, so in Work mode
   // they appear only after "Reveal the gains".
-  const gainsShown = (ctx) => ctx.S.mode === 'explore' || ctx.app.isRevealed(`E:${ctx.S.chapter}:gains`);
+  const gainsShown = (ctx) => WB.ui.shown(ctx, `E:${ctx.S.chapter}:gains`);
   function loopToggle(parent, ctx, label = 'Loop') {
     segmented(parent, {
       label, options: [{ value: 'in', label: 'inner (θ)' }, { value: 'out', label: 'outer (z)' }],
-      get: () => ctx.st.loop, set: (v) => { ctx.st.loop = v; ctx.update(); },
+      ...bind(ctx, 'loop'),
     });
   }
   const E10_SAMPLE = { trTh: 0.15, zetaTh: 0.707, M: 8, zetaZ: 0.707, kIz: -0.05, kIth: 20 };
   const freqDefaults = (extra = {}) => ({ comp: 'fl', trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0, sigma: 0.05, loop: 'in', vbar: 0.05, ...extra });
   const nestedCtl = (ctx, o) => E.nestedPID(ctx, loopsOf(ctx).g, { comp: 'fl', meas: 'dirty', sigma: ctx.st.sigma, antiwindup: 'gate', vbar: ctx.st.vbar }, o);
-  const showOf = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isRevealed(key);
-  const revealBtn = (ctx, key, text) => el('button', { type: 'button', class: 'btn btn-quiet', text, onclick: () => { ctx.app.reveal(key); WB.ui.refreshAll(); } });
-  const metricRow = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
+  const metricRow = WB.ui.metric;
   function loopMarkers(ctx, Lg) {
     const mk = [{ re: 0, im: 0, kind: 'ol', label: 'double pole of the plant' }];
     // The dirty-derivative pole near −1/σ would squash everything else; leave it off-scale.
@@ -98,8 +96,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     buildControls(parent, ctx) {
       const sec = section(parent, 'Bode plot', 'p. 266 · §15.1.3');
       loopToggle(sec, ctx, 'Plant');
-      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, get: () => ctx.st.w0, set: (v) => { ctx.st.w0 = v; ctx.update(); } });
-      segmented(sec, { label: 'Inner plant: also show the full E.5(b) model', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => ctx.st.full, set: (v) => { ctx.st.full = v; ctx.update(); } });
+      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, ...bind(ctx, 'w0') });
+      segmented(sec, { label: 'Inner plant: also show the full E.5(b) model', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'full') });
       sec.append(el('p', { class: 'muted small', text: 'Sketch the straight-line approximation by hand first, then compare. The time plots show the E.8 nested loop for reference.' }));
     },
 
@@ -109,7 +107,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const lines = [{ label: inner ? 'P_in(jω) (E.5c)' : 'P_out(jω)', ...T.bode(P, W), color: '--series-1' }];
       if (inner && ctx.st.full) lines.push({ label: 'full Θ̃/F̃ (E.5b)', ...T.bode(PinFull(ctx), W), color: '--text-muted', dash: [5, 4], width: 1.5 });
       const g = T.at(P, ctx.st.w0);
-      const show = showOf(ctx, 'E:ch15:w0');
+      const show = WB.ui.shown(ctx, 'E:ch15:w0');
       return { title: inner ? 'Bode: inner plant F̃ → θ̃' : 'Bode: outer plant θ̃ → z̃', w: W, lines,
         marks: [{ w: ctx.st.w0, label: show ? `ω₀: ${fmt(db(L.C.abs(g)), 3)} dB` : 'ω₀', color: '--series-3' }] };
     },
@@ -195,20 +193,20 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       sec.append(box);
       WB.ui.addRefresher(() => {
         const s = this.specs(ctx), st = ctx.st;
-        box.replaceChildren(...(showOf(ctx, 'E:ch16:specs') ? [
+        box.replaceChildren(...(WB.ui.shown(ctx, 'E:ch16:specs') ? [
           metricRow(`inner tracking below ${st.wr} rad/s: 1/|L_in|`, pct(s.gr)),
           metricRow(`inner d_in below ${st.wdin} rad/s: 1/k_Pθ`, pct(s.gdin)),
           metricRow(`inner noise above ${st.wno} rad/s: |L_in|`, pct(s.gn)),
           metricRow(`outer d_out below ${st.wdout} rad/s: 1/|L_out|`, pct(s.gdout)),
           metricRow(`outer error to ${st.Asin} sin(${st.wsin}t): A|S|`, fmt(s.esin, 3)),
-        ] : [revealBtn(ctx, 'E:ch16:specs', 'Reveal the spec readouts')]));
+        ] : [WB.ui.revealButton(ctx, 'E:ch16:specs', 'Reveal the spec readouts')]));
       });
     },
 
     bode(ctx) {
       const s = this.specs(ctx), st = ctx.st, inner = st.loop === 'in';
       const P = inner ? Pin(ctx) : Pout(ctx), Lg = inner ? s.Lin : s.Lout;
-      const show = showOf(ctx, 'E:ch16:specs');
+      const show = WB.ui.shown(ctx, 'E:ch16:specs');
       const marks = inner
         ? [{ w: st.wr, label: 'ω_r' }, { w: st.wdin, label: 'ω_d,in' }, { w: st.wno, label: 'ω_no' }]
         : [{ w: st.wdout, label: 'ω_d,out' }, { w: st.wsin, label: '0.6 rad/s' }];
@@ -296,13 +294,13 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     buildControls(parent, ctx) {
       knobSection(parent, ctx, 'Gains (default: E.8 specs)', 'p. 391 · E.17');
       const sec = section(parent, 'Margins', 'p. 303–306');
-      segmented(sec, { label: 'Bode shows', options: [{ value: 'both', label: 'both loops' }, { value: 'in', label: 'inner' }, { value: 'out', label: 'outer' }], get: () => ctx.st.loop, set: (v) => { ctx.st.loop = v; ctx.update(); } });
+      segmented(sec, { label: 'Bode shows', options: [{ value: 'both', label: 'both loops' }, { value: 'in', label: 'inner' }, { value: 'out', label: 'outer' }], ...bind(ctx, 'loop') });
       const box = el('div', { class: 'metrics' });
       sec.append(box);
       WB.ui.addRefresher(() => {
         const l = this.loops(ctx);
         const gm = WB.freq.gmText;
-        box.replaceChildren(...(showOf(ctx, 'E:ch17:m') ? [
+        box.replaceChildren(...(WB.ui.shown(ctx, 'E:ch17:m') ? [
           metricRow('inner PM', `${fmt(l.mi.pm, 3)}° at ${fmt(l.mi.wc, 3)} rad/s`),
           metricRow('inner GM', gm(l.mi)),
           metricRow('inner bandwidth', `${fmt(l.bwIn, 3)} rad/s`),
@@ -310,13 +308,13 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           metricRow('outer GM', gm(l.mo)),
           metricRow('outer bandwidth', `${fmt(l.bwOut, 3)} rad/s`),
           metricRow('separation ω_bw,in / ω_bw,out', fmt(l.bwIn / l.bwOut, 3)),
-        ] : [revealBtn(ctx, 'E:ch17:m', 'Reveal the margins')]));
+        ] : [WB.ui.revealButton(ctx, 'E:ch17:m', 'Reveal the margins')]));
       });
     },
 
     bode(ctx) {
       const l = this.loops(ctx), which = ctx.st.loop;
-      const show = showOf(ctx, 'E:ch17:m');
+      const show = WB.ui.shown(ctx, 'E:ch17:m');
       const lines = [], marks = [];
       if (which !== 'out') {
         lines.push({ label: 'L_in open', ...T.bode(l.Lin, W), color: '--series-1' }, { label: 'T_in closed', ...T.bode(l.Tin, W), color: '--series-1', dash: [5, 4], width: 1.5 });
@@ -450,39 +448,38 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         ? 'C_in = k · lead · lag · LPF on P_in from E.5.'
         : 'C_out = −k · (s + z_I)/s · lead · lag · LPF on P = P_out · T_in. The minus sign makes the loop gain positive (P_out has a negative gain).' }));
       const g = section(parent, which === 'in' ? 'Inner gain k' : 'Outer gain k (applied as −k)', 'p. 324');
-      slider(g, { label: 'k', min: which === 'in' ? 0.1 : 1e-4, max: which === 'in' ? 1000 : 10, log: true, sig: 4, get: () => b.k, set: (v) => { b.k = v; ctx.update(); } });
-      const onOff = (sec, blk) => segmented(sec, { options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], get: () => b[blk].on, set: (v) => { b[blk].on = v; ctx.update(); } });
+      slider(g, { label: 'k', min: which === 'in' ? 0.1 : 1e-4, max: which === 'in' ? 1000 : 10, log: true, sig: 4, ...bind(ctx, 'k', () => b) });
+      const onOff = (sec, blk) => WB.ui.onOff(sec, ctx, () => b[blk]);
       if (which === 'out') {
         const pi = section(parent, 'Integrator (s + z_I)/s', 'p. 324–325 · §18.1.2');
         onOff(pi, 'pi');
-        slider(pi, { label: 'z<sub>I</sub>', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, get: () => b.pi.z, set: (v) => { b.pi.z = v; ctx.update(); }, disabled: () => !b.pi.on });
+        slider(pi, { label: 'z<sub>I</sub>', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, ...bind(ctx, 'z', () => b.pi), disabled: () => !b.pi.on });
       }
       const ld = section(parent, 'Lead M(s + ω/√M)/(s + ω√M)', 'p. 328 · Eq. 18.2');
       onOff(ld, 'lead');
-      slider(ld, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.01, max: 1000, log: true, sig: 3, get: () => b.lead.w, set: (v) => { b.lead.w = v; ctx.update(); }, disabled: () => !b.lead.on });
-      slider(ld, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, get: () => b.lead.M, set: (v) => { b.lead.M = v; ctx.update(); }, disabled: () => !b.lead.on });
+      slider(ld, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.01, max: 1000, log: true, sig: 3, ...bind(ctx, 'w', () => b.lead), disabled: () => !b.lead.on });
+      slider(ld, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, ...bind(ctx, 'M', () => b.lead), disabled: () => !b.lead.on });
       const lp = el('p', { class: 'muted small' });
       ld.append(lp);
       WB.ui.addRefresher(() => { lp.textContent = `max phase added: ${fmt(Math.asin((b.lead.M - 1) / (b.lead.M + 1)) * 180 / Math.PI, 3)}° at ω_lead`; });
       const lg = section(parent, 'Lag (s + z)/(s + z/M)', 'p. 325 · Eq. 18.1');
       onOff(lg, 'lag');
-      slider(lg, { label: 'z', unit: 'rad/s', min: 0.001, max: 100, log: true, sig: 3, get: () => b.lag.z, set: (v) => { b.lag.z = v; ctx.update(); }, disabled: () => !b.lag.on });
-      slider(lg, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, get: () => b.lag.M, set: (v) => { b.lag.M = v; ctx.update(); }, disabled: () => !b.lag.on });
+      slider(lg, { label: 'z', unit: 'rad/s', min: 0.001, max: 100, log: true, sig: 3, ...bind(ctx, 'z', () => b.lag), disabled: () => !b.lag.on });
+      slider(lg, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, ...bind(ctx, 'M', () => b.lag), disabled: () => !b.lag.on });
       const lf = section(parent, 'Low-pass p/(s + p)', 'p. 325');
       onOff(lf, 'lpf');
-      slider(lf, { label: 'p', unit: 'rad/s', min: 1, max: 5000, log: true, sig: 3, get: () => b.lpf.p, set: (v) => { b.lpf.p = v; ctx.update(); }, disabled: () => !b.lpf.on });
+      slider(lf, { label: 'p', unit: 'rad/s', min: 1, max: 5000, log: true, sig: 3, ...bind(ctx, 'p', () => b.lpf), disabled: () => !b.lpf.on });
       const pf = section(parent, 'Prefilter F(s) = p/(s + p) on z̃_r', 'p. 336 · Eq. 18.5–18.7');
-      segmented(pf, { options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], get: () => st.d.pf.on, set: (v) => { st.d.pf.on = v; ctx.update(); } });
-      slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, get: () => st.d.pf.p, set: (v) => { st.d.pf.p = v; ctx.update(); }, disabled: () => !st.d.pf.on });
-      segmented(pf, { label: 'Bode: closed loop', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => st.showT, set: (v) => { st.showT = v; ctx.update(); } });
+      WB.ui.onOff(pf, ctx, () => st.d.pf);
+      slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'p', () => st.d.pf), disabled: () => !st.d.pf.on });
+      segmented(pf, { label: 'Bode: closed loop', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT', () => st) });
 
       const sp = section(parent, 'E.18 specs', 'p. 392');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
       WB.ui.addRefresher(() => {
         const d = lsDesign(ctx), pr = ctx.sys.problems.ch18;
-        const row = (label, ok, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: label }), el('strong', { text: v }),
-          el('span', { class: 'status ' + (ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: ok ? '✓' : '✗' }), el('span', { text: ok ? 'met' : 'not met' })));
+        const row = WB.ui.specRow;
         box.replaceChildren(
           row(`inner |L| ≥ ${fmt(db(1 / pr.inner.gr), 3)} dB below ${pr.inner.wr} rad/s`, d.si.lowOk, `${fmt(db(d.si.lo), 3)} dB`),
           row(`inner |L| ≤ ${fmt(db(pr.inner.gn), 3)} dB above ${pr.inner.wn} rad/s`, d.si.highOk, `${fmt(db(d.si.hi), 3)} dB`),

@@ -382,7 +382,7 @@ WB.studies.D = WB.studies.D || { chapters: {} };
 
   // ------------------------------------------------------------ shared kit --
   // Small helpers every D chapter uses. Problem panels come from WB.design.
-  const { el, slider } = WB.ui;
+  const { el, slider, bind } = WB.ui;
   const lib = {
     panel: (...a) => WB.design.problemPanel(...a),
     check: (...a) => WB.design.checkNumbers(...a),
@@ -398,23 +398,17 @@ WB.studies.D = WB.studies.D || { chapters: {} };
       });
     },
     gainSlider(parent, ctx, key, label, max, { min = 0, step, obj } = {}) {
-      const o = () => (obj ? ctx.st[obj] : ctx.st);
-      return slider(parent, { label, min, max, step: step || (max - min) / 2000, sig: 4, get: () => o()[key], set: (v) => { o()[key] = v; ctx.update(); } });
+      return slider(parent, { label, min, max, step: step || (max - min) / 2000, sig: 4, ...bind(ctx, key, () => (obj ? ctx.st[obj] : ctx.st)) });
     },
     readout(parent, ctx, keys, vals) {
-      const box = el('div', { class: 'readout wrap' });
-      parent.append(box);
-      WB.ui.addRefresher(() => {
-        const v = vals();
-        box.replaceChildren(...keys.map((k) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: M.fmt(v[k], 4) }))));
-      });
+      WB.ui.readout(parent, () => { const v = vals(); return keys.map((k) => [k, v[k]]); });
     },
     note(parent, text) { parent.append(el('p', { class: 'muted small', text })); },
     // Error |r - y| just before the first square-wave switch (or at t_end).
     errorBeforeSwitch(ctx) {
       const res = ctx.app.result(), S = ctx.S;
-      const tSw = S.sim.type === 'square' ? S.sim.tStep + 0.5 / S.sim.frequency : S.sim.tEnd;
-      const i = Math.min(res.t.length - 1, Math.max(0, Math.round((tSw - 0.05) / S.sim.Ts)));
+      const tSw = WB.sim.switchTime(S);
+      const i = WB.sim.indexBefore(S, res, tSw);
       return { e: Math.abs(res.r[i] - res.y[i]), t: res.t[i], amp: Math.abs(S.sim.amplitude) };
     },
     polesOf(list) { return list.map((p) => M.fmtPole(p)).join(', '); },

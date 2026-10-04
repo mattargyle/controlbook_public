@@ -6,7 +6,7 @@
 // its DC gain, as in F.8). Ch 18 designs the outer loop on P_out·T_in instead,
 // with the current inner design, so the loops really are designed in succession.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const T = WB.tf;
@@ -50,7 +50,7 @@
       options: [{ value: 'mine', label: 'my F.10 gains (Ch 10 tab)' }, { value: 'ref', label: 'reference F.10 design' }],
       get: () => (ctx.S.mode === 'explore' ? 'ref' : ctx.st.src), set: (v) => { ctx.st.src = v; ctx.update(); },
     });
-    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); } });
+    slider(sec, { label: 'σ', unit: 's', min: 0.005, max: 0.3, step: 0.001, sig: 3, ...bind(ctx, 'sigma') });
     F.readout(sec, ctx, ALL.map((k) => ({ key: k, label: k })), () => f10Gains(ctx));
     sec.append(el('p', { class: 'muted small', text: ctx.S.mode === 'work' ? 'Answers below are computed from the gains selected here, so you can check your own design. The reference design reveals the F.8/F.10 gains.' : 'Explore mode uses the reference F.10 design.' }));
     return sec;
@@ -119,19 +119,19 @@
     },
     buildControls(parent, ctx) {
       const sec = section(parent, 'Plant and sinusoid', 'p. 264 · Eq. 15.4');
-      segmented(sec, { label: 'Transfer function', options: [{ value: 'lon', label: 'F̃ → h (a)' }, { value: 'inner', label: 'τ → θ (b)' }, { value: 'outer', label: 'θ → z (c)' }], get: () => ctx.st.loop, set: (v) => { ctx.st.loop = v; ctx.update(); } });
-      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, get: () => ctx.st.w0, set: (v) => { ctx.st.w0 = v; ctx.update(); } });
-      slider(sec, { label: 'A (F̃)', unit: 'N', min: 0, max: 3, step: 0.01, sig: 3, get: () => ctx.st.AF, set: (v) => { ctx.st.AF = v; ctx.update(); }, disabled: () => ctx.st.loop !== 'lon' });
-      slider(sec, { label: 'A (τ)', unit: 'N·m', min: 0, max: 0.05, step: 0.0001, sig: 3, get: () => ctx.st.AT, set: (v) => { ctx.st.AT = v; ctx.update(); }, disabled: () => ctx.st.loop === 'lon' });
-      segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], get: () => ctx.st.asym, set: (v) => { ctx.st.asym = v; ctx.update(); } });
-      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch15')) sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the straight-line approximation and |P(jω₀)|', onclick: () => { ctx.app.reveal('F:ch15'); ctx.update(); } }));
+      segmented(sec, { label: 'Transfer function', options: [{ value: 'lon', label: 'F̃ → h (a)' }, { value: 'inner', label: 'τ → θ (b)' }, { value: 'outer', label: 'θ → z (c)' }], ...bind(ctx, 'loop') });
+      slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'w0') });
+      slider(sec, { label: 'A (F̃)', unit: 'N', min: 0, max: 3, step: 0.01, sig: 3, ...bind(ctx, 'AF'), disabled: () => ctx.st.loop !== 'lon' });
+      slider(sec, { label: 'A (τ)', unit: 'N·m', min: 0, max: 0.05, step: 0.0001, sig: 3, ...bind(ctx, 'AT'), disabled: () => ctx.st.loop === 'lon' });
+      segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'asym') });
+      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('F:ch15')) sec.append(WB.ui.revealButton(ctx, 'F:ch15', 'Reveal the straight-line approximation and |P(jω₀)|'));
       sec.append(el('p', { class: 'muted small', text: 'Open loop around hover, started on the steady-state sinusoid so the plant does not drift. θ → z is driven through τ: the θ sinusoid then moves z. Dotted traces: the Bode prediction.' }));
     },
     bode(ctx) {
       const P = plants(ctx.pModel), G = P[ctx.st.loop];
       const { mag, phase } = T.bode(G, W);
       const lines = [{ label: `P_${ctx.st.loop}(jω)`, mag, phase, color: '--series-1' }];
-      const show = F.shown(ctx, 'F:ch15');   // asymptotes and |P(jω₀)| answer F.15
+      const show = WB.ui.shown(ctx, 'F:ch15');   // asymptotes and |P(jω₀)| answer F.15
       if (ctx.st.asym && show) {
         if (ctx.st.loop === 'outer') {
           const a = P.m.a, Kb = Math.abs(G.num[0]) / a;
@@ -210,12 +210,12 @@
     buildControls(parent, ctx) {
       srcControls(parent, ctx);
       const sec = section(parent, 'Loop shown in the Bode plot', 'p. 284–290');
-      segmented(sec, { options: [{ value: 'lon', label: 'altitude (a, b)' }, { value: 'inner', label: 'inner θ (c, d)' }, { value: 'outer', label: 'outer z (e, f)' }], get: () => ctx.st.view, set: (v) => { ctx.st.view = v; ctx.update(); } });
+      segmented(sec, { options: [{ value: 'lon', label: 'altitude (a, b)' }, { value: 'inner', label: 'inner θ (c, d)' }, { value: 'outer', label: 'outer z (e, f)' }], ...bind(ctx, 'view') });
       const box = el('div', { class: 'metrics' });
       sec.append(box);
       WB.ui.addRefresher(() => {
         const s = specs16(ctx), pr = ctx.sys.problems.ch16;
-        const show = F.shown(ctx, 'F:ch16');
+        const show = WB.ui.shown(ctx, 'F:ch16');
         box.replaceChildren(...(show ? [
           F.metricRow('(a) parabola r̈ = 5: e_ss (book / D on h)', `${fmt(s.ePar, 3)} / ${isFinite(s.eParImpl) ? fmt(s.eParImpl, 3) : '∞'} m`),
           F.metricRow(`(b) noise above ${pr.wno} rad/s: |PC|`, `${fmt(100 * s.gn, 3)} %`),
@@ -223,14 +223,14 @@
           F.metricRow('(d) 1° of θ noise → < 0.1° above', `${fmt(s.wSensor, 3)} rad/s`),
           F.metricRow(`(e) tracking below ${pr.wr} rad/s: 1/|PC|`, `${fmt(100 * s.gr, 3)} %`),
           F.metricRow(`(f) d_out below ${pr.wdout} rad/s: 1/|PC|`, `${fmt(100 * s.gout, 3)} %`),
-        ] : [F.revealButton(ctx, 'F:ch16', 'Reveal the spec readouts')]));
+        ] : [WB.ui.revealButton(ctx, 'F:ch16', 'Reveal the spec readouts')]));
       });
-      segmented(sec, { label: 'Outer plant', options: [{ value: false, label: 'inner loop = k_DC (F.8)' }, { value: true, label: 'with inner dynamics' }], get: () => ctx.st.innerDyn, set: (v) => { ctx.st.innerDyn = v; ctx.update(); } });
+      segmented(sec, { label: 'Outer plant', options: [{ value: false, label: 'inner loop = k_DC (F.8)' }, { value: true, label: 'with inner dynamics' }], ...bind(ctx, 'innerDyn') });
     },
     bode(ctx) {
       const s = specs16(ctx), pr = ctx.sys.problems.ch16, lp = s.lp, v = ctx.st.view;
       // spec bands and marks show the F.16 answers, so only after Reveal in Work mode
-      const show = F.shown(ctx, 'F:ch16');
+      const show = WB.ui.shown(ctx, 'F:ch16');
       if (v === 'lon') {
         return { title: 'Altitude: P and PC (F.10 PID)', w: W, lines: [{ label: 'P_lon', ...T.bode(lp.P.lon, W), color: '--text-muted', width: 1.5 }, { label: 'P·C_PID', ...T.bode(lp.Ll, W), color: '--series-1' }],
           specs: show ? [{ w0: pr.wno, w1: 1e4, db: db(s.gn), keep: 'below', color: '--series-3', label: `${fmt(db(s.gn), 3)} dB` }] : [],
@@ -320,14 +320,14 @@
     buildControls(parent, ctx) {
       srcControls(parent, ctx);
       const sec = section(parent, 'Margins', 'p. 304–306');
-      segmented(sec, { label: 'Bode plot', options: [{ value: 'lon', label: 'altitude (a)' }, { value: 'lat', label: 'inner + outer (b–d)' }], get: () => ctx.st.view, set: (v) => { ctx.st.view = v; ctx.update(); } });
-      segmented(sec, { label: 'Outer controller', options: [{ value: true, label: 'PD (as F.17c says)' }, { value: false, label: 'PID (with k_I,z)' }], get: () => ctx.st.pdOuter, set: (v) => { ctx.st.pdOuter = v; ctx.update(); } });
-      segmented(sec, { label: 'Outer plant', options: [{ value: false, label: 'inner = k_DC' }, { value: true, label: 'with inner dynamics' }], get: () => ctx.st.innerDyn, set: (v) => { ctx.st.innerDyn = v; ctx.update(); } });
+      segmented(sec, { label: 'Bode plot', options: [{ value: 'lon', label: 'altitude (a)' }, { value: 'lat', label: 'inner + outer (b–d)' }], ...bind(ctx, 'view') });
+      segmented(sec, { label: 'Outer controller', options: [{ value: true, label: 'PD (as F.17c says)' }, { value: false, label: 'PID (with k_I,z)' }], ...bind(ctx, 'pdOuter') });
+      segmented(sec, { label: 'Outer plant', options: [{ value: false, label: 'inner = k_DC' }, { value: true, label: 'with inner dynamics' }], ...bind(ctx, 'innerDyn') });
       const box = el('div', { class: 'metrics' });
       sec.append(box);
       WB.ui.addRefresher(() => {
         const r = margins17(ctx);
-        const show = F.shown(ctx, 'F:ch17');
+        const show = WB.ui.shown(ctx, 'F:ch17');
         const rows = [];
         if (show) {
           for (const k of ['lon', 'inner', 'outer']) {
@@ -335,12 +335,12 @@
             rows.push(F.metricRow(`${LOOPS[k]}: GM; bandwidth`, `${gmText(r[k].mg)}; ${fmt(r[k].bw, 3)} rad/s`));
           }
           rows.push(F.metricRow('separation ω_bw,in / ω_bw,out', fmt(r.sep, 3)));
-        } else rows.push(F.revealButton(ctx, 'F:ch17', 'Reveal the margins'));
+        } else rows.push(WB.ui.revealButton(ctx, 'F:ch17', 'Reveal the margins'));
         box.replaceChildren(...rows);
       });
     },
     bode(ctx) {
-      const r = margins17(ctx), show = F.shown(ctx, 'F:ch17');
+      const r = margins17(ctx), show = WB.ui.shown(ctx, 'F:ch17');
       if (ctx.st.view === 'lon') {
         const marks = show ? marginMarks(r.lon.mg) : [];
         if (show && isFinite(r.lon.bw)) marks.push({ w: r.lon.bw, label: `bandwidth ${fmt(r.lon.bw, 3)}`, color: '--series-2' });
@@ -495,46 +495,44 @@
     buildControls(parent, ctx) {
       const st = ctx.st;
       const top = section(parent, 'Loop being shaped', 'F.18 p. 403');
-      segmented(top, { options: Object.entries(LOOPS).map(([v, l]) => ({ value: v, label: l })), get: () => st.loop, set: (v) => { st.loop = v; ctx.update(); } });
+      segmented(top, { options: Object.entries(LOOPS).map(([v, l]) => ({ value: v, label: l })), ...bind(ctx, 'loop', () => st) });
       top.append(el('div', { class: 'btn-row' },
         el('button', { type: 'button', class: 'btn', text: 'Start over (lead only)', onclick: () => { const A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; A[st.loop] = st[st.loop] = START[st.loop](); A[st.loop].k = autoK(ctx, st.loop); ctx.update(); } }),
         el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference design (reveals answer)', onclick: () => { const r = refState(ctx), A = st[ctx.S.mode === 'explore' ? 'X' : 'W']; for (const w of ['lon', 'inner', 'outer']) A[w] = st[w] = r[w]; ctx.update(); } })));
       top.append(el('p', { class: 'muted small', text: 'C = k·PI·lead·lag·LPF·LPF (outer loop: −k·…). The outer plant includes the current inner closed loop, so shape the inner loop first.' }));
       const c = () => st[st.loop];
-      const set = (path, key) => (v) => { c()[path][key] = v; ctx.update(); };
-      const onOff = (sec, key) => segmented(sec, { options: [{ value: true, label: 'on' }, { value: false, label: 'off' }], get: () => c()[key].on, set: (v) => { c()[key].on = v; ctx.update(); } });
+      const onOff = (sec, key) => WB.ui.onOff(sec, ctx, () => c()[key]);
       const g = section(parent, 'Gain k', 'p. 324');
-      slider(g, { label: 'k', min: 1e-4, max: 100, log: true, sig: 4, get: () => c().k, set: (v) => { c().k = v; ctx.update(); } });
-      slider(g, { label: 'target ω<sub>co</sub>', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, get: () => c().wco, set: (v) => { c().wco = v; ctx.update(); } });
+      slider(g, { label: 'k', min: 1e-4, max: 100, log: true, sig: 4, ...bind(ctx, 'k', () => c()) });
+      slider(g, { label: 'target ω<sub>co</sub>', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'wco', () => c()) });
       g.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Set k for crossover at target ω_co', onclick: () => { c().k = autoK(ctx, st.loop); ctx.update(); } }));
       const pi = section(parent, 'PI (s + z_I)/s', 'p. 325');
       onOff(pi, 'pi');
-      slider(pi, { label: 'z<sub>I</sub>', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, get: () => c().pi.z, set: set('pi', 'z'), disabled: () => !c().pi.on });
+      slider(pi, { label: 'z<sub>I</sub>', unit: 'rad/s', min: 0.001, max: 10, log: true, sig: 3, ...bind(ctx, 'z', () => c().pi), disabled: () => !c().pi.on });
       const ld = section(parent, 'Lead M(s + ω/√M)/(s + ω√M)', 'p. 328 · Eq. 18.2');
       onOff(ld, 'lead');
-      slider(ld, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.05, max: 200, log: true, sig: 3, get: () => c().lead.w, set: set('lead', 'w'), disabled: () => !c().lead.on });
-      slider(ld, { label: 'M', min: 1.01, max: 100, log: true, sig: 3, get: () => c().lead.M, set: set('lead', 'M'), disabled: () => !c().lead.on });
+      slider(ld, { label: 'ω<sub>lead</sub>', unit: 'rad/s', min: 0.05, max: 200, log: true, sig: 3, ...bind(ctx, 'w', () => c().lead), disabled: () => !c().lead.on });
+      slider(ld, { label: 'M', min: 1.01, max: 100, log: true, sig: 3, ...bind(ctx, 'M', () => c().lead), disabled: () => !c().lead.on });
       const lg = section(parent, 'Lag (s + z)/(s + z/M)', 'p. 325 · Eq. 18.1');
       onOff(lg, 'lag');
-      slider(lg, { label: 'z', unit: 'rad/s', min: 0.001, max: 20, log: true, sig: 3, get: () => c().lag.z, set: set('lag', 'z'), disabled: () => !c().lag.on });
-      slider(lg, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, get: () => c().lag.M, set: set('lag', 'M'), disabled: () => !c().lag.on });
+      slider(lg, { label: 'z', unit: 'rad/s', min: 0.001, max: 20, log: true, sig: 3, ...bind(ctx, 'z', () => c().lag), disabled: () => !c().lag.on });
+      slider(lg, { label: 'M', min: 1.01, max: 200, log: true, sig: 3, ...bind(ctx, 'M', () => c().lag), disabled: () => !c().lag.on });
       for (const key of ['lpf1', 'lpf2']) {
         const sx = section(parent, `Low-pass ${key === 'lpf1' ? 1 : 2}: p/(s + p)`, 'p. 325');
         onOff(sx, key);
-        slider(sx, { label: 'p', unit: 'rad/s', min: 0.5, max: 5000, log: true, sig: 3, get: () => c()[key].p, set: set(key, 'p'), disabled: () => !c()[key].on });
+        slider(sx, { label: 'p', unit: 'rad/s', min: 0.5, max: 5000, log: true, sig: 3, ...bind(ctx, 'p', () => c()[key]), disabled: () => !c()[key].on });
       }
       if (st.loop !== 'inner') {
         const pf = section(parent, 'Prefilter F(s) = p/(s + p)', 'p. 336 · Eq. 18.5–18.7');
         onOff(pf, 'pf');
-        slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, get: () => c().pf.p, set: set('pf', 'p'), disabled: () => !c().pf.on });
+        slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'p', () => c().pf), disabled: () => !c().pf.on });
       }
       const sp = section(parent, 'F.18 specs (all loops)', 'p. 403–404');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
       WB.ui.addRefresher(() => {
         const d = design18(ctx), s = specs18(ctx, d);
-        const row = (label, ok, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: label }), el('strong', { text: v || '' }),
-          el('span', { class: 'status ' + (ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: ok ? '✓' : '✗' }), el('span', { text: ok ? 'met' : 'not met' })));
+        const row = WB.ui.specRow;
         box.replaceChildren(
           row('(a) integrator (input d)', s.lon.integ), row('(a) |L| ≥ 40 dB below 0.1', s.lon.track, `${fmt(db(s.lon.lo), 3)} dB`),
           row('(a) |L| ≤ −80 dB above 200', s.lon.noise, `${fmt(db(s.lon.hiL), 3)} dB`), row('(a) PM ≈ 60°', s.lon.pm, `${fmt(d.mgl.pm, 3)}°`), row('(a) prefilter', s.lon.pf),

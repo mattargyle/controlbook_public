@@ -10,7 +10,7 @@ WB.studies = WB.studies || {};
 WB.studies.E = WB.studies.E || { chapters: {} };
 
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texPole, fmt, fmtPole } = M;
@@ -33,7 +33,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { value: 'eq', label: 'F<sub>e</sub> at z<sub>e</sub>', title: 'constant equilibrium force' },
         { value: 'none', label: 'none' },
       ],
-      get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+      ...bind(ctx, 'comp'),
     });
   }
 
@@ -55,7 +55,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       segmented(parent, {
         label: 'ω<sub>n</sub> from t<sub>r</sub>',
         options: [{ value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5' }, { value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))' }],
-        get: () => ctx.st.rule, set: (v) => { ctx.st.rule = v; ctx.update(); },
+        ...bind(ctx, 'rule'),
       });
     }
   }
@@ -106,7 +106,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     segmented(parent, {
       label: 's-plane scale',
       options: [{ value: 'both', label: 'both loops' }, { value: 'outer', label: 'zoom to outer loop' }],
-      get: () => ctx.st.zoom, set: (v) => { ctx.st.zoom = v; ctx.update(); },
+      ...bind(ctx, 'zoom'),
     });
   }
 
@@ -419,7 +419,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       segmented(sec, {
         label: 'Reference on z (amplitude = size [m], slope [m/s] or coefficient [m/s²])',
         options: [{ value: 'step', label: 'step' }, { value: 'ramp', label: 'ramp' }, { value: 'parabola', label: 'parabola' }],
-        get: () => ctx.st.input, set: (v) => { ctx.st.input = v; ctx.update(); },
+        ...bind(ctx, 'input'),
       });
       if (ctx.S.mode === 'work') workGainSliders(sec, ctx, { kI: true });
       else {
@@ -435,8 +435,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
 
     renderType(box, ctx) {
       const a = this.analysis(ctx), S = ctx.S, st = ctx.st;
-      const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
-      const show = S.mode === 'explore' || ctx.app.isRevealed('E:ch9:type');
+      const row = WB.ui.metric;
+      const show = WB.ui.shown(ctx, 'E:ch9:type');
       const A = S.sim.amplitude;
       const predZ = st.input === 'parabola' ? 2 * A * a.outParab : 0;  // r = A t² ⇒ R = 2A/s³
       const res = ctx.app.result();
@@ -451,7 +451,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         rows.push(row(`predicted e_z (${st.input})`, isFinite(predZ) ? `${fmt(predZ, 3)} m` : '∞'));
         rows.push(row(`predicted e_z from force d = ${fmt(S.sim.dist, 3)} N`, `${fmt(a.forceToZ * S.sim.dist, 3)} m`));
       } else {
-        rows.push(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the predicted types and errors', onclick: () => { ctx.app.reveal('E:ch9:type'); WB.ui.refreshAll(); } }));
+        rows.push(WB.ui.revealButton(ctx, 'E:ch9:type', 'Reveal the predicted types and errors'));
       }
       rows.push(row('simulated z_r − z at t_end', isFinite(eEnd) ? `${fmt(eEnd, 3)} m` : '—'));
       box.replaceChildren(...rows);
@@ -575,7 +575,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       sec.append(el('p', { class: 'muted small', text: 'Drag a closed-loop pole along the locus to set k_I.' }));
       if (ctx.S.mode === 'explore') gainReadout(sec, ctx, ['kPz', 'kDz', 'kIz']);  // E.8(d) answers stay hidden in Work mode
       else if (!ctx.app.isRevealed('E:p6:locus')) {
-        sec.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the root locus (uses the E.8 gains)', onclick: () => { ctx.app.reveal('E:p6:locus'); ctx.update(); } }));
+        sec.append(WB.ui.revealButton(ctx, 'E:p6:locus', 'Reveal the root locus (uses the E.8 gains)'));
       }
       zoomControl(sec, ctx);
     },
@@ -706,14 +706,14 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       segmented(imp, {
         label: 'Anti-windup on the z integrator',
         options: [{ value: 'gate', label: 'integrate when |ż| < v̄ (E.10c)' }, { value: 'none', label: 'none' }],
-        get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+        ...bind(ctx, 'antiwindup'),
       });
       E.knob(imp, ctx, 'vbar', 'v̄', 0.005, 0.5, 0.005, { unit: 'm/s', sig: 3, disabled: () => ctx.st.antiwindup !== 'gate' });
       compControl(imp, ctx);
       segmented(imp, {
         label: 'Extra plot',
         options: [{ value: 'deriv', label: 'ż estimate' }, { value: 'int', label: 'z integrator' }],
-        get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); },
+        ...bind(ctx, 'extra'),
       });
       zoomControl(imp, ctx);
     },

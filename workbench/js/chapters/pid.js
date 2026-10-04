@@ -4,7 +4,7 @@ window.WB = window.WB || {};
 WB.chapters = WB.chapters || {};
 
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texPole, fmt, fmtPole } = M;
@@ -83,22 +83,22 @@ WB.chapters = WB.chapters || {};
   }
 
   function gainSliders(parent, ctx, ranges = {}) {
-    slider(parent, { label: 'k<sub>P</sub>', min: 0, max: ranges.kP || 2, step: 0.001, get: () => ctx.st.kP, set: (v) => { ctx.st.kP = v; ctx.update(); } });
-    slider(parent, { label: 'k<sub>I</sub>', min: 0, max: ranges.kI || 2, step: 0.001, get: () => ctx.st.kI, set: (v) => { ctx.st.kI = v; ctx.update(); } });
-    slider(parent, { label: 'k<sub>D</sub>', min: 0, max: ranges.kD || 0.5, step: 0.0005, get: () => ctx.st.kD, set: (v) => { ctx.st.kD = v; ctx.update(); } });
+    slider(parent, { label: 'k<sub>P</sub>', min: 0, max: ranges.kP || 2, step: 0.001, ...bind(ctx, 'kP') });
+    slider(parent, { label: 'k<sub>I</sub>', min: 0, max: ranges.kI || 2, step: 0.001, ...bind(ctx, 'kI') });
+    slider(parent, { label: 'k<sub>D</sub>', min: 0, max: ranges.kD || 0.5, step: 0.0005, ...bind(ctx, 'kD') });
   }
 
   function designSliders(parent, ctx, withRule) {
-    slider(parent, { label: 't<sub>r</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, get: () => ctx.st.tr, set: (v) => { ctx.st.tr = v; ctx.update(); } });
-    slider(parent, { label: 'ζ', min: 0.1, max: 2, step: 0.005, get: () => ctx.st.zeta, set: (v) => { ctx.st.zeta = v; ctx.update(); } });
+    slider(parent, { label: 't<sub>r</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, ...bind(ctx, 'tr') });
+    slider(parent, { label: 'ζ', min: 0.1, max: 2, step: 0.005, ...bind(ctx, 'zeta') });
     if (withRule) {
       segmented(parent, {
         label: 'ω<sub>n</sub> from t<sub>r</sub>',
         options: [{ value: '2.2', label: '2.2 / t<sub>r</sub>' }, { value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))' }],
-        get: () => ctx.st.rule, set: (v) => { ctx.st.rule = v; ctx.update(); },
+        ...bind(ctx, 'rule'),
       });
     }
-    slider(parent, { label: 'k<sub>I</sub>', min: 0, max: 2, step: 0.001, get: () => ctx.st.kIx, set: (v) => { ctx.st.kIx = v; ctx.update(); } });
+    slider(parent, { label: 'k<sub>I</sub>', min: 0, max: 2, step: 0.001, ...bind(ctx, 'kIx') });
   }
 
   function designedGains(ctx) {
@@ -107,14 +107,7 @@ WB.chapters = WB.chapters || {};
     return { ...PD().gainsFromPoles(ctx.model, PD().polesFromWnZeta(wn, st.zeta)), kI: st.kIx, wn };
   }
 
-  function readout(parent, ctx) {
-    const box = el('div', { class: 'readout' });
-    parent.append(box);
-    WB.ui.addRefresher(() => {
-      const g = ctx.gains;
-      box.replaceChildren(...['kP', 'kI', 'kD'].map((k) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: fmt(g[k], 4) }))));
-    });
-  }
+  const readout = (parent, ctx) => WB.ui.readout(parent, () => ['kP', 'kI', 'kD'].map((k) => [k, ctx.gains[k]]), { wrap: false });
 
   // ------------------------------------------------------------- Chapter 9 --
   WB.chapters.ch9 = {
@@ -134,7 +127,7 @@ WB.chapters = WB.chapters || {};
       segmented(sec, {
         label: 'Reference shape (amplitude = size, slope, or coefficient)',
         options: [{ value: 'step', label: 'step' }, { value: 'ramp', label: 'ramp' }, { value: 'parabola', label: 'parabola' }],
-        get: () => ctx.st.input, set: (v) => { ctx.st.input = v; ctx.update(); },
+        ...bind(ctx, 'input'),
       });
       if (ctx.S.mode === 'work') gainSliders(sec, ctx);
       else { designSliders(sec, ctx, false); readout(sec, ctx); }
@@ -165,8 +158,8 @@ WB.chapters = WB.chapters || {};
       const distPred = Math.abs(S.sim.dist) * a.distStepErr;
       const res = ctx.app.result();
       const eEnd = res ? res.r[res.r.length - 1] - res.y[res.y.length - 1] : NaN;
-      const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
-      const show = S.mode === 'explore' || ctx.app.isRevealed('ch9:type');
+      const row = WB.ui.metric;
+      const show = WB.ui.shown(ctx, 'ch9:type');
       const rows = [];
       if (show) {
         rows.push(row('reference tracking type', `type ${a.type}`));
@@ -174,7 +167,7 @@ WB.chapters = WB.chapters || {};
         rows.push(row('input-disturbance type', `type ${a.distType}`));
         rows.push(row(`predicted e from d = ${fmt(S.sim.dist, 3)} N·m`, `${fmt(distPred / M.DEG, 3)}°`));
       } else {
-        rows.push(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the predicted type and errors', onclick: () => { ctx.app.reveal('ch9:type'); WB.ui.refreshAll(); } }));
+        rows.push(WB.ui.revealButton(ctx, 'ch9:type', 'Reveal the predicted type and errors'));
       }
       rows.push(row('simulated error r − θ at t_end', isFinite(eEnd) ? `${fmt(eEnd / M.DEG, 3)}°` : '—'));
       box.replaceChildren(...rows);
@@ -271,9 +264,9 @@ WB.chapters = WB.chapters || {};
       segmented(imp, {
         label: 'θ̇ for the D term',
         options: [{ value: 'dirty', label: 'dirty derivative of y' }, { value: 'state', label: 'true θ̇ (cheating)' }],
-        get: () => ctx.st.deriv, set: (v) => { ctx.st.deriv = v; ctx.update(); },
+        ...bind(ctx, 'deriv'),
       });
-      slider(imp, { label: 'σ', unit: 's', min: 0.002, max: 0.5, step: 0.001, sig: 3, hint: 'dirty-derivative bandwidth is 1/σ rad/s', get: () => ctx.st.sigma, set: (v) => { ctx.st.sigma = v; ctx.update(); }, disabled: () => ctx.st.deriv !== 'dirty' });
+      slider(imp, { label: 'σ', unit: 's', min: 0.002, max: 0.5, step: 0.001, sig: 3, hint: 'dirty-derivative bandwidth is 1/σ rad/s', ...bind(ctx, 'sigma'), disabled: () => ctx.st.deriv !== 'dirty' });
       segmented(imp, {
         label: 'Anti-windup',
         options: [
@@ -281,14 +274,14 @@ WB.chapters = WB.chapters || {};
           { value: 'backcalc', label: 'back-calculation', title: 'u_I += (u_sat − u_unsat)/k_I, p. 158' },
           { value: 'none', label: 'none' },
         ],
-        get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+        ...bind(ctx, 'antiwindup'),
       });
-      slider(imp, { label: 'v̄', unit: 'rad/s', min: 0.01, max: 2, step: 0.01, sig: 3, get: () => ctx.st.vbar, set: (v) => { ctx.st.vbar = v; ctx.update(); }, disabled: () => ctx.st.antiwindup !== 'gate' });
+      slider(imp, { label: 'v̄', unit: 'rad/s', min: 0.01, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'vbar'), disabled: () => ctx.st.antiwindup !== 'gate' });
       PD().sharedControls(imp, ctx);
       segmented(imp, {
         label: 'Extra plot',
         options: [{ value: 'deriv', label: 'θ̇ estimate' }, { value: 'int', label: 'integrator' }],
-        get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); },
+        ...bind(ctx, 'extra'),
       });
     },
 
@@ -373,8 +366,8 @@ WB.chapters = WB.chapters || {};
           html: 'Checks the current simulation (with the plant mismatch in the left panel): the error just before the first reference switch must be under 0.1°, with no saturation-driven windup ringing.',
           check: () => {
             const res = ctx.app.result();
-            const tSw = ctx.S.sim.type === 'square' ? ctx.S.sim.tStep + 0.5 / ctx.S.sim.frequency : ctx.S.sim.tEnd;
-            const i = Math.min(res.t.length - 1, Math.round((tSw - 0.05) / ctx.S.sim.Ts));
+            const tSw = WB.sim.switchTime(ctx.S);
+            const i = WB.sim.indexBefore(ctx.S, res, tSw);
             const e = Math.abs(res.r[i] - res.y[i]) / M.DEG;
             if (!(ctx.gains.kI > 0)) return { ok: false, msg: `kI = 0: error before the switch is ${fmt(e, 3)}°.` };
             return e < 0.1 ? { ok: true, msg: `Error before the switch: ${fmt(e, 3)}°.` } : { ok: false, msg: `Error before the switch: ${fmt(e, 3)}°.` };
@@ -405,10 +398,10 @@ WB.chapters = WB.chapters || {};
     buildControls(parent, ctx) {
       const sec = section(parent, 'PD from A.8, then add k_I', 'p. 470');
       PD().sharedControls(sec, ctx);
-      slider(sec, { label: 't<sub>r</sub>', unit: 's', min: 0.2, max: 3, step: 0.005, get: () => ctx.st.tr, set: (v) => { ctx.st.tr = v; ctx.update(); } });
-      slider(sec, { label: 'ζ', min: 0.2, max: 1.5, step: 0.005, get: () => ctx.st.zeta, set: (v) => { ctx.st.zeta = v; ctx.update(); } });
-      slider(sec, { label: 'k<sub>I</sub>', min: 0, max: 2, step: 0.001, get: () => ctx.st.kIx, set: (v) => { ctx.st.kIx = v; ctx.update(); } });
-      slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.2, max: 5, step: 0.1, sig: 2, get: () => ctx.st.kMaxFactor, set: (v) => { ctx.st.kMaxFactor = v; ctx.update(); } });
+      slider(sec, { label: 't<sub>r</sub>', unit: 's', min: 0.2, max: 3, step: 0.005, ...bind(ctx, 'tr') });
+      slider(sec, { label: 'ζ', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zeta') });
+      slider(sec, { label: 'k<sub>I</sub>', min: 0, max: 2, step: 0.001, ...bind(ctx, 'kIx') });
+      slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.2, max: 5, step: 0.1, sig: 2, ...bind(ctx, 'kMaxFactor') });
       sec.append(el('p', { class: 'muted small', text: 'Drag a closed-loop pole along the locus to set k_I.' }));
       readout(sec, ctx);
     },

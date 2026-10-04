@@ -5,7 +5,7 @@ window.WB = window.WB || {};
 WB.chapters = WB.chapters || {};
 
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt } = M;
@@ -45,16 +45,16 @@ WB.chapters = WB.chapters || {};
     segmented(parent, {
       label: 'Input torque τ<sub>in</sub>(t)',
       options: shapes.map((s) => ({ value: s, label: names[s] })),
-      get: () => ctx.st.inp.shape, set: (v) => { ctx.st.inp.shape = v; ctx.update(); },
+      ...bind(ctx, 'shape', () => ctx.st.inp),
     });
-    slider(parent, { label: 'amplitude', unit: 'N·m', min: -1, max: 1, step: 0.005, sig: 3, get: () => ctx.st.inp.amp, set: (v) => { ctx.st.inp.amp = v; ctx.update(); }, disabled: () => ctx.st.inp.shape === 'zero' });
-    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.01, max: 2, step: 0.005, sig: 3, get: () => ctx.st.inp.freq, set: (v) => { ctx.st.inp.freq = v; ctx.update(); }, disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
-    slider(parent, { label: 'width', unit: 's', min: 0.05, max: 5, step: 0.05, sig: 3, get: () => ctx.st.inp.width, set: (v) => { ctx.st.inp.width = v; ctx.update(); }, disabled: () => ctx.st.inp.shape !== 'pulse' });
+    slider(parent, { label: 'amplitude', unit: 'N·m', min: -1, max: 1, step: 0.005, sig: 3, ...bind(ctx, 'amp', () => ctx.st.inp), disabled: () => ctx.st.inp.shape === 'zero' });
+    slider(parent, { label: 'frequency', unit: 'Hz', min: 0.01, max: 2, step: 0.005, sig: 3, ...bind(ctx, 'freq', () => ctx.st.inp), disabled: () => !['square', 'sine'].includes(ctx.st.inp.shape) });
+    slider(parent, { label: 'width', unit: 's', min: 0.05, max: 5, step: 0.05, sig: 3, ...bind(ctx, 'width', () => ctx.st.inp), disabled: () => ctx.st.inp.shape !== 'pulse' });
     if (comps) {
       segmented(parent, {
         label: 'Gravity compensation added to τ<sub>in</sub>',
         options: comps,
-        get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+        ...bind(ctx, 'comp'),
       });
     }
   }
@@ -93,8 +93,8 @@ WB.chapters = WB.chapters || {};
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Prescribed motion θ(t) = A sin(2πft)', 'p. 28 · A.2(b)');
-      slider(sec, { label: 'A', unit: '°', min: 0, max: 180, step: 1, sig: 3, get: () => ctx.st.A, set: (v) => { ctx.st.A = v; ctx.update(); } });
-      slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, get: () => ctx.st.f, set: (v) => { ctx.st.f = v; ctx.update(); } });
+      slider(sec, { label: 'A', unit: '°', min: 0, max: 180, step: 1, sig: 3, ...bind(ctx, 'A') });
+      slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'f') });
       sec.append(el('p', { class: 'muted small', text: 'No dynamics here: the motion is imposed, as in hw02_armSim.py. The plot below splits the kinetic energy into translation of the center of mass and rotation about it.' }));
     },
 
@@ -243,12 +243,12 @@ WB.chapters = WB.chapters || {};
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Operating point', 'p. 63 · Eq. 4.4');
-      slider(sec, { label: 'θ<sub>e</sub>', unit: '°', min: -90, max: 90, step: 1, sig: 3, get: () => ctx.st.yE, set: (v) => { ctx.st.yE = v; ctx.update(); } });
-      slider(sec, { label: 'δθ(0)', unit: '°', min: -60, max: 60, step: 0.5, sig: 3, hint: 'initial offset from θₑ', get: () => ctx.st.dy0, set: (v) => { ctx.st.dy0 = v; ctx.update(); } });
+      slider(sec, { label: 'θ<sub>e</sub>', unit: '°', min: -90, max: 90, step: 1, sig: 3, ...bind(ctx, 'yE') });
+      slider(sec, { label: 'δθ(0)', unit: '°', min: -60, max: 60, step: 0.5, sig: 3, hint: 'initial offset from θₑ', ...bind(ctx, 'dy0') });
       segmented(sec, {
         label: 'Linearization',
         options: [{ value: 'jacobian', label: 'Jacobian: τ = τ<sub>e</sub> + τ̃' }, { value: 'fl', label: 'feedback: τ = τ<sub>fl</sub>(θ) + τ̃' }],
-        get: () => ctx.st.method, set: (v) => { ctx.st.method = v; ctx.update(); },
+        ...bind(ctx, 'method'),
       });
       const inp = section(parent, 'Input τ̃(t)', 'p. 64');
       inputControls(inp, ctx);

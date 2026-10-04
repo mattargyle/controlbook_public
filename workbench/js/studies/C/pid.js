@@ -7,7 +7,7 @@
 //   work    - you set the five gains; anything that answers a problem stays hidden.
 //   explore - gains come from (t_rθ, ζ_θ, M, ζ_φ); drag the inner- or outer-loop poles.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const T = WB.tf;
@@ -120,37 +120,26 @@
   }
 
   // ------------------------------------------------------------ controls --
-  function workSliders(parent, ctx, withI) {
-    const w = ctx.st.w;
-    const spec = [['kPth', 'k<sub>P<sub>θ</sub></sub>', 0, 400], ['kDth', 'k<sub>D<sub>θ</sub></sub>', 0, 150], ['kPphi', 'k<sub>P<sub>φ</sub></sub>', -0.5, 5], ['kDphi', 'k<sub>D<sub>φ</sub></sub>', 0, 30]];
-    if (withI) spec.push(['kIphi', 'k<sub>I<sub>φ</sub></sub>', 0, 2]);
-    for (const [key, label, min, max] of spec) {
-      slider(parent, { label, min, max, step: (max - min) / 4000, sig: 4, get: () => w[key], set: (v) => { w[key] = v; ctx.update(); } });
-    }
-  }
+  const WORK_SPEC = { kPth: ['k<sub>P<sub>θ</sub></sub>', 0, 400], kDth: ['k<sub>D<sub>θ</sub></sub>', 0, 150], kPphi: ['k<sub>P<sub>φ</sub></sub>', -0.5, 5], kDphi: ['k<sub>D<sub>φ</sub></sub>', 0, 30], kIphi: ['k<sub>I<sub>φ</sub></sub>', 0, 2] };
+  const workSliders = (parent, ctx, withI) => WB.ui.gainSliders(parent, ctx, WORK_SPEC, ['kPth', 'kDth', 'kPphi', 'kDphi', ...(withI ? ['kIphi'] : [])]);
   function designSliders(parent, ctx, { withI = false, withRule = true } = {}) {
     const st = ctx.st;
-    slider(parent, { label: 't<sub>r<sub>θ</sub></sub>', unit: 's', min: 0.1, max: 5, step: 0.005, sig: 3, get: () => st.trTh, set: (v) => { st.trTh = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, get: () => st.zetaTh, set: (v) => { st.zetaTh = v; ctx.update(); } });
-    slider(parent, { label: 'M = t<sub>r<sub>φ</sub></sub>/t<sub>r<sub>θ</sub></sub>', min: 1, max: 40, step: 0.1, sig: 3, hint: 'bandwidth separation between the loops', get: () => st.M, set: (v) => { st.M = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>φ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, get: () => st.zetaPhi, set: (v) => { st.zetaPhi = v; ctx.update(); } });
+    slider(parent, { label: 't<sub>r<sub>θ</sub></sub>', unit: 's', min: 0.1, max: 5, step: 0.005, sig: 3, ...bind(ctx, 'trTh', () => st) });
+    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, ...bind(ctx, 'zetaTh', () => st) });
+    slider(parent, { label: 'M = t<sub>r<sub>φ</sub></sub>/t<sub>r<sub>θ</sub></sub>', min: 1, max: 40, step: 0.1, sig: 3, hint: 'bandwidth separation between the loops', ...bind(ctx, 'M', () => st) });
+    slider(parent, { label: 'ζ<sub>φ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, ...bind(ctx, 'zetaPhi', () => st) });
     if (withRule) {
       segmented(parent, {
         label: 'ω<sub>n</sub> from t<sub>r</sub>',
         options: [{ value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))', title: 'C.8 solution and ctrlPD.py' }, { value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5; ctrlPID.py' }],
-        get: () => st.rule, set: (v) => { st.rule = v; ctx.update(); },
+        ...bind(ctx, 'rule', () => st),
       });
     }
-    if (withI) slider(parent, { label: 'k<sub>I<sub>φ</sub></sub>', min: 0, max: 2, step: 0.001, sig: 3, get: () => st.kIx, set: (v) => { st.kIx = v; ctx.update(); } });
+    if (withI) slider(parent, { label: 'k<sub>I<sub>φ</sub></sub>', min: 0, max: 2, step: 0.001, sig: 3, ...bind(ctx, 'kIx', () => st) });
   }
   function readout(parent, ctx, keys) {
-    const box = el('div', { class: 'readout wrap' });
-    parent.append(box);
     const names = { kPth: 'kPθ', kDth: 'kDθ', kPphi: 'kPφ', kDphi: 'kDφ', kIphi: 'kIφ' };
-    WB.ui.addRefresher(() => {
-      const g = ctx.gains;
-      box.replaceChildren(...keys.map((k) => el('div', {}, el('span', { class: 'ro-label', text: names[k] }), el('strong', { text: fmt(g[k], 4) }))));
-    });
+    WB.ui.readout(parent, () => keys.map((k) => [names[k], ctx.gains[k]]));
   }
   function commonControls(parent, ctx, { ff = true, deriv = false, aw = false } = {}) {
     const st = ctx.st;
@@ -158,29 +147,29 @@
       segmented(parent, {
         label: 'Feedforward φ<sub>r</sub> into θ<sub>r</sub>',
         options: [{ value: true, label: 'on (Fig. 8-20 p. 133, ctrlPD.py)' }, { value: false, label: 'off (Fig. 8-19)' }],
-        get: () => st.ff, set: (v) => { st.ff = v; ctx.update(); },
+        ...bind(ctx, 'ff', () => st),
       });
     }
-    slider(parent, { label: '|θ<sub>r</sub>| limit', unit: '°', min: 5, max: 360, step: 1, sig: 3, hint: 'saturation of the outer loop\'s output (θ_max in the repo)', get: () => st.thetaMaxDeg, set: (v) => { st.thetaMaxDeg = v; ctx.update(); } });
+    slider(parent, { label: '|θ<sub>r</sub>| limit', unit: '°', min: 5, max: 360, step: 1, sig: 3, hint: 'saturation of the outer loop\'s output (θ_max in the repo)', ...bind(ctx, 'thetaMaxDeg', () => st) });
     if (deriv) {
       segmented(parent, {
         label: 'θ̇, φ̇ for the D terms',
         options: [{ value: 'dirty', label: 'dirty derivative of y' }, { value: 'state', label: 'true state' }],
-        get: () => st.deriv, set: (v) => { st.deriv = v; ctx.update(); },
+        ...bind(ctx, 'deriv', () => st),
       });
-      slider(parent, { label: 'σ', unit: 's', min: 0.005, max: 0.5, step: 0.001, sig: 3, hint: 'dirty-derivative bandwidth is 1/σ rad/s', get: () => st.sigma, set: (v) => { st.sigma = v; ctx.update(); }, disabled: () => st.deriv !== 'dirty' });
+      slider(parent, { label: 'σ', unit: 's', min: 0.005, max: 0.5, step: 0.001, sig: 3, hint: 'dirty-derivative bandwidth is 1/σ rad/s', ...bind(ctx, 'sigma', () => st), disabled: () => st.deriv !== 'dirty' });
     }
     if (aw) {
       segmented(parent, {
         label: 'Anti-windup',
         options: [{ value: 'repo', label: 'u<sub>I</sub> += (T<sub>s</sub>/k<sub>I</sub>)(θ<sub>r</sub> − θ<sub>r,unsat</sub>)', title: 'ctrlPID.py / Listing 10.4' }, { value: 'none', label: 'none' }],
-        get: () => st.antiwindup, set: (v) => { st.antiwindup = v; ctx.update(); },
+        ...bind(ctx, 'antiwindup', () => st),
       });
     }
     segmented(parent, {
       label: 's-plane view',
       options: [{ value: 'all', label: 'all poles' }, { value: 'outer', label: 'zoom on outer loop' }],
-      get: () => st.zoom, set: (v) => { st.zoom = v; ctx.update(); },
+      ...bind(ctx, 'zoom', () => st),
     });
   }
 
@@ -217,11 +206,7 @@
       const wi = Math.min(...inner.map((q) => Math.hypot(q.re, q.im))), wo = Math.max(...outer.map((q) => Math.hypot(q.re, q.im)));
       const full = lib().fullLoopPoles(p, g, { sigma: sigmaFn ? sigmaFn() : null });
       const stable = full.every((q) => q.re < 0);
-      const row = (l, v, ok) => {
-        const r = el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
-        if (ok !== undefined) r.append(el('span', { class: 'status ' + (ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: ok ? '✓' : '✗' }), el('span', { text: ok ? 'stable' : 'unstable' })));
-        return r;
-      };
+      const row = (l, v, ok) => WB.ui.metric(l, v, ok === undefined ? null : { ok, text: ok ? 'stable' : 'unstable' });
       box.replaceChildren(
         row('|p_inner| / |p_outer| (slowest inner ÷ fastest outer)', isFinite(wi / wo) ? `${fmt(wi / wo, 3)}×` : '—'),
         row('full 4-state loop', full.length ? `slowest pole ${fmtPole(full.reduce((a, q) => (q.re > a.re ? q : a)))}` : '—', stable),
@@ -361,16 +346,7 @@
         for (const u of out.uDemand) peak = Math.max(peak, Math.abs(u));
         return peak / TAU_MAX;
       };
-      const useGains = {
-        label: 'Use my gains',
-        run: (v) => {
-          const vals = ['kPth', 'kDth', 'kPphi', 'kDphi'].map((k) => PD().num(v[k]));
-          if (vals.some((x) => x === null)) return { ok: false, msg: 'Enter all four gains in (b) and (d) first.' };
-          ctx.app.setMode('work');
-          Object.assign(ctx.st.w, { kPth: vals[0], kDth: vals[1], kPphi: vals[2], kDphi: vals[3], kIphi: 0 });
-          ctx.update(); return null;
-        },
-      };
+      const useGains = WB.design.useGains(ctx, ['kPth', 'kDth', 'kPphi', 'kDphi'], { extra: { kIphi: 0 }, msg: 'Enter all four gains in (b) and (d) first.' });
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'b', title: `(b) Inner loop: t<sub>r<sub>θ</sub></sub> = ${prob.trTh} s, ζ<sub>θ</sub> = ${prob.zetaTh}`,
@@ -499,7 +475,7 @@
       segmented(sec, {
         label: 'φ<sub>r</sub> shape (amplitude = size, slope or coefficient)',
         options: [{ value: 'step', label: 'step' }, { value: 'ramp', label: 'ramp' }, { value: 'parabola', label: 'parabola' }],
-        get: () => ctx.st.input, set: (v) => { ctx.st.input = v; ctx.update(); },
+        ...bind(ctx, 'input'),
       });
       commonControls(sec, ctx, { ff: true });
       if (ctx.S.mode === 'work') {
@@ -518,8 +494,8 @@
       const res = ctx.app.result();
       const n = res ? res.t.length - 1 : 0;
       const eEnd = res ? (res.rAll[0][n] - res.yAll[1][n]) * R2D : NaN;
-      const row = (l, v) => el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: l }), el('strong', { text: v }));
-      const show = S.mode === 'explore' || ctx.app.isRevealed('C:ch9:type');
+      const row = WB.ui.metric;
+      const show = WB.ui.shown(ctx, 'C:ch9:type');
       const rows = [];
       if (show) {
         const pr = this.predicted(ctx);
@@ -527,7 +503,7 @@
         rows.push(row('outer loop vs. φ_r / vs. d₂ (k_DCθ = 1)', `type ${a.outer.type} / type ${a.outer.dType}`));
         rows.push(row(`predicted φ_r − φ (${ctx.st.input}${ctx.st.ff ? ', feedforward' : ''}, d = ${fmt(S.sim.dist, 3)})`, isFinite(pr) ? `${fmt(pr * R2D, 3)}°` : '∞ (grows)'));
       } else {
-        rows.push(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reveal the predicted types and errors', onclick: () => { ctx.app.reveal('C:ch9:type'); WB.ui.refreshAll(); } }));
+        rows.push(WB.ui.revealButton(ctx, 'C:ch9:type', 'Reveal the predicted types and errors'));
       }
       rows.push(row('simulated φ_r − φ at t_end', isFinite(eEnd) ? `${fmt(eEnd, 3)}°` : '—'));
       box.replaceChildren(...rows);
@@ -642,11 +618,11 @@
       const sec = section(parent, 'C.8 PD loops, then add k_Iφ', 'p. 472');
       if (ctx.S.mode === 'work') { workSliders(sec, ctx, true); loadC8Button(sec, ctx); }
       else designSliders(sec, ctx, { withI: true });
-      slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.2, max: 5, step: 0.1, sig: 2, get: () => ctx.st.kMaxFactor, set: (v) => { ctx.st.kMaxFactor = v; ctx.update(); } });
+      slider(sec, { label: 'locus to', unit: '× kI,crit', min: 0.2, max: 5, step: 0.1, sig: 2, ...bind(ctx, 'kMaxFactor') });
       segmented(sec, {
         label: 's-plane view',
         options: [{ value: 'all', label: 'all poles' }, { value: 'outer', label: 'zoom on outer loop' }],
-        get: () => ctx.st.zoom, set: (v) => { ctx.st.zoom = v; ctx.update(); },
+        ...bind(ctx, 'zoom'),
       });
       sec.append(el('p', { class: 'muted small', text: 'Drag a closed-loop pole along the locus to set k_Iφ. The locus is for the book\'s outer design model; the circles are the full four-state loop with the same gains.' }));
       readout(sec, ctx, ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi']);
@@ -766,7 +742,7 @@
       segmented(imp, {
         label: 'Extra plot',
         options: [{ value: 'int', label: 'integrator' }, { value: 'deriv', label: 'rate estimates' }],
-        get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); },
+        ...bind(ctx, 'extra'),
       });
       const sep = section(parent, 'Bandwidth separation', 'p. 129');
       separationBox(sep, ctx, () => (ctx.st.deriv === 'dirty' ? ctx.st.sigma : null));
@@ -839,8 +815,8 @@
           html: 'Checks the current simulation, with the plant mismatch in the left panel. The book only says "tune the integrator"; the workbench asks for |φ<sub>r</sub> − φ| under 0.5° just before the first reference switch (15° step, 25 s later).',
           check: () => {
             const res = ctx.app.result(), S = ctx.S;
-            const tSw = S.sim.type === 'square' ? S.sim.tStep + 0.5 / S.sim.frequency : S.sim.tEnd;
-            const i = Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts));
+            const tSw = WB.sim.switchTime(S);
+            const i = WB.sim.indexBefore(S, res, tSw);
             const e = Math.abs(res.rAll[0][i] - res.yAll[1][i]) * R2D;
             if (!(ctx.gains.kIphi > 0)) return { ok: false, msg: `kIφ = 0: error before the switch is ${fmt(e, 3)}°.` };
             return { ok: e < 0.5, msg: `Error before the switch: ${fmt(e, 3)}° (workbench limit 0.5°).` };

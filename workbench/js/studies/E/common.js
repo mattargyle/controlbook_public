@@ -5,7 +5,7 @@
 window.WB = window.WB || {};
 
 (function () {
-  const { el, slider } = WB.ui;
+  const { el, slider, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { fmt } = M;
@@ -226,12 +226,7 @@ window.WB = window.WB || {};
   }
 
   // ---------------------------------------------------------------- UI bits --
-  function readout(parent, rows) {
-    const box = el('div', { class: 'readout wrap' });
-    parent.append(box);
-    WB.ui.addRefresher(() => box.replaceChildren(...rows().map(([k, v]) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: v })))));
-    return box;
-  }
+  const readout = (parent, rows) => WB.ui.readout(parent, rows);
 
   // Grid of number boxes for matrix gains (K, L) in Work mode. obj[key] is a
   // number, or an array for matrix entries (key 'L' with idx).
@@ -253,14 +248,14 @@ window.WB = window.WB || {};
   // Slider helper bound to ctx.st[key].
   function knob(parent, ctx, key, label, min, max, step, extra = {}) {
     return slider(parent, { label, min, max, step, sig: extra.sig || 4, unit: extra.unit, hint: extra.hint, log: extra.log, disabled: extra.disabled,
-      get: () => ctx.st[key], set: (v) => { ctx.st[key] = v; ctx.update(); } });
+      ...bind(ctx, key) });
   }
 
   // Index of the sample just before the first reference switch (square wave) or t_end.
   function beforeSwitch(ctx, res) {
     const S = ctx.S;
-    const tSw = S.sim.type === 'square' ? S.sim.tStep + 0.5 / S.sim.frequency : S.sim.tEnd;
-    return Math.max(0, Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts)));
+    const tSw = WB.sim.switchTime(S);
+    return WB.sim.indexBefore(S, res, tSw);
   }
 
   // Block stays on the (true) beam for the whole run: 0 ≤ z ≤ ℓ_true.
@@ -277,7 +272,7 @@ window.WB = window.WB || {};
     const S = ctx.S, half = 0.5 / S.sim.frequency;
     let tSw = S.sim.tEnd;
     if (S.sim.type === 'square') tSw = S.sim.tStep + Math.floor((S.sim.tEnd - S.sim.tStep) / half - 1e-9) * half;
-    return Math.max(0, Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts)));
+    return WB.sim.indexBefore(S, res, tSw);
   }
 
   // Shared problem-panel accessors.

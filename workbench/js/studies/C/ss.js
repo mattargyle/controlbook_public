@@ -4,7 +4,7 @@
 // and ctrlDisturbanceObserver.py. The desired poles are two second-order pairs:
 // a "θ" pair from t_rθ and a slower "φ" pair from t_rφ = M t_rθ (C.11, p. 192).
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt, fmtPole } = M;
@@ -116,31 +116,26 @@
   // ------------------------------------------------------------- controls --
   function tuningSliders(parent, ctx, { pI = false } = {}) {
     const st = ctx.st;
-    slider(parent, { label: 't<sub>r<sub>θ</sub></sub>', unit: 's', min: 0.2, max: 6, step: 0.01, sig: 3, get: () => st.trTh, set: (v) => { st.trTh = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, get: () => st.zetaTh, set: (v) => { st.zetaTh = v; ctx.update(); } });
-    slider(parent, { label: 'M = t<sub>r<sub>φ</sub></sub>/t<sub>r<sub>θ</sub></sub>', min: 1, max: 10, step: 0.05, sig: 3, get: () => st.M, set: (v) => { st.M = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>φ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, get: () => st.zetaPhi, set: (v) => { st.zetaPhi = v; ctx.update(); } });
+    slider(parent, { label: 't<sub>r<sub>θ</sub></sub>', unit: 's', min: 0.2, max: 6, step: 0.01, sig: 3, ...bind(ctx, 'trTh', () => st) });
+    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, ...bind(ctx, 'zetaTh', () => st) });
+    slider(parent, { label: 'M = t<sub>r<sub>φ</sub></sub>/t<sub>r<sub>θ</sub></sub>', min: 1, max: 10, step: 0.05, sig: 3, ...bind(ctx, 'M', () => st) });
+    slider(parent, { label: 'ζ<sub>φ</sub>', min: 0.2, max: 0.99, step: 0.005, sig: 3, ...bind(ctx, 'zetaPhi', () => st) });
     segmented(parent, {
       label: 'ω<sub>n</sub> from t<sub>r</sub>',
       options: [{ value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))' }, { value: '2.2', label: '2.2 / t<sub>r</sub>' }],
-      get: () => st.rule, set: (v) => { st.rule = v; ctx.update(); },
+      ...bind(ctx, 'rule', () => st),
     });
-    if (pI) slider(parent, { label: 'p<sub>I</sub>', min: -10, max: -0.05, step: 0.01, sig: 3, get: () => st.pI, set: (v) => { st.pI = v; ctx.update(); } });
+    if (pI) slider(parent, { label: 'p<sub>I</sub>', min: -10, max: -0.05, step: 0.01, sig: 3, ...bind(ctx, 'pI', () => st) });
   }
   function obsSliders(parent, ctx, { withD = false } = {}) {
     const o = obsOf(ctx);
-    slider(parent, { label: 'ω<sub>n,obs,θ</sub>', unit: 'rad/s', min: 0.5, max: 60, step: 0.05, sig: 4, get: () => o.wTh, set: (v) => { o.wTh = v; ctx.update(); } });
-    slider(parent, { label: 'ω<sub>n,obs,φ</sub>', unit: 'rad/s', min: 0.2, max: 40, step: 0.05, sig: 4, get: () => o.wPh, set: (v) => { o.wPh = v; ctx.update(); } });
+    slider(parent, { label: 'ω<sub>n,obs,θ</sub>', unit: 'rad/s', min: 0.5, max: 60, step: 0.05, sig: 4, ...bind(ctx, 'wTh', () => o) });
+    slider(parent, { label: 'ω<sub>n,obs,φ</sub>', unit: 'rad/s', min: 0.2, max: 40, step: 0.05, sig: 4, ...bind(ctx, 'wPh', () => o) });
     slider(parent, { label: 'ζ<sub>obs</sub>', min: 0.3, max: 0.99, step: 0.005, sig: 3, get: () => o.zTh, set: (v) => { o.zTh = v; o.zPh = v; ctx.update(); } });
-    if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -40, max: -0.2, step: 0.1, sig: 3, get: () => ctx.st.pD, set: (v) => { ctx.st.pD = v; ctx.update(); } });
+    if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -40, max: -0.2, step: 0.1, sig: 3, ...bind(ctx, 'pD') });
   }
-  function workSliders(parent, ctx, keys) {
-    const spec = { K1: ['K<sub>1</sub>', -50, 200], K2: ['K<sub>2</sub>', -200, 1000], K3: ['K<sub>3</sub>', -20, 100], K4: ['K<sub>4</sub>', -200, 1500], kr: ['k<sub>r</sub>', 0, 200], ki: ['k<sub>I</sub>', -300, 0] };
-    for (const k of keys) {
-      const [label, min, max] = spec[k];
-      slider(parent, { label, min, max, step: (max - min) / 4000, sig: 4, get: () => ctx.st.w[k], set: (v) => { ctx.st.w[k] = v; ctx.update(); } });
-    }
-  }
+  const WORK_SPEC = { K1: ['K<sub>1</sub>', -50, 200], K2: ['K<sub>2</sub>', -200, 1000], K3: ['K<sub>3</sub>', -20, 100], K4: ['K<sub>4</sub>', -200, 1500], kr: ['k<sub>r</sub>', 0, 200], ki: ['k<sub>I</sub>', -300, 0] };
+  const workSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, WORK_SPEC, keys);
   function targetToggle(parent, ctx) {
     segmented(parent, {
       label: 'Target poles from the problem (s-plane rings)',
@@ -152,16 +147,14 @@
     segmented(parent, {
       label: 'Anti-windup (C.12a)',
       options: [{ value: 'clamp', label: 'hold integrator while saturated' }, { value: 'none', label: 'none (repo)' }],
-      get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+      ...bind(ctx, 'antiwindup'),
     });
   }
   function gainsReadout(parent, ctx, keys) {
-    const box = el('div', { class: 'readout wrap' });
-    parent.append(box);
-    WB.ui.addRefresher(() => {
+    WB.ui.readout(parent, () => {
       const g = ctx.gains;
       const v = { K1: g.K[0], K2: g.K[1], K3: g.K[2], K4: g.K[3], kr: g.kr, ki: g.ki };
-      box.replaceChildren(...keys.map((k) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: fmt(v[k], 4) }))));
+      return keys.map((k) => [k, v[k]]);
     });
   }
 
@@ -240,20 +233,10 @@
   }
   const specOf = (ctx, pr, level) => design(ctx.pModel, { ...ctx.st, trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaPhi: pr.zetaPhi, rule: pr.rule, pI: pr.pI ?? -2, obs: pr.obsFactor ? obsDefaults(pr) : ctx.st.obs, pD: pr.pD ?? ctx.st.pD }, level);
 
-  const useGains = (ctx, keys) => ({
-    label: 'Use my gains',
-    run: (v) => {
-      const vals = keys.map((k) => PD().num(v[k]));
-      if (vals.some((x) => x === null)) return { ok: false, msg: `Enter ${keys.join(', ')}.` };
-      ctx.app.setMode('work');
-      keys.forEach((k, i) => { ctx.st.w[k] = vals[i]; });
-      ctx.update(); return null;
-    },
-  });
   const errBeforeSwitch = (ctx) => {
     const res = ctx.app.result(), S = ctx.S;
-    const tSw = S.sim.type === 'square' ? S.sim.tStep + 0.5 / S.sim.frequency : S.sim.tEnd;
-    const i = Math.min(res.t.length - 1, Math.round((tSw - 0.05) / S.sim.Ts));
+    const tSw = WB.sim.switchTime(S);
+    const i = WB.sim.indexBefore(S, res, tSw);
     return Math.abs(res.rAll[0][i] - res.yAll[1][i]) * R2D;
   };
 
@@ -321,7 +304,7 @@
           id: 'd', title: '(d) K and k<sub>r</sub>',
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', kr: 'k<sub>r</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], kr: r.kr }, {}); },
-          actions: [useGains(ctx, ['K1', 'K2', 'K3', 'K4', 'kr'])],
+          actions: [WB.design.useGains(ctx, ['K1', 'K2', 'K3', 'K4', 'kr'])],
           solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_r = ${tex(r.kr)}` }, { html: 'Book (p. 194): K = (40.28, 255.17, 24.34, 366.18), k<sub>r</sub> = 295.46, for its own poles and a different A.' }]; },
         },
       ]);
@@ -365,7 +348,7 @@
           id: 'a', title: `(a) Gains with the listing's tuning (t<sub>r<sub>θ</sub></sub> = ${pr.trTh}, M = ${pr.M}, ζ = ${pr.zetaTh}, p<sub>I</sub> = ${pr.pI})`,
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', ki: 'k<sub>I</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], ki: r.ki }, {}); },
-          actions: [useGains(ctx, ['K1', 'K2', 'K3', 'K4', 'ki'])],
+          actions: [WB.design.useGains(ctx, ['K1', 'K2', 'K3', 'K4', 'ki'])],
           solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` }, { html: 'Book (p. 212): K = (19.15, 43.41, 16.72, 111.63), k<sub>I</sub> = −14.52, for p<sub>I</sub> = −1 and different poles and A.' }]; },
         },
         {
@@ -423,7 +406,7 @@
       else tuningSliders(sec, ctx, { pI: true });
       const ob = section(parent, 'Observer poles', 'p. 236');
       obsSliders(ob, ctx);
-      slider(ob, { label: 'θ̂(0)', unit: '°', min: -30, max: 30, step: 0.5, sig: 3, hint: 'initial estimate (the plant starts at the left panel values)', get: () => ctx.st.xhat0, set: (v) => { ctx.st.xhat0 = v; ctx.update(); } });
+      slider(ob, { label: 'θ̂(0)', unit: '°', min: -30, max: 30, step: 0.5, sig: 3, hint: 'initial estimate (the plant starts at the left panel values)', ...bind(ctx, 'xhat0') });
       if (ctx.S.mode === 'explore') gainsReadout(ob, ctx, ['K1', 'K2', 'K3', 'K4', 'ki']);
       ob.append(el('p', { class: 'muted small', text: 'L has eight entries and is not unique with two outputs, so in both modes you pick observer poles and L is placed for you.' }));
     },
@@ -482,7 +465,7 @@
       segmented(sec, {
         label: 'Disturbance observer',
         options: [{ value: true, label: 'on' }, { value: false, label: 'off: C.13 observer (C.14a)' }],
-        get: () => ctx.st.dobs, set: (v) => { ctx.st.dobs = v; ctx.update(); },
+        ...bind(ctx, 'dobs'),
       });
       awControl(sec, ctx);
       if (ctx.S.mode === 'work') { workSliders(sec, ctx, ['K1', 'K2', 'K3', 'K4', 'ki']); targetToggle(sec, ctx); }

@@ -7,7 +7,7 @@ WB.studies = WB.studies || {};
 WB.studies.E = WB.studies.E || { chapters: {} };
 
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt } = M;
@@ -54,7 +54,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { value: 'eq', label: 'F = F<sub>e</sub> + F̃, Jacobian A', title: 'consistent with E.6 / E.11' },
         { value: 'fl', label: 'F = F<sub>fl</sub>(z) + F̃, A₄₁ = 0', title: 'feedback linearization; the m1 g z̃ coupling is cancelled' },
       ],
-      get: () => ctx.st.comp, set: (v) => { ctx.st.comp = v; ctx.update(); },
+      ...bind(ctx, 'comp'),
     });
   }
 
@@ -75,7 +75,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { value: 'decoupled', label: 'decoupled (uses z and θ)', title: 'L cancels the A cross-couplings: a z block and a θ block' },
         { value: 'zonly', label: 'from z only', title: 'Ackermann on C = [1 0 0 0]; ignores the θ measurement' },
       ],
-      get: () => ctx.st.obsMode, set: (v) => { ctx.st.obsMode = v; ctx.update(); },
+      ...bind(ctx, 'obsMode'),
     });
   }
 
@@ -239,7 +239,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       segmented(sec, {
         label: 'Where x comes from',
         options: [{ value: 'true', label: 'true state' }, { value: 'dirty', label: 'z, θ + dirty derivatives' }],
-        get: () => ctx.st.est, set: (v) => { ctx.st.est = v; ctx.update(); },
+        ...bind(ctx, 'est'),
       });
       if (ctx.S.mode === 'work') workGrid(sec, ctx, { kr: true });
       const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Pole knobs', 'p. 389 · E.11(a)');
@@ -329,7 +329,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       segmented(sec, {
         label: 'Anti-windup (E.12a)',
         options: [{ value: 'clamp', label: 'hold integrator while saturated' }, { value: 'none', label: 'none' }],
-        get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+        ...bind(ctx, 'antiwindup'),
       });
       if (ctx.S.mode === 'work') workGrid(sec, ctx, { ki: true });
       const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Pole knobs', 'p. 389 · E.12(c)');
@@ -421,7 +421,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Controller and observer knobs', 'p. 224 · §13.2');
       poleKnobs(spec, ctx, { pI: true });
       obsKnobs(spec, ctx);
-      slider(spec, { label: 'ẑ(0) − z<sub>e</sub>', unit: 'm', min: -0.2, max: 0.2, step: 0.005, sig: 3, hint: 'initial estimate error', get: () => ctx.st.zhat0, set: (v) => { ctx.st.zhat0 = v; ctx.update(); } });
+      slider(spec, { label: 'ẑ(0) − z<sub>e</sub>', unit: 'm', min: -0.2, max: 0.2, step: 0.005, sig: 3, hint: 'initial estimate error', ...bind(ctx, 'zhat0') });
       if (ctx.S.mode === 'explore') gainsReadout(spec, ctx, 'obs');
     },
     math(ctx) {
@@ -515,7 +515,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       segmented(sec, {
         label: 'Disturbance observer',
         options: [{ value: true, label: 'on' }, { value: false, label: 'off (E.14a)' }],
-        get: () => ctx.st.dobs, set: (v) => { ctx.st.dobs = v; ctx.update(); },
+        ...bind(ctx, 'dobs'),
       });
       if (ctx.S.mode === 'work') workGrid(sec, ctx, { ki: true, Lrows: 5 });
       const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Controller and observer knobs', 'p. 241');

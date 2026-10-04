@@ -329,11 +329,7 @@ window.WB = window.WB || {};
     const out = v.outputs[metrics.output];
     const inp = v.inputs[metrics.peakIn];
     const rows = [];
-    const row = (label, value, status) => {
-      const r = el('div', { class: 'metric' }, el('span', { class: 'metric-label', text: label }), el('strong', { text: value }));
-      if (status) r.append(el('span', { class: 'status ' + (status.ok ? 'good' : 'bad') }, el('span', { class: 'status-icon', 'aria-hidden': 'true', text: status.ok ? '✓' : '✗' }), el('span', { text: status.text })));
-      rows.push(r);
-    };
+    const row = (label, value, status) => rows.push(WB.ui.metric(label, value, status));
     const tg = chapter().targets ? chapter().targets(ctx) : {};
     const trTarget = tg.tr || null;
     const label = v.multi ? ` (${out.label})` : '';

@@ -7,7 +7,7 @@
 // (θ innovation feeds θ̂, z innovation feeds ẑ). Then A − LC is block triangular
 // and eig(A − LC) = eig(z block) ∪ eig(θ block): two SISO designs.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const F = WB.F;
@@ -207,12 +207,7 @@
     Lz1: ['L<sub>z,1</sub>', 0, 20], Lz2: ['L<sub>z,2</sub>', -50, 50], Ldz: ['L<sub>d,z</sub>', -200, 200],
     Lt1: ['L<sub>θ,1</sub>', 0, 200], Lt2: ['L<sub>θ,2</sub>', 0, 5000], Ldt: ['L<sub>d,θ</sub>', 0, 2000],
   };
-  function wSliders(parent, ctx, keys) {
-    for (const key of keys) {
-      const [label, min, max] = SPEC[key];
-      slider(parent, { label, min, max, step: (max - min) / 4000, sig: 4, get: () => ctx.st.w[key], set: (v) => { ctx.st.w[key] = v; ctx.update(); } });
-    }
-  }
+  const wSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, SPEC, keys);
   // Work-mode gains (flat st.w) → gain object
   function fromW(w, level) {
     const g = { Kh: [w.Kh1, w.Kh2], Kz: [w.Kz1, w.Kz2, w.Kz3, w.Kz4], krh: w.krh, krz: w.krz, kIh: w.kIh, kIz: w.kIz };
@@ -241,37 +236,35 @@
       pDh: sys.problems.ch14.pDh, pDz: sys.problems.ch14.pDz, pDth: sys.problems.ch14.pDth, ...extra };
   }
   function knobControls(parent, ctx, level, title) {
-    const k = ctx.st.k, set = (key) => (v) => { k[key] = v; ctx.update(); };
+    const k = ctx.st.k;
     const s1 = section(parent, `${title}: controller poles`, 'p. 113 · Eq. 8.5, F.11(a) p. 399');
-    slider(s1, { label: 't<sub>r,h</sub>', unit: 's', min: 0.5, max: 20, step: 0.01, sig: 3, get: () => k.trh, set: set('trh') });
-    slider(s1, { label: 'ζ<sub>h</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, get: () => k.zetah, set: set('zetah') });
-    slider(s1, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, sig: 3, get: () => k.trth, set: set('trth') });
-    slider(s1, { label: 'ζ<sub>θ</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, get: () => k.zetath, set: set('zetath') });
-    slider(s1, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1, max: 30, step: 0.1, sig: 3, get: () => k.Msep, set: set('Msep') });
-    slider(s1, { label: 'ζ<sub>z</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, get: () => k.zetaz, set: set('zetaz') });
+    slider(s1, { label: 't<sub>r,h</sub>', unit: 's', min: 0.5, max: 20, step: 0.01, sig: 3, ...bind(ctx, 'trh', () => k) });
+    slider(s1, { label: 'ζ<sub>h</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, ...bind(ctx, 'zetah', () => k) });
+    slider(s1, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, sig: 3, ...bind(ctx, 'trth', () => k) });
+    slider(s1, { label: 'ζ<sub>θ</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, ...bind(ctx, 'zetath', () => k) });
+    slider(s1, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1, max: 30, step: 0.1, sig: 3, ...bind(ctx, 'Msep', () => k) });
+    slider(s1, { label: 'ζ<sub>z</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, ...bind(ctx, 'zetaz', () => k) });
     if (level !== 'sf') {
-      slider(s1, { label: 'p<sub>I,h</sub>', min: -3, max: -0.01, step: 0.001, sig: 3, get: () => k.pIh, set: set('pIh') });
-      slider(s1, { label: 'p<sub>I,z</sub>', min: -3, max: -0.01, step: 0.001, sig: 3, get: () => k.pIz, set: set('pIz') });
+      slider(s1, { label: 'p<sub>I,h</sub>', min: -3, max: -0.01, step: 0.001, sig: 3, ...bind(ctx, 'pIh', () => k) });
+      slider(s1, { label: 'p<sub>I,z</sub>', min: -3, max: -0.01, step: 0.001, sig: 3, ...bind(ctx, 'pIz', () => k) });
     }
     if (level === 'obs' || level === 'dobs') {
       const s2 = section(parent, `${title}: observer poles`, 'p. 222');
-      slider(s2, { label: 'ω<sub>n,obs</sub> / ω<sub>n,ctrl</sub>', min: 1, max: 30, step: 0.1, sig: 3, get: () => k.obsFactor, set: set('obsFactor'), hint: 'each observer pair is this many times faster than its controller pair' });
-      slider(s2, { label: 'ζ<sub>obs</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, get: () => k.zetaObs, set: set('zetaObs') });
+      slider(s2, { label: 'ω<sub>n,obs</sub> / ω<sub>n,ctrl</sub>', min: 1, max: 30, step: 0.1, sig: 3, ...bind(ctx, 'obsFactor', () => k), hint: 'each observer pair is this many times faster than its controller pair' });
+      slider(s2, { label: 'ζ<sub>obs</sub>', min: 0.3, max: 1.5, step: 0.005, sig: 3, ...bind(ctx, 'zetaObs', () => k) });
       if (level === 'dobs') {
-        slider(s2, { label: 'p<sub>d,h</sub>', min: -20, max: -0.05, step: 0.01, sig: 3, get: () => k.pDh, set: set('pDh') });
-        slider(s2, { label: 'p<sub>d,z</sub>', min: -20, max: -0.05, step: 0.01, sig: 3, get: () => k.pDz, set: set('pDz') });
-        slider(s2, { label: 'p<sub>d,θ</sub>', min: -60, max: -0.1, step: 0.01, sig: 3, get: () => k.pDth, set: set('pDth') });
+        slider(s2, { label: 'p<sub>d,h</sub>', min: -20, max: -0.05, step: 0.01, sig: 3, ...bind(ctx, 'pDh', () => k) });
+        slider(s2, { label: 'p<sub>d,z</sub>', min: -20, max: -0.05, step: 0.01, sig: 3, ...bind(ctx, 'pDz', () => k) });
+        slider(s2, { label: 'p<sub>d,θ</sub>', min: -60, max: -0.1, step: 0.01, sig: 3, ...bind(ctx, 'pDth', () => k) });
       }
     }
   }
   function gainReadout(parent, ctx, level) {
-    const box = el('div', { class: 'readout wrap' });
-    parent.append(box);
-    WB.ui.addRefresher(() => {
+    WB.ui.readout(parent, () => {
       const w = toW(ctx.gains);
       const keys = [...KEYS[level === 'sf' ? 'sf' : 'sfi'].lon, ...KEYS[level === 'sf' ? 'sf' : 'sfi'].lat,
         ...(level === 'obs' || level === 'dobs' ? ['Lh1', 'Lh2', 'Lz1', 'Lz2', 'Lt1', 'Lt2'] : []), ...(level === 'dobs' ? ['Ldh', 'Ldz', 'Ldt'] : [])];
-      box.replaceChildren(...keys.map((k) => el('div', {}, el('span', { class: 'ro-label', text: k }), el('strong', { text: fmt(w[k], 4) }))));
+      return keys.map((k) => [k, w[k]]);
     });
   }
 
@@ -324,7 +317,7 @@
     }, extra));
   }
   function viewSeg(parent, ctx) {
-    segmented(parent, { label: 's-plane shows', options: [{ value: 'lon', label: 'altitude' }, { value: 'lat', label: 'lateral' }], get: () => ctx.st.view, set: (v) => { ctx.st.view = v; ctx.update(); } });
+    segmented(parent, { label: 's-plane shows', options: [{ value: 'lon', label: 'altitude' }, { value: 'lat', label: 'lateral' }], ...bind(ctx, 'view') });
   }
   function workControls(parent, ctx, level) {
     const keys = KEYS[level === 'sf' ? 'sf' : 'sfi'];
@@ -452,7 +445,7 @@
     buildControls(parent, ctx) {
       const sec = section(parent, 'u = −Kx − k_I ∫(r − y)', 'p. 199');
       viewSeg(sec, ctx);
-      segmented(sec, { label: 'Anti-windup (F.12a)', options: [{ value: 'clamp', label: 'hold integrators while a rotor saturates' }, { value: 'none', label: 'none' }], get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); } });
+      segmented(sec, { label: 'Anti-windup (F.12a)', options: [{ value: 'clamp', label: 'hold integrators while a rotor saturates' }, { value: 'none', label: 'none' }], ...bind(ctx, 'antiwindup') });
       if (ctx.S.mode === 'work') { workControls(parent, ctx, 'sfi'); knobControls(parent, ctx, 'sfi', 'Specs (target rings)'); }
       else { knobControls(parent, ctx, 'sfi', 'Design'); gainReadout(section(parent, 'Gains', 'p. 199'), ctx, 'sfi'); }
     },
@@ -543,7 +536,7 @@
     buildControls(parent, ctx) {
       const sec = section(parent, 'Controller uses x̂', 'p. 222 · Fig. 13-3');
       viewSeg(sec, ctx);
-      segmented(sec, { label: 'Extra plot', options: [{ value: 'v', label: 'velocities' }, { value: 'd', label: 'disturbances' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(sec, { label: 'Extra plot', options: [{ value: 'v', label: 'velocities' }, { value: 'd', label: 'disturbances' }], ...bind(ctx, 'extra') });
       if (ctx.S.mode === 'work') { workControls(parent, ctx, 'obs'); knobControls(parent, ctx, 'obs', 'Specs (target rings)'); }
       else { knobControls(parent, ctx, 'obs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 222'), ctx, 'obs'); }
     },
@@ -593,8 +586,8 @@
     buildControls(parent, ctx) {
       const sec = section(parent, 'Controller uses x̂, subtracts d̂', 'p. 241');
       viewSeg(sec, ctx);
-      segmented(sec, { label: 'Disturbance observer', options: [{ value: true, label: 'on' }, { value: false, label: 'off (F.14a)' }], get: () => ctx.st.dobs, set: (v) => { ctx.st.dobs = v; ctx.update(); } });
-      segmented(sec, { label: 'Extra plot', options: [{ value: 'd', label: 'disturbance estimates' }, { value: 'v', label: 'velocities' }], get: () => ctx.st.extra, set: (v) => { ctx.st.extra = v; ctx.update(); } });
+      segmented(sec, { label: 'Disturbance observer', options: [{ value: true, label: 'on' }, { value: false, label: 'off (F.14a)' }], ...bind(ctx, 'dobs') });
+      segmented(sec, { label: 'Extra plot', options: [{ value: 'd', label: 'disturbance estimates' }, { value: 'v', label: 'velocities' }], ...bind(ctx, 'extra') });
       if (ctx.S.mode === 'work') { workControls(parent, ctx, 'dobs'); knobControls(parent, ctx, 'dobs', 'Specs (target rings)'); }
       else { knobControls(parent, ctx, 'dobs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 241'), ctx, 'dobs'); }
     },

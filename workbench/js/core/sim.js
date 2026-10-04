@@ -125,5 +125,11 @@ WB.sim = (function () {
     return res;
   }
 
-  return { simulate, makeReference, makeNoise, sat, normalize };
+  // Time of the n-th switch of the primary square-wave reference (half a period
+  // per switch), or t_end for other references; and the result index 0.05 s
+  // before time t. Problems read tracking errors there.
+  const switchTime = (S, n = 1) => (S.sim.type === 'square' ? S.sim.tStep + n * 0.5 / S.sim.frequency : S.sim.tEnd);
+  const indexBefore = (S, res, t) => Math.max(0, Math.min(res.t.length - 1, Math.round((t - 0.05) / S.sim.Ts)));
+
+  return { simulate, makeReference, makeNoise, sat, normalize, switchTime, indexBefore };
 })();

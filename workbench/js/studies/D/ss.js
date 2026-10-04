@@ -5,7 +5,7 @@
 // follows the repo's ctrl*.py: dirty derivative Eq. 10.4, trapezoid integrator,
 // observer integrated with RK4 over one Ts using the previous (saturated) input.
 (function () {
-  const { el, slider, segmented, section } = WB.ui;
+  const { el, slider, segmented, section, bind } = WB.ui;
   const M = WB.math;
   const L = WB.la;
   const { tex, texMat, texPole, fmt } = M;
@@ -112,22 +112,20 @@
 
   // ------------------------------------------------------------- controls --
   function tuningSliders(parent, ctx, { pI } = {}) {
-    slider(parent, { label: 't<sub>r</sub>', unit: 's', min: 0.2, max: 6, step: 0.005, sig: 4, get: () => ctx.st.tr, set: (v) => { ctx.st.tr = v; ctx.update(); } });
-    slider(parent, { label: 'ζ', min: 0.2, max: 1.5, step: 0.005, get: () => ctx.st.zeta, set: (v) => { ctx.st.zeta = v; ctx.update(); } });
-    if (pI) slider(parent, { label: 'p<sub>I</sub>', min: -10, max: -0.05, step: 0.01, sig: 3, get: () => ctx.st.pI, set: (v) => { ctx.st.pI = v; ctx.update(); } });
+    slider(parent, { label: 't<sub>r</sub>', unit: 's', min: 0.2, max: 6, step: 0.005, sig: 4, ...bind(ctx, 'tr') });
+    slider(parent, { label: 'ζ', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zeta') });
+    if (pI) slider(parent, { label: 'p<sub>I</sub>', min: -10, max: -0.05, step: 0.01, sig: 3, ...bind(ctx, 'pI') });
   }
   function obsSliders(parent, ctx, withD) {
-    slider(parent, { label: 'ω<sub>n,obs</sub>', unit: 'rad/s', min: 0.5, max: 40, step: 0.05, sig: 4, get: () => ctx.st.wnObs, set: (v) => { ctx.st.wnObs = v; ctx.update(); } });
-    slider(parent, { label: 'ζ<sub>obs</sub>', min: 0.2, max: 1.5, step: 0.005, get: () => ctx.st.zetaObs, set: (v) => { ctx.st.zetaObs = v; ctx.update(); } });
-    if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -30, max: -0.1, step: 0.05, sig: 3, get: () => ctx.st.pD, set: (v) => { ctx.st.pD = v; ctx.update(); } });
+    slider(parent, { label: 'ω<sub>n,obs</sub>', unit: 'rad/s', min: 0.5, max: 40, step: 0.05, sig: 4, ...bind(ctx, 'wnObs') });
+    slider(parent, { label: 'ζ<sub>obs</sub>', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zetaObs') });
+    if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -30, max: -0.1, step: 0.05, sig: 3, ...bind(ctx, 'pD') });
   }
   const SPEC = {
     K1: ['K<sub>1</sub>', 0, 20], K2: ['K<sub>2</sub>', 0, 30], kr: ['k<sub>r</sub>', 0, 30], ki: ['k<sub>i</sub>', -30, 0],
     L1: ['L<sub>1</sub>', 0, 60], L2: ['L<sub>2</sub>', 0, 600], Ld: ['L<sub>d</sub>', 0, 300],
   };
-  function workSliders(parent, ctx, keys) {
-    for (const k of keys) { const [lab, mn, mx] = SPEC[k]; lib.gainSlider(parent, ctx, k, lab, mx, { min: mn, obj: 'w' }); }
-  }
+  const workSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, SPEC, keys, { steps: 2000 });
   function gainsReadout(parent, ctx, keys) {
     lib.readout(parent, ctx, keys, () => {
       const g = ctx.gains;
@@ -138,14 +136,14 @@
     segmented(parent, {
       label: 'Where ż comes from',
       options: [{ value: 'dirty', label: 'dirty derivative of z (D.11e)' }, { value: 'true', label: 'true state' }],
-      get: () => ctx.st.est, set: (v) => { ctx.st.est = v; ctx.update(); },
+      ...bind(ctx, 'est'),
     });
   }
   function awControl(parent, ctx) {
     segmented(parent, {
       label: 'Anti-windup (D.12a)',
       options: [{ value: 'clamp', label: 'hold integrator while saturated' }, { value: 'none', label: 'none' }],
-      get: () => ctx.st.antiwindup, set: (v) => { ctx.st.antiwindup = v; ctx.update(); },
+      ...bind(ctx, 'antiwindup'),
     });
   }
 
@@ -229,11 +227,6 @@
   }
   // Work-mode starting gains: deliberately not the answers.
   const W0 = { K1: 1, K2: 1, kr: 1, ki: -0.5, L1: 5, L2: 10, Ld: 2 };
-  const useGains = (ctx, keys) => ({ label: 'Use my gains', run: (v) => {
-    const vals = keys.map((k) => lib.num(v[k]));
-    if (vals.some((x) => x === null)) return { ok: false, msg: `Enter ${keys.join(', ')}.` };
-    ctx.app.setMode('work'); keys.forEach((k, i) => { ctx.st.w[k] = vals[i]; }); ctx.update(); return null;
-  } });
   const estOut = (ctx, res, sc) => [{ label: 'ẑ (estimate)', y: sc(res.extras.xhat0 || []), color: '--series-3', dash: [3, 3], width: 2 }];
 
   // ---------------------------------------------------------------- D.11 --
@@ -288,7 +281,7 @@
           id: 'd', title: `(d) K and k<sub>r</sub> for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}`,
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', kr: 'k<sub>r</sub>' },
           check: (v) => { const r = ref(); return lib.check(v, { K1: r.K[0], K2: r.K[1], kr: r.kr }, {}); },
-          actions: [useGains(ctx, ['K1', 'K2', 'kr'])],
+          actions: [WB.design.useGains(ctx, ['K1', 'K2', 'kr'])],
           solution: () => {
             const r = ref();
             return [
@@ -355,7 +348,7 @@
             if (pI === null || pI >= 0) return { ok: false, msg: 'Enter a negative pI.' };
             const r = ref(pI); return lib.check(v, { K1: r.K[0], K2: r.K[1], ki: r.ki }, { ki: 'kI' });
           },
-          actions: [useGains(ctx, ['K1', 'K2', 'ki'])],
+          actions: [WB.design.useGains(ctx, ['K1', 'K2', 'ki'])],
           solution: () => {
             const r = ref(prob.pIRef);
             return [
@@ -400,7 +393,7 @@
       const ob = section(parent, 'Observer', 'p. 216 · Eq. 13.3');
       if (ctx.S.mode === 'work') workSliders(ob, ctx, ['L1', 'L2']);
       else { obsSliders(ob, ctx, false); gainsReadout(ob, ctx, ['K1', 'K2', 'ki', 'L1', 'L2']); }
-      slider(ob, { label: 'ẑ(0)', unit: 'm', min: -1, max: 1, step: 0.01, sig: 3, hint: 'initial estimate (true z starts at the left-panel value)', get: () => ctx.st.xhat0, set: (v) => { ctx.st.xhat0 = v; ctx.update(); } });
+      slider(ob, { label: 'ẑ(0)', unit: 'm', min: -1, max: 1, step: 0.01, sig: 3, hint: 'initial estimate (true z starts at the left-panel value)', ...bind(ctx, 'xhat0') });
     },
     math(ctx) {
       const d = design(ctx), { A, C } = ctx.ss;
@@ -442,7 +435,7 @@
             const r = ans.observer(ctx.pModel, q);
             return lib.check(v, { L1: r.L[0], L2: r.L[1] }, {});
           },
-          actions: [useGains(ctx, ['L1', 'L2'])],
+          actions: [WB.design.useGains(ctx, ['L1', 'L2'])],
           solution: () => {
             const q = D.polesFromWnZeta(prob.obsFactor * 2.2 / prob.tr, prob.zetaObs);
             const r = ans.observer(ctx.pModel, q);
@@ -505,7 +498,7 @@
       const sec = section(parent, 'Controller (uses x̂, subtracts d̂)', 'p. 241');
       segmented(sec, {
         label: 'Disturbance observer', options: [{ value: true, label: 'on' }, { value: false, label: 'off (D.14a)' }],
-        get: () => ctx.st.dobs, set: (v) => { ctx.st.dobs = v; ctx.update(); },
+        ...bind(ctx, 'dobs'),
       });
       awControl(sec, ctx);
       if (ctx.S.mode === 'work') workSliders(sec, ctx, ['K1', 'K2', 'ki']);
@@ -546,7 +539,7 @@
             const r = ans.disturbanceObserver(ctx.pModel, q);
             return lib.check(v, { L1: r.L[0], L2: r.L[1], Ld: r.Ld }, {});
           },
-          actions: [useGains(ctx, ['L1', 'L2', 'Ld'])],
+          actions: [WB.design.useGains(ctx, ['L1', 'L2', 'Ld'])],
           solution: () => {
             const q = [...D.polesFromWnZeta(prob.obsFactor * 2.2 / prob.tr, prob.zetaObs), { re: prob.pDRef, im: 0 }];
             const r = ans.disturbanceObserver(ctx.pModel, q);
