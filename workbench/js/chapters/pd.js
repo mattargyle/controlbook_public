@@ -238,6 +238,10 @@ WB.chapters = WB.chapters || {};
     }
 
     if (parts.length > 1) parent.append(tools);
+    // Parts that can be marked solved (a Check or a done button) decide when the chapter's tab turns green.
+    if (ctx.app && ctx.app.registerParts) {
+      ctx.app.registerParts(prob.id, parts.filter((p) => p.check || (p.code && p.code.check) || p.done).map((p) => `${prob.id}/${p.id}`));
+    }
     for (const part of parts) {
       const box = el('div', { class: 'part' });
       const title = el('div', { class: 'part-title' });

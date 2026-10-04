@@ -599,6 +599,23 @@ window.WB = window.WB || {};
   const SOLVED_KEY = 'wb.solved';
   const solved = store.get(SOLVED_KEY, {});
   const isSolved = (k) => !!solved[`${S.sysId}:${k}`];
+  // The parts each chapter's problem panels can mark solved, recorded when a panel
+  // is built: {A: {ch3: {'A.3': ['A.3/a', ...]}}}. A tab turns green once every
+  // recorded part of its chapter is solved (so a chapter counts once visited).
+  const PARTS_KEY = 'wb.parts';
+  const parts = store.get(PARTS_KEY, {});
+  function chapterDone(sysId, c) {
+    const probs = Object.values((parts[sysId] || {})[c] || {});
+    const keys = probs.flat();
+    return keys.length > 0 && keys.every((k) => !!solved[`${sysId}:${k}`]);
+  }
+  function refreshTabs() {
+    for (const b of document.querySelectorAll('#tabs .tab[data-ch]')) {
+      const done = chapterDone(S.sysId, b.dataset.ch);
+      b.classList.toggle('done', done);
+      b.title = b.title.replace(/ · all parts solved$/, '') + (done ? ' · all parts solved' : '');
+    }
+  }
 
   // ------------------------------------------------------------ top level --
   function update() {
@@ -608,6 +625,7 @@ window.WB = window.WB || {};
     drawAnalysis();
     drawMath();
     drawCursor();
+    refreshTabs();
     store.set(STATE_KEY, S);
     try { history.replaceState(null, '', `#${S.sysId}/${S.chapter}/${S.mode}`); } catch (e) { /* file:// in some browsers */ }
   }
@@ -701,6 +719,15 @@ window.WB = window.WB || {};
     isRevealed: (key) => revealed.has(key),
     reveal: (key) => revealed.add(key),
     isSolved,
+    // Called by each problem panel with the keys of the parts it can mark solved.
+    registerParts(probId, keys) {
+      const sys = (parts[S.sysId] = parts[S.sysId] || {});
+      const ch = (sys[S.chapter] = sys[S.chapter] || {});
+      if (JSON.stringify(ch[probId]) === JSON.stringify(keys)) return;
+      ch[probId] = keys;
+      store.set(PARTS_KEY, parts);
+      refreshTabs();
+    },
     markSolved(k) {
       if (isSolved(k)) return;
       solved[`${S.sysId}:${k}`] = true;
