@@ -69,6 +69,9 @@
 
   // Closed loop with D on the output: s^3 + (a1 + b0 kD) s^2 + (a0 + b0 kP) s + b0 kI
   function pidCharPoly(t, g) { return [1, t.a1 + t.b0 * g.kD, t.a0 + t.b0 * g.kP, t.b0 * g.kI]; }
+  // Python-check truths at complex s (a = {s, kP, kD}): D.7(b) and D.P.6.
+  const clDen = (p, a) => { const t = ans.tf(p); return WB.py.cx.poly([1, t.a1 + t.b0 * a.kD, t.a0 + t.b0 * a.kP], a.s); };
+  const evansL = (p, a) => { const t = ans.tf(p); return WB.py.cx.div(t.b0, WB.py.cx.poly([1, t.a1 + t.b0 * a.kD, t.a0 + t.b0 * a.kP, 0], a.s)); };
   function clPoles(t, g) {
     return g.kI ? L.roots(pidCharPoly(t, g)) : M.roots2(t.a1 + t.b0 * g.kD, t.a0 + t.b0 * g.kP);
   }
@@ -78,7 +81,7 @@
     segmented(parent, {
       label: 'Spring compensation',
       options: [
-        { value: 'eq', label: 'F = k z<sub>r</sub> + F̃', title: 'equilibrium force F_e = k z_e with z_e = z_r' },
+        { value: 'eq', label: lib.compLabel(ctx), title: 'equilibrium force F_e at z_e = z_r, added outside the loop' },
         { value: 'none', label: 'none (Fig. 7-2)', title: 'F = F̃: pure PD/PID' },
       ],
       ...bind(ctx, 'comp'),
@@ -116,9 +119,10 @@
     ctx.update();
   }
 
-  function markers(ctx, { draggable = false, ol = true } = {}) {
+  // The open-loop poles answer D.7(a): in Work mode they stay off until it is solved.
+  function markers(ctx, { draggable = false } = {}) {
     const t = ctx.model, g = ctx.gains;
-    const mk = ol ? M.roots2(t.a1, t.a0).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` })) : [];
+    const mk = lib.showOl(ctx) ? M.roots2(t.a1, t.a0).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` })) : [];
     clPoles(t, g).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole ${i + 1}`, dragId: draggable && Math.abs(p.im) > 1e-9 ? 0 : (draggable && !g.kI ? i : undefined) }));
     if (g.kI && g.kP) mk.push({ re: -g.kI / g.kP, im: 0, kind: 'zero', label: 'closed-loop zero −kI/kP' });
     if (!g.kI && ctx.st.arch === 'error' && g.kD > 1e-9) mk.push({ re: -g.kP / g.kD, im: 0, kind: 'zero', label: 'zero −kP/kD' });
@@ -129,10 +133,9 @@
   function plantCard(ctx) {
     const t = ctx.model;
     return {
-      title: 'Plant (D.5)', page: 'p. 378 · D.5, p. 99 · Eq. 7.1',
-      theory: 'P(s) = \\frac{b_0}{s^2 + a_1 s + a_0}',
-      symbolic: 'b_0 = \\tfrac1m,\\quad a_1 = \\tfrac bm,\\quad a_0 = \\tfrac km',
-      numbers: `P(s) = \\frac{${tex(t.b0)}}{s^2 + ${tex(t.a1)}\\,s + ${tex(t.a0)}}`, spoiler: true,
+      title: 'Plant (D.5)', page: 'p. 378 · D.5, p. 99 · Eq. 7.1', answers: 'D.5/b',
+      theory: 'P(s) = \\frac{b_0}{s^2 + a_1 s + a_0},\\quad b_0 = \\tfrac1m,\\; a_1 = \\tfrac bm,\\; a_0 = \\tfrac km',
+      numbers: `P(s) = \\frac{${tex(t.b0)}}{s^2 + ${tex(t.a1)}\\,s + ${tex(t.a0)}}`,
     };
   }
   function pdLoopCard(ctx) {
@@ -143,12 +146,12 @@
       theory: err ? '\\frac{Y}{R} = \\frac{b_0 k_D s + b_0 k_P}{s^2 + (a_1 + b_0 k_D)s + (a_0 + b_0 k_P)}' : '\\frac{Y}{R} = \\frac{b_0 k_P}{s^2 + (a_1 + b_0 k_D)s + (a_0 + b_0 k_P)}',
       symbolic: `\\Delta_{cl}(s) = s^2 + \\frac{b + k_D}{m}s + \\frac{k + k_P}{m}`,
       numbers: `\\Delta_{cl} = s^2 + ${tex(t.a1 + t.b0 * g.kD)}\\,s + ${tex(t.a0 + t.b0 * g.kP)},\\quad p_{cl} = ${texPole(cl[0])},\\; ${texPole(cl[1])}`,
-      spoiler: true,
+      answers: 'D.7/b',
     };
   }
   function compCard(ctx) {
     return {
-      title: 'Spring compensation', page: 'p. 59–60 (equilibrium input)',
+      title: 'Spring compensation', page: 'p. 59–60 (equilibrium input)', answers: ctx.st.comp === 'eq' ? 'D.4/a' : undefined,
       theory: ctx.st.comp === 'eq' ? 'F = F_e + \\tilde F,\\quad F_e = k z_e,\\; z_e = z_r' : 'F = \\tilde F \\quad(\\text{Fig. 7-2 exactly})',
       note: ctx.st.comp === 'eq' ? 'Feedforward outside the loop: the poles do not move, but the DC gain from z_r to z becomes 1 when k is known exactly.' : 'Without F_e the spring holds the mass short of z_r: D.9 asks how far.',
     };
@@ -198,7 +201,7 @@
 
     splane(ctx) {
       const work = ctx.S.mode === 'work';
-      const mk = markers(ctx, { draggable: !work, ol: !work || ctx.app.isRevealed('D:ch7:ol') });
+      const mk = markers(ctx, { draggable: !work });
       if (work) for (const p of ctx.sys.problems.ch7.desiredPoles) mk.push({ ...p, kind: 'target', label: 'target pole (problem)' });
       return { markers: mk };
     },
@@ -219,12 +222,16 @@
       const des = ctx.S.mode === 'work' ? ctx.sys.problems.ch7.desiredPoles : this.designPoles(ctx);
       const g = ans.pdGains(ctx.pModel, des);
       return [
-        plantCard(ctx),
         { title: 'Open-loop poles', page: 'p. 99',
-          theory: '\\Delta_{ol}(s) = s^2 + a_1 s + a_0 = 0', numbers: `p_{ol} = ${texPole(ol[0], 4)},\\; ${texPole(ol[1], 4)}`, spoiler: true },
+          theory: '\\text{open-loop poles} = \\text{roots of the denominator of } P(s)' },
+        plantCard(ctx),
+        { title: 'Open-loop poles of the mass-spring-damper', page: 'p. 99', answers: 'D.7/a',
+          theory: 'p_{ol} = -\\frac{b}{2m} \\pm \\sqrt{\\left(\\frac{b}{2m}\\right)^2 - \\frac km}',
+          numbers: `p_{ol} = ${texPole(ol[0], 4)},\\; ${texPole(ol[1], 4)}` },
         pdLoopCard(ctx),
         { title: ctx.S.mode === 'work' ? 'Pole placement (problem targets)' : 'Pole placement (your design)', page: 'p. 100',
-          theory: '\\Delta^d_{cl} = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
+          theory: '\\Delta^d_{cl}(s) = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad \\text{set } \\Delta_{cl}(s) = \\Delta^d_{cl}(s) \\text{ and match coefficients}',
+          symbolic: 'k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
           numbers: `\\Delta^d_{cl} = s^2 + ${tex(g.alpha1)}\\,s + ${tex(g.alpha0)} \\Rightarrow k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}`, spoiler: true },
         compCard(ctx),
       ];
@@ -242,21 +249,27 @@
             const gp = [M.parseComplex(v.p1), M.parseComplex(v.p2)];
             if (!gp[0] || !gp[1]) return { ok: false, msg: 'Enter both poles.' };
             const ok = M.polesMatch(gp, ans.olPoles(ctx.pModel));
-            if (ok) { ctx.app.reveal('D:ch7:ol'); ctx.update(); }
-            return ok ? { ok, msg: 'Lightly damped: ζ ≈ 0.065.' } : { ok, msg: 'Roots of s² + (b/m)s + k/m?' };
+            return lib.passed(ctx, ok ? { ok, msg: 'Lightly damped: ζ ≈ 0.065.' } : { ok, msg: 'The open-loop poles are the roots of the denominator of P(s).' });
           },
           solution: () => {
             const ol = ans.olPoles(ctx.pModel);
-            return [{ tex: `\\Delta_{ol} = s^2 + ${tex(t().a1)}s + ${tex(t().a0)} \\Rightarrow p = ${texPole(ol[0], 4)},\\; ${texPole(ol[1], 4)}` }];
+            return [{ tex: `\\Delta_{ol} = s^2 + \\tfrac bm s + \\tfrac km = s^2 + ${tex(t().a1)}s + ${tex(t().a0)} \\Rightarrow p = ${texPole(ol[0], 4)},\\; ${texPole(ol[1], 4)}` }];
           },
         },
         {
-          id: 'b', title: '(b) Closed loop: Δ<sub>cl</sub> = s² + (c<sub>1</sub> + d<sub>1</sub>k<sub>D</sub>)s + (c<sub>0</sub> + d<sub>0</sub>k<sub>P</sub>)',
-          inputs: { c1: 'c<sub>1</sub>', d1: 'd<sub>1</sub>', c0: 'c<sub>0</sub>', d0: 'd<sub>0</sub>' },
-          check: (v) => lib.check(v, { c1: t().a1, d1: t().b0, c0: t().a0, d0: t().b0 }, {}),
+          id: 'b', title: '(b) Closed-loop transfer function and closed-loop poles',
+          html: 'Derivative on the output (Fig. 7-2). Write the transfer function from z<sub>r</sub> to z and the closed-loop characteristic polynomial (its roots are the closed-loop poles) in terms of k<sub>P</sub> and k<sub>D</sub>; the check calls them at complex s. Any nonzero multiple of Δ<sub>cl</sub> is accepted.',
+          code: lib.pyPart(ctx, {
+            args: { s: lib.sArg, kP: { label: 'kP', lo: 0.5, hi: 20 }, kD: { label: 'kD', lo: 0.5, hi: 30 } },
+            items: [
+              { fn: 'closed_loop', args: ['s', 'kP', 'kD'], truth: (p, a) => WB.py.cx.div(ans.tf(p).b0 * a.kP, clDen(p, a)) },
+              { fn: 'char_poly', args: ['s', 'kP', 'kD'], compare: 'scale', truth: clDen },
+            ],
+          }, 'def closed_loop(s, kP, kD):\n    # Z(s)/Z_r(s)\n    return ...\n\ndef char_poly(s, kP, kD):\n    # Delta_cl(s)\n    return ...\n'),
           solution: () => [
-            { tex: '\\frac{Z(s)}{Z_r(s)} = \\frac{k_P/m}{s^2 + \\frac{b + k_D}{m}s + \\frac{k + k_P}{m}}' },
-            { tex: `p_{1,2} = -\\frac{b + k_D}{2m} \\pm \\sqrt{\\left(\\frac{b + k_D}{2m}\\right)^2 - \\frac{k + k_P}{m}},\\quad (c_1, d_1, c_0, d_0) = (${tex(t().a1)}, ${tex(t().b0)}, ${tex(t().a0)}, ${tex(t().b0)})` },
+            { tex: '\\frac{Z(s)}{Z_r(s)} = \\frac{k_P/m}{s^2 + \\frac{b + k_D}{m}s + \\frac{k + k_P}{m}},\\quad \\Delta_{cl}(s) = s^2 + \\frac{b + k_D}{m}s + \\frac{k + k_P}{m}' },
+            { tex: 'p_{1,2} = -\\frac{b + k_D}{2m} \\pm \\sqrt{\\left(\\frac{b + k_D}{2m}\\right)^2 - \\frac{k + k_P}{m}}' },
+            { code: 'def char_poly(s, kP, kD):\n    return (s**2 + (P.b + kD) / P.m * s\n            + (P.k + kP) / P.m)\n\ndef closed_loop(s, kP, kD):\n    return kP / P.m / char_poly(s, kP, kD)' },
             { html: 'From Eq. 7.5 (p. 101). With the spring compensation F = kz<sub>r</sub> + F̃ the numerator becomes (k + k<sub>P</sub>)/m, so the DC gain is 1; the poles are the same.' },
           ],
         },
@@ -276,7 +289,7 @@
         },
         {
           id: 'd', title: '(d) Simulate a 1 m step',
-          html: 'Click <em>Use my gains</em> in (c). The pure Fig. 7-2 loop settles at k<sub>P</sub>/(k + k<sub>P</sub>) of the step (D.9 explains why). Switch the spring compensation to F = kz<sub>r</sub> + F̃ to reach 1 m; with these gains that asks for 7.5 N at the step, above the 6 N limit that D.8(b) introduces.',
+          html: 'Click <em>Use my gains</em> in (c), then compare the closed-loop × with the dashed target rings and look at the 1 m step response. The dashed orange trace is the linear design model.',
           check: () => {
             if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
             const cl = M.roots2(t().a1 + t().b0 * ctx.st.kD, t().a0 + t().b0 * ctx.st.kP);
@@ -284,7 +297,7 @@
               ? { ok: true, msg: 'The simulated loop has the target poles.' }
               : { ok: false, msg: `Current closed-loop poles: ${lib.polesOf(cl)}.` };
           },
-          solution: () => [{ html: 'Two real poles: no overshoot, and the slower pole at −1 gives a 2% settling time of about 5 s (the 4/σ rule of thumb with σ = 1 gives 4 s; the second pole stretches it).' }],
+          solution: () => [{ html: 'Two real poles: no overshoot, and the slower pole at −1 gives a 2% settling time of about 5 s (the 4/σ rule of thumb with σ = 1 gives 4 s; the second pole stretches it). The pure Fig. 7-2 loop settles at k<sub>P</sub>/(k + k<sub>P</sub>) of the step (D.9 explains why). With the spring compensation F = kz<sub>r</sub> + F̃ it reaches 1 m, but with these gains that asks for 7.5 N at the step, above the 6 N limit that D.8(b) introduces.' }],
         },
       ]);
     },
@@ -360,12 +373,14 @@
           theory: '\\omega_n = \\frac{2.2}{t_r},\\quad \\Delta^d_{cl} = s^2 + 2\\zeta\\omega_n s + \\omega_n^2,\\quad p = -\\zeta\\omega_n \\pm j\\omega_n\\sqrt{1-\\zeta^2}',
           numbers: `\\omega_n = ${tex(d.wn)},\\quad \\Delta^d_{cl} = s^2 + ${tex(d.alpha1)}\\,s + ${tex(d.alpha0)},\\quad p = ${texPole(d.poles[0], 4)},\\; ${texPole(d.poles[1], 4)}`, spoiler: true },
         { title: 'Gains from the spec', page: 'p. 100',
-          theory: 'k_P = \\frac{\\omega_n^2 - a_0}{b_0},\\quad k_D = \\frac{2\\zeta\\omega_n - a_1}{b_0}',
-          numbers: `k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)}`, spoiler: true },
+          theory: '\\text{set } \\Delta_{cl}(s) = \\Delta^d_{cl}(s) \\text{ and match coefficients}' },
+        { title: 'Gains from the spec (this plant)', page: 'p. 100', answers: 'D.8/a',
+          theory: 'k_P = \\frac{\\omega_n^2 - a_0}{b_0} = m\\omega_n^2 - k,\\quad k_D = \\frac{2\\zeta\\omega_n - a_1}{b_0} = 2m\\zeta\\omega_n - b',
+          numbers: `k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)}` },
         { title: 'Saturation limits the rise time', page: 'p. 119 · Eq. 8.8, p. 121 · Fig. 8-13',
-          theory: 'u = F_e + k_P e - k_D\\dot z \\text{ peaks at } t = 0^+ \\;(\\dot z = 0):\\quad k_P \\le \\frac{F_{max} - |F_e|}{e_{max}},\\quad \\omega_n \\le \\sqrt{a_0 + b_0 k_{P,max}},\\quad t_r \\ge \\frac{2.2}{\\omega_{n,max}}',
+          theory: 'k_P \\le \\frac{\\tilde{u}_{max}}{e_{max}},\\quad \\omega_n \\le \\sqrt{a_0 + b_0\\frac{\\tilde{u}_{max}}{e_{max}}},\\quad t_r \\ge \\frac{2.2}{\\omega_{n,max}},\\quad \\tilde{u}_{max} = u_{max} - |u_e|',
           numbers: `F_e = ${tex(sb.Fe)},\\; e_{max} = ${tex(step)}\\,\\text{m}\\Rightarrow k_{P,max} = ${tex(sb.kP)},\\; \\omega_{n,max} = ${tex(sb.wn)},\\; t_{r,min} = ${tex(sb.tr)}\\,\\text{s}`, spoiler: true,
-          note: 'F_e depends on the spring-compensation setting (k z_r or none), which changes the D.8(b) answer.' },
+          note: 'u_e is the equilibrium force the controller adds (it depends on the spring-compensation setting), which changes the D.8(b) answer.' },
         compCard(ctx),
       ];
     },
@@ -375,8 +390,8 @@
       const ref = () => ans.spec(ctx.pModel, prob.tr, prob.zeta);
       lib.panel(parent, ctx, prob, [
         {
-          id: 'a', title: `(a) t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,
-          html: 'Δ<sup>d</sup><sub>cl</sub>(s) = s² + α<sub>1</sub>s + α<sub>0</sub>; poles −σ ± jω<sub>d</sub>.',
+          id: 'a', title: `(a) Desired characteristic polynomial, poles, k<sub>P</sub> and k<sub>D</sub> (t<sub>r</sub> ≈ ${prob.tr} s, ζ = ${prob.zeta})`,
+          html: 'Enter ω<sub>n</sub>, the coefficients of Δ<sup>d</sup><sub>cl</sub>(s) = s² + α<sub>1</sub>s + α<sub>0</sub>, the poles −σ ± jω<sub>d</sub>, and your gains.',
           inputs: { wn: 'ω<sub>n</sub>', alpha1: 'α<sub>1</sub>', alpha0: 'α<sub>0</sub>', sig: 'σ', wd: 'ω<sub>d</sub>', kP: 'k<sub>P</sub>', kD: 'k<sub>D</sub>' },
           check: (v) => { const r = ref(); return lib.check(v, { wn: r.wn, alpha1: r.alpha1, alpha0: r.alpha0, sig: -r.poles[0].re, wd: Math.abs(r.poles[0].im), kP: r.kP, kD: r.kD }, { wn: 'ωn', alpha1: 'α1', alpha0: 'α0', sig: 'σ', wd: 'ωd' }); },
           actions: [{ label: 'Use my gains', run: (v) => {
@@ -416,7 +431,7 @@
             const pct = (100 * pk).toFixed(1);
             if (pk > 1.0005) return { ok: false, msg: `Peak demand is ${pct}% of Fmax, so it saturates. Slow it down.` };
             if (pk < 0.95) return { ok: false, msg: `Peak demand is ${pct}% of Fmax. You can go faster.` };
-            return { ok: true, msg: `Peak demand is ${pct}% of Fmax (compensation: ${ctx.st.comp === 'eq' ? 'F = kz_r + F̃' : 'none'}).` };
+            return { ok: true, msg: `Peak demand is ${pct}% of Fmax (spring compensation: ${ctx.st.comp === 'eq' ? 'F = F_e + F̃' : 'none'}).` };
           },
           actions: [{ label: 'Try it', run: (v) => {
             const tr = lib.num(v.tr);
@@ -505,16 +520,17 @@
         { title: 'Final value theorem and tracking error', page: 'p. 137, p. 138',
           theory: '\\lim_{t\\to\\infty} e(t) = \\lim_{s\\to 0} sE(s),\\quad E(s) = \\frac{1}{1 + P(s)C(s)}R(s)' },
         { title: 'Error constants and system type', page: 'p. 141 · Table 9-1',
-          theory: 'M_p = \\lim_{s\\to0} PC,\\quad M_v = \\lim_{s\\to0} sPC,\\quad e_{step} = \\tfrac{1}{1+M_p},\\; e_{ramp} = \\tfrac{1}{M_v},\\; e_{parab} = \\tfrac{1}{M_a}',
-          symbolic: g.kI > 0 ? 'PC = \\frac{(k_D s^2 + k_P s + k_I)/m}{s\\,(s^2 + \\frac bm s + \\frac km)} \\Rightarrow \\text{type 1},\\; M_v = \\frac{k_I}{k}' : 'PC = \\frac{(k_D s + k_P)/m}{s^2 + \\frac bm s + \\frac km} \\Rightarrow \\text{type 0},\\; M_p = \\frac{k_P}{k}',
+          theory: 'M_p = \\lim_{s\\to0} PC,\\quad M_v = \\lim_{s\\to0} sPC,\\quad e_{step} = \\tfrac{1}{1+M_p},\\; e_{ramp} = \\tfrac{1}{M_v},\\; e_{parab} = \\tfrac{1}{M_a}' },
+        { title: g.kI > 0 ? 'Type of this loop with PID' : 'Type of this loop with PD', page: 'p. 141 · Table 9-1', answers: g.kI > 0 ? 'D.9/a2' : 'D.9/a1',
+          theory: g.kI > 0 ? 'PC = \\frac{(k_D s^2 + k_P s + k_I)/m}{s\\,(s^2 + \\frac bm s + \\frac km)} \\Rightarrow \\text{type 1},\\; M_v = \\frac{k_I}{k}' : 'PC = \\frac{(k_D s + k_P)/m}{s^2 + \\frac bm s + \\frac km} \\Rightarrow \\text{type 0},\\; M_p = \\frac{k_P}{k}',
           numbers: g.kI > 0 ? `M_v = ${tex(a.Mv)},\\quad e_{ramp} = \\frac{k}{k_I} = ${tex(a.ramp)}` : `M_p = ${tex(a.Mp)},\\quad e_{step} = \\frac{k}{k + k_P} = ${tex(a.step)}`,
-          spoiler: true,
           note: 'For this plant the Fig. 7-1 and Fig. 7-2 loops give the same limits, because P(0) is finite.' },
         { title: 'Input disturbance', page: 'p. 143 · §9.1.3, Fig. 9-5',
           theory: 'E(s) = \\cdots + \\frac{P}{1+PC}D_{in}(s),\\quad \\lim_{s\\to0}\\frac{P}{1+PC}',
-          numbers: g.kI > 0 ? '\\lim_{s\\to0}\\frac{P}{1+PC} = 0 \\;(\\text{integrator in } C)' : `\\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1}{k + k_P} = ${tex(a.dist)}\\;\\text{m/N}`,
-          spoiler: true,
           note: 'Fig. 9-5 subtracts d_in at the plant input, hence the + sign. The workbench adds d (the plant sees u + d), so here E = −P/(1+PC)·D: same magnitude, opposite sign.' },
+        { title: 'Input disturbance in this loop', page: 'p. 143 · §9.1.3', answers: 'D.9/b',
+          theory: "\\lim_{s\\to0}\\frac{P}{1+PC} = \\frac{1}{k + k_P} \\;(\\text{PD}),\\quad 0 \\;(\\text{PID: integrator in } C)",
+          numbers: g.kI > 0 ? '\\lim_{s\\to0}\\frac{P}{1+PC} = 0' : `\\lim_{s\\to0}\\frac{P}{1+PC} = ${tex(a.dist)}\\;\\text{m/N}` },
         compCard(ctx),
       ];
     },
@@ -553,7 +569,6 @@
           id: 'b', title: '(b) Constant input disturbance',
           html: 'Steady-state error per newton of d (m/N), without and with the integrator, at the current k<sub>P</sub>.',
           inputs: { pd: 'PD', pid: 'PID' },
-          html: undefined,
           check: (v) => {
             const pd = lib.num(v.pd);  // sign depends on the convention (Fig. 9-5 subtracts d_in; the sim adds d)
             return lib.check({ pd: pd === null ? v.pd : Math.abs(pd), pid: v.pid }, { pd: 1 / (ctx.pModel.k + g().kP), pid: 0 }, { pd: 'PD', pid: 'PID' });
@@ -612,14 +627,14 @@
     math(ctx) {
       const g = ctx.gains, ev = ans.evans(ctx.pModel, g);
       return [
-        { title: 'Closed loop with PID (derivative on output)', page: 'p. 470 (A.P.6 pattern)',
-          theory: '\\Delta_{cl}(s) = s^3 + (a_1 + b_0k_D)s^2 + (a_0 + b_0k_P)s + b_0k_I',
-          symbolic: '\\Delta_{cl}(s) = s^3 + \\frac{b + k_D}{m}s^2 + \\frac{k + k_P}{m}s + \\frac{k_I}{m}',
-          numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(pidCharPoly(ctx.model, g))}`, spoiler: true },
         { title: 'Evans form', page: 'p. 466',
-          theory: '1 + K\\,L(s) = 0,\\quad K = k_I',
-          symbolic: 'L(s) = \\frac{1/m}{s^3 + \\frac{b + k_D}{m}s^2 + \\frac{k + k_P}{m}s}',
-          numbers: `L(s) = \\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev.den)}},\\quad k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}`, spoiler: true },
+          theory: '\\Delta_{cl}(s) = 0 \\iff 1 + k\\,L(s) = 0 \\quad(k \\text{ is the gain that varies along the locus, here } k_I)' },
+        { title: 'Closed loop with PID (derivative on output)', page: 'p. 470 (A.P.6 pattern)', answers: 'D.P.6/a',
+          theory: '\\Delta_{cl}(s) = s^3 + \\frac{b + k_D}{m}s^2 + \\frac{k + k_P}{m}s + \\frac{k_I}{m}',
+          numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(pidCharPoly(ctx.model, g))}` },
+        { title: 'Evans form of the mass-spring-damper with PID', page: 'p. 466', answers: 'D.P.6/a',
+          theory: '1 + k_I\\,L(s) = 0,\\quad L(s) = \\frac{1/m}{s^3 + \\frac{b + k_D}{m}s^2 + \\frac{k + k_P}{m}s}',
+          numbers: `L(s) = \\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev.den)}},\\quad k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}` },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
           theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ is stable iff } c_2, c_1, c_0 > 0 \\text{ and } c_2 c_1 > c_0',
           numbers: `k_{I,crit} = \\frac{c_2 c_1}{b_0} = ${tex(ev.kCrit)}`, spoiler: true },
@@ -641,11 +656,18 @@
           } }],
         },
         {
-          id: 'a', title: 'Evans form: L(s) = c / (s³ + d<sub>2</sub>s² + d<sub>1</sub>s)',
-          html: 'Uses the current k<sub>P</sub>, k<sub>D</sub> (Work: your gains; Explore: from t<sub>r</sub>, ζ).',
-          inputs: { c: 'c', d2: 'd<sub>2</sub>', d1: 'd<sub>1</sub>' },
-          check: (v) => lib.check(v, { c: ctx.model.b0, d2: ev().den[1], d1: ev().den[2] }, {}),
-          solution: () => [{ tex: `1 + k_I\\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev().den)}} = 0` }, { html: 'd<sub>2</sub> = (b + k<sub>D</sub>)/m and d<sub>1</sub> = (k + k<sub>P</sub>)/m are the coefficients of the PD design polynomial: α<sub>1</sub> = 2ζω<sub>n</sub>, α<sub>0</sub> = ω<sub>n</sub>².' }],
+          id: 'a', title: 'Characteristic equation in Evans form (in k<sub>I</sub>)',
+          html: 'Write L(s) for 1 + k<sub>I</sub>L(s) = 0 in terms of the PD gains k<sub>P</sub>, k<sub>D</sub> (derivative on the output); the check calls it at complex s.',
+          code: lib.pyPart(ctx, {
+            args: { s: lib.sArg, kP: { label: 'kP', lo: 0.5, hi: 20 }, kD: { label: 'kD', lo: 0.5, hi: 30 } },
+            items: [{ fn: 'L', args: ['s', 'kP', 'kD'], truth: evansL }],
+          }, 'def L(s, kP, kD):\n    return ...\n'),
+          solution: () => [
+            { tex: '\\Delta_{cl}(s) = s^3 + \\frac{b + k_D}{m}s^2 + \\frac{k + k_P}{m}s + \\frac{k_I}{m} = 0 \\;\\Rightarrow\\; L(s) = \\frac{1/m}{s^3 + \\frac{b + k_D}{m}s^2 + \\frac{k + k_P}{m}s}' },
+            { tex: `\\text{current PD gains: } 1 + k_I\\frac{${tex(ctx.model.b0)}}{${WB.tf.polyTex(ev().den)}} = 0` },
+            { code: 'def L(s, kP, kD):\n    return (1 / P.m) / (s**3\n        + (P.b + kD) / P.m * s**2\n        + (P.k + kP) / P.m * s)' },
+            { html: '(b + k<sub>D</sub>)/m and (k + k<sub>P</sub>)/m are the coefficients of the PD design polynomial: α<sub>1</sub> = 2ζω<sub>n</sub>, α<sub>0</sub> = ω<sub>n</sub>².' },
+          ],
         },
         {
           id: 'b', title: 'Largest stable k<sub>I</sub>',
@@ -746,8 +768,10 @@
           numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad ${tex(beta)},\\quad ${tex(gamma)}`, spoiler: true },
         { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
           theory: '\\text{(1) integrate only when } |\\dot z| < \\bar v,\\quad \\text{(2) } u_I^+ = u_I + \\frac{1}{k_I}\\big(u_{sat} - u_{unsat}\\big)' },
-        { title: 'Gains from t_r, ζ (D.8)', page: 'p. 113 · Eq. 8.5, p. 160 · §10.1.3',
-          theory: '\\omega_n = \\frac{2.2}{t_r},\\quad k_P = \\frac{\\omega_n^2 - a_0}{b_0},\\quad k_D = \\frac{2\\zeta\\omega_n - a_1}{b_0},\\quad \\text{then raise } k_I \\text{ from 0}',
+        { title: 'Gain-selection guidance', page: 'p. 160 · §10.1.3',
+          theory: '\\text{pick } k_P, k_D \\text{ (Ch. 8)},\\; \\text{then raise } k_I \\text{ from 0 until the steady-state error is gone}' },
+        { title: 'Gains from t_r, ζ (D.8)', page: 'p. 113 · Eq. 8.5, p. 160 · §10.1.3', answers: 'D.8/a',
+          theory: '\\omega_n = \\frac{2.2}{t_r},\\quad k_P = m\\omega_n^2 - k,\\quad k_D = 2m\\zeta\\omega_n - b',
           numbers: `\\omega_n = ${tex(d.wn)},\\quad k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)},\\quad k_I = ${tex(d.kI)}`, spoiler: true },
         compCard(ctx),
       ];
@@ -757,6 +781,18 @@
       const prob = ctx.sys.problems.ch10;
       const ref = () => ans.spec(ctx.pModel, prob.tr, prob.zeta);
       lib.panel(parent, ctx, prob, [
+        {
+          id: 'a', title: '(a) Parameters vary by up to 20%',
+          html: 'Set the true plant in the left panel (<em>Randomize ±α</em> with α = 0.2). The chapter starts with a fixed 20% draw so the page is repeatable. In your code, <code>massDynamics(alpha=0.2)</code> perturbs m, k and b.',
+          check: () => {
+            const mis = Object.entries(ctx.S.mismatch || {});
+            return mis.some(([, v]) => Math.abs(v) > 0) ? { ok: true, msg: `Mismatch: ${mis.map(([k, v]) => `${k} ${fmt(v, 3)}%`).join(', ')}.` } : { ok: false, msg: 'The true plant equals the model. Randomize it.' };
+          },
+        },
+        {
+          id: 'b', title: '(b) The controller gets only z and z<sub>r</sub>',
+          html: 'The PID here gets only the (noisy) measurement and the reference; ż comes from the dirty derivative in (c). In your <code>ctrlPID.py</code>, <code>update(z_r, y)</code> receives y, not the state.',
+        },
         {
           id: 'c1', title: `(c) PD part for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,
           inputs: { kP: 'k<sub>P</sub>', kD: 'k<sub>D</sub>' },

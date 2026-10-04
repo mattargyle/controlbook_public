@@ -298,6 +298,7 @@ WB.studies.D = WB.studies.D || { chapters: {} };
         sim: { type: 'square', amplitude: 0.5, frequency: 0.02, tStep: 0, tEnd: 50 },
         mismatch: { m: 15, k: -18, b: 10 },  // one fixed draw with alpha = 0.2, so the page is repeatable
         statement: [
+          'Implement the PID controller using only measured outputs of the system.',
           '(a) Let m, k and b vary by up to 20% of their nominal values each run (α = 0.2).',
           '(b) The controller gets only the measured position z and the reference z<sub>r</sub>, not the state.',
           '(c) Implement the PID controller designed in D.8 with dirty-derivative gain σ = 0.05. Tune the integrator to remove the steady-state error caused by the uncertain parameters. (This tab uses the D.8(a) specs t<sub>r</sub> = 2 s, ζ = 0.7.)',
@@ -412,6 +413,28 @@ WB.studies.D = WB.studies.D || { chapters: {} };
       return { e: Math.abs(res.r[i] - res.y[i]), t: res.t[i], amp: Math.abs(S.sim.amplitude) };
     },
     polesOf(list) { return list.map((p) => M.fmtPole(p)).join(', '); },
+
+    // ----------------------------------------------- Work-mode answer gating --
+    // Anything that answers part `key` ('D.7/a') is shown in Explore mode, or in
+    // Work mode once that part is solved. Explore is tested first, so contexts
+    // without app.isSolved (tools/regress_D.py) work in Explore.
+    shows: (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isSolved(key),
+    // The open-loop (plant) poles answer D.7(a).
+    showOl: (ctx) => lib.shows(ctx, 'D.7/a'),
+    // markSolved runs after a check returns and redraws only the live math; redraw
+    // everything once more so s-plane markers and plots gated by the part appear.
+    passed(ctx, r) {
+      if (r && r.ok) setTimeout(() => ctx.update(), 0);
+      return r;
+    },
+    refresh(ctx, promise) { return promise.then((r) => lib.passed(ctx, r)); },
+    pyError: (out) => ({ ok: false, msg: out.timeout ? out.error : 'Python raised an error.', detail: [out.error, out.where, (out.stdout || '').trim()].filter(Boolean).join('\n') }),
+    // A Python answer part: {template, check(code)} with spec as in WB.py.check.
+    pyPart: (ctx, spec, template) => ({ template, check: (code) => lib.refresh(ctx, WB.py.check(ctx, spec, code)) }),
+    // Complex s for transfer-function and characteristic-polynomial answers.
+    sArg: { label: 's', complex: true, re: [-3, 2], im: [0.2, 6] },
+    // Spring compensation label: F_e = k z_e answers D.4(a), so Work mode writes F_e.
+    compLabel: (ctx) => (lib.shows(ctx, 'D.4/a') ? 'F = k z<sub>r</sub> + F̃' : 'F = F<sub>e</sub> + F̃ (z<sub>e</sub> = z<sub>r</sub>)'),
   };
   WB.studies.D.lib = lib;
 })();

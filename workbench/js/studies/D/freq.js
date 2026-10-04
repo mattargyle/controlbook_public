@@ -92,7 +92,8 @@
 
   function clMarkers(ctx, Lg) {
     const poles = L.roots(L.polyAdd(Lg.den, Lg.num));
-    const mk = L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` }));
+    // The plant poles answer D.7(a): hidden in Work mode until it is solved.
+    const mk = lib.showOl(ctx) ? L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` })) : [];
     poles.forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 12 }));
     return { markers: mk, fitR: 3 };
   }
@@ -110,8 +111,11 @@
     },
     linearSim(ctx, c) { return lib.linearSim(ctx, c, (cx, o) => this.controller(cx, o)); },
     linearLabel: 'linear model (with transient)',
+    // D.15 is drawn by hand: in Work mode the Bode plot, the predicted sinusoid and
+    // the plant poles appear once the student says it is done.
+    drawn: (ctx) => lib.shows(ctx, 'D.15/a'),
     outputSeries(ctx, res, sc) {
-      if (!WB.ui.shown(ctx, 'D:ch15:bode')) return [];
+      if (!this.drawn(ctx)) return [];
       const g = T.at(plantTf(ctx), ctx.st.w0), mag = L.C.abs(g), ph = L.C.arg(g);
       return [{ label: 'A|P(jω₀)| sin(ω₀t + ∠P)', y: sc(Array.from(res.t, (t) => ctx.st.A * mag * Math.sin(ctx.st.w0 * t + ph))), color: '--series-3', dash: [2, 3], width: 2 }];
     },
@@ -120,15 +124,10 @@
       slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 20, log: true, sig: 3, ...bind(ctx, 'w0') });
       slider(sec, { label: 'A', unit: 'N', min: 0, max: 6, step: 0.01, sig: 3, ...bind(ctx, 'A') });
       segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'asym') });
-      lib.note(sec, 'After the transient (it decays like e^(−ζωₙt), slowly for this plant) z is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀). Sweep ω₀ and watch the amplitude to find the resonance.');
-      if (ctx.S.mode === 'work') {
-        const b = WB.ui.revealButton(ctx, 'D:ch15:bode', 'Reveal the Bode plot (compare with your sketch)');
-        WB.ui.addRefresher(() => { b.hidden = ctx.app.isRevealed('D:ch15:bode'); });
-        sec.append(b);
-      }
+      lib.note(sec, 'After the transient (it decays slowly for this plant) z is a sinusoid with gain |P(jω₀)| and phase ∠P(jω₀). Sweep ω₀ and watch the amplitude. In Work mode the Bode plot appears once you have drawn yours (problem part a).');
     },
     bode(ctx) {
-      if (!WB.ui.shown(ctx, 'D:ch15:bode')) return null;
+      if (!this.drawn(ctx)) return null;
       const P = plantTf(ctx), { mag, phase } = T.bode(P, W);
       const lines = [{ label: 'P(jω)', mag, phase, color: '--series-1' }];
       const b = ans.bode(ctx.pModel);
@@ -141,7 +140,7 @@
       return { title: 'Bode plot of P(s)', w: W, lines, marks: [{ w: ctx.st.w0, label: `ω₀: ${fmt(db(L.C.abs(g)), 3)} dB, ${fmt(L.C.arg(g) * 180 / Math.PI, 3)}°`, color: '--series-3' }] };
     },
     splane(ctx) {
-      if (!WB.ui.shown(ctx, 'D:ch15:bode')) return null;
+      if (!this.drawn(ctx)) return { markers: [] };
       return { markers: L.roots(plantTf(ctx).den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of P ${i + 1}` })) };
     },
     math(ctx) {
@@ -150,12 +149,14 @@
         { title: 'Frequency response', page: 'p. 264 · Eq. 15.4',
           theory: 'u = A\\sin\\omega_0 t \\;\\Rightarrow\\; y_{ss} = A|P(j\\omega_0)|\\sin\\big(\\omega_0 t + \\angle P(j\\omega_0)\\big)' },
         { title: 'Bode canonical form', page: 'p. 266 · Eq. 15.5–15.7',
-          theory: 'P(j\\omega) = K\\,\\frac{1}{\\left(1 - \\frac{\\omega^2}{\\omega_n^2}\\right) + j2\\zeta\\frac{\\omega}{\\omega_n}}',
-          symbolic: 'K = \\frac{1}{k},\\quad \\omega_n = \\sqrt{\\frac km},\\quad \\zeta = \\frac{b}{2\\sqrt{km}}',
-          numbers: `K = ${tex(b.dc)}\\;(${tex(b.dcDb)}\\,\\text{dB}),\\quad \\omega_n = ${tex(b.wn)},\\quad \\zeta = ${tex(b.zeta)}`, spoiler: true },
+          theory: 'P(j\\omega) = K\\,\\frac{\\prod (1 + j\\omega/z_i)}{(j\\omega)^q \\prod (1 + j\\omega/p_i)}:\\quad 20\\log|P| = 20\\log K + \\textstyle\\sum 20\\log|1 + j\\omega/z_i| - 20q\\log\\omega - \\sum 20\\log|1 + j\\omega/p_i|' },
+        { title: 'Real pole', page: 'p. 269–270 · Eq. 15.9',
+          theory: '\\frac{p}{s + p}:\\; -20\\text{ dB/dec above } p,\\; \\angle = -\\tan^{-1}(\\omega/p) \\text{ from } 0^\\circ \\text{ at } p/10 \\text{ to } -90^\\circ \\text{ at } 10p' },
         { title: 'Complex pole pair', page: 'p. 270–272 · Fig. 15-9',
-          theory: '\\omega \\ll \\omega_n: 0\\text{ dB}, 0^\\circ;\\quad \\omega \\gg \\omega_n: -40\\text{ dB/dec}, -180^\\circ;\\quad \\omega = \\omega_n: -20\\log_{10}|2\\zeta|,\\; -90^\\circ',
-          numbers: `-20\\log_{10}(2\\zeta) = ${tex(-db(2 * b.zeta))}\\,\\text{dB} \\Rightarrow |P(j\\omega_n)| = ${tex(b.peakDb)}\\,\\text{dB}`, spoiler: true,
+          theory: '\\frac{1}{\\left(1 - \\frac{\\omega^2}{\\omega_n^2}\\right) + j2\\zeta\\frac{\\omega}{\\omega_n}}:\\quad \\omega \\ll \\omega_n: 0\\text{ dB}, 0^\\circ;\\quad \\omega \\gg \\omega_n: -40\\text{ dB/dec}, -180^\\circ;\\quad \\omega = \\omega_n: -20\\log_{10}|2\\zeta|,\\; -90^\\circ' },
+        { title: 'Bode form of the mass-spring-damper', page: 'p. 266, p. 270–272', answers: 'D.15/a',
+          theory: 'P(j\\omega) = \\frac{1}{k}\\,\\frac{1}{\\left(1 - \\frac{\\omega^2}{\\omega_n^2}\\right) + j2\\zeta\\frac{\\omega}{\\omega_n}},\\quad \\omega_n = \\sqrt{\\frac km},\\quad \\zeta = \\frac{b}{2\\sqrt{km}}',
+          numbers: `K = ${tex(b.dc)}\\;(${tex(b.dcDb)}\\,\\text{dB}),\\quad \\omega_n = ${tex(b.wn)},\\quad \\zeta = ${tex(b.zeta)},\\quad |P(j\\omega_n)| = ${tex(b.peakDb)}\\,\\text{dB}`,
           note: 'ζ is small, so the resonant peak is tall and narrow, and the straight-line sketch misses it badly.' },
       ];
     },
@@ -164,22 +165,21 @@
       const magDb = (w) => db(absAt(plantTf(ctx), w));
       lib.panel(parent, ctx, ctx.sys.problems.ch15, [
         {
-          id: 'a', title: 'Straight-line pieces',
-          inputs: { K: 'low-frequency gain [dB]', wn: 'corner ω<sub>n</sub> [rad/s]', s2: 'slope above [dB/dec]', ph: 'phase above [°]' },
-          check: (v) => lib.check(v, { K: b().dcDb, wn: b().wn, s2: -40, ph: -180 }, {}),
-          solution: () => [{ tex: `P(j\\omega) = \\frac{${tex(b().dc)}}{1 - (\\omega/${tex(b().wn)})^2 + j\\,2(${tex(b().zeta)})\\,\\omega/${tex(b().wn)}}:\\; ${tex(b().dcDb)}\\,\\text{dB flat, then } -40\\,\\text{dB/dec}; \\; 0^\\circ \\to -180^\\circ` }],
+          id: 'a', title: '(a) Draw the Bode plot by hand (F̃ to z̃)',
+          html: 'On paper: put P(s) in Bode canonical form and sketch the straight-line magnitude and phase. When you are done, click the button to see part (b) and the workbench\'s Bode plot to compare against.',
+          done: 'I\'ve drawn it: next',
+          solution: () => [{ tex: `P(j\\omega) = \\frac{${tex(b().dc)}}{1 - (\\omega/${tex(b().wn)})^2 + j\\,2(${tex(b().zeta)})\\,\\omega/${tex(b().wn)}}:\\; ${tex(b().dcDb)}\\,\\text{dB flat, then } -40\\,\\text{dB/dec above } \\omega_n;\\; 0^\\circ \\to -180^\\circ` }],
         },
         {
-          id: 'b', title: 'Resonance',
-          inputs: { zeta: 'ζ', peak: '|P(jω<sub>n</sub>)| [dB]' },
-          check: (v) => lib.check(v, { zeta: b().zeta, peak: b().peakDb }, {}),
-          solution: () => [{ tex: `\\zeta = \\frac{b}{2\\sqrt{km}} = ${tex(b().zeta)},\\quad |P(j\\omega_n)| = \\frac{1}{k\\,2\\zeta} = \\frac{1}{b\\,\\omega_n} = ${tex(b().peak)} = ${tex(b().peakDb)}\\,\\text{dB}` }],
-        },
-        {
-          id: 'c', title: 'Magnitudes from the bode command',
-          inputs: { m1: '|P(j0.1)| [dB]', m2: '|P(j1)| [dB]', m3: '|P(j10)| [dB]' },
-          check: (v) => lib.check(v, { m1: magDb(0.1), m2: magDb(1), m3: magDb(10) }, {}),
-          solution: () => [{ tex: `${tex(magDb(0.1))},\\; ${tex(magDb(1))},\\; ${tex(magDb(10))}\\;\\text{dB}` }, { html: 'Checked against python-control in tools/regress_D.py.' }],
+          id: 'b', title: '(b) Compare with the bode command', after: 'a',
+          html: 'Read these off the bode plot (your Python or the plot here). The resonance peak is what the straight-line sketch misses.',
+          inputs: { m1: '|P(j0.1)| [dB]', m2: '|P(j1)| [dB]', m3: '|P(j10)| [dB]', peak: 'resonance peak [dB]' },
+          check: (v) => lib.check(v, { m1: magDb(0.1), m2: magDb(1), m3: magDb(10), peak: b().peakDb }, {}),
+          solution: () => [
+            { tex: `${tex(magDb(0.1))},\\; ${tex(magDb(1))},\\; ${tex(magDb(10))}\\;\\text{dB}` },
+            { tex: `\\zeta = \\frac{b}{2\\sqrt{km}} = ${tex(b().zeta)},\\quad |P(j\\omega_n)| = \\frac{1}{k\\,2\\zeta} = \\frac{1}{b\\,\\omega_n} = ${tex(b().peak)} = ${tex(b().peakDb)}\\,\\text{dB}` },
+            { html: 'The true maximum (at ω<sub>n</sub>√(1 − 2ζ²)) is 0.02 dB higher; either is accepted. Checked against python-control in tools/regress_D.py.' },
+          ],
         },
       ]);
     },
@@ -230,8 +230,9 @@
           theory: 'E = \\frac{1}{1+PC}R + \\frac{PC}{1+PC}N,\\quad + \\frac{1}{1+PC}D_{out} + \\frac{P}{1+PC}D_{in}' },
         { title: 'Type 1 from the Bode plot', page: 'p. 294 · Eq. 16.11',
           theory: 'M_v = \\lim_{\\omega\\to 0}|j\\omega\\,P(j\\omega)C(j\\omega)|,\\quad e_{ss} = \\frac{A}{M_v} \\text{ for a ramp of slope } A',
-          symbolic: 'M_v = \\lim_{s\\to0} s\\,\\frac{1/m}{s^2 + \\frac bm s + \\frac km}\\,\\frac{k_I}{s} = \\frac{k_I}{k}',
           numbers: `M_v = ${tex(s.Mv)} \\Rightarrow e_{ramp} = ${tex(s.ramp)}\\,\\text{m}`, spoiler: true },
+        { title: 'M_v of the mass-spring-damper under PID', page: 'p. 294 · Eq. 16.11', answers: 'D.16/a',
+          theory: 'M_v = \\lim_{s\\to0} s\\,\\frac{1/m}{s^2 + \\frac bm s + \\frac km}\\,\\frac{k_I}{s} = \\frac{k_I}{k}' },
         { title: 'Input disturbance', page: 'p. 290 · Eq. 16.8, p. 291 · Eq. 16.9',
           theory: '20\\log|PC| - 20\\log|P| = 20\\log|C| \\ge B_{d_{in}} \\text{ for } \\omega \\le \\omega_{d_{in}},\\quad \\gamma_{d_{in}} = 10^{-B_{d_{in}}/20}',
           numbers: `|C(j\\omega_{d,in})| = ${tex(s.Bdin)}\\,\\text{dB} \\Rightarrow \\gamma_{d_{in}} = ${tex(s.gdin)}\\quad(\\text{exact } |P/(1+PC)| = ${tex(s.gdinExact)})`, spoiler: true,
@@ -255,7 +256,9 @@
         return { ok: false, msg: `Check ${what}.` };
       };
       lib.panel(parent, ctx, ctx.sys.problems.ch16, [
-        { id: 'a', title: '(a) tracking error to a unit ramp', inputs: { v: 'e<sub>ss</sub> [m]' },
+        { id: 'plot', title: 'Bode plots of the plant and of the plant under PID',
+          html: 'With <code>bode</code> in your code: P(s), and P(s)C(s) with the D.10 gains and the dirty derivative in C (p. 313). The Bode panel here draws both for the gains in the sliders: <em>Load my D.10 gains</em> copies your Work-mode D.10 gains.' },
+        { id: 'a', title: '(a) Tracking error to a unit ramp under PID', inputs: { v: 'e<sub>ss</sub> [m]' },
           html: 'For the PID gains in the sliders (load your D.10 gains first).',
           check: (v) => (ctx.st.kI > 0 ? lib.check(v, { v: s().ramp }, { v: 'e_ss' }) : { ok: false, msg: 'Set kI > 0.' }),
           solution: () => [{ tex: `\\text{type 1}:\\; e_{ss} = \\frac{1}{M_v} = \\frac{k}{k_I} = ${tex(s().ramp)}\\,\\text{m}` }, { html: 'The dirty derivative and k<sub>D</sub> do not enter: only the integrator survives as s → 0.' }] },
@@ -332,13 +335,31 @@
     buildProblem(parent, ctx) {
       const l = () => loop(ctx);
       lib.panel(parent, ctx, ctx.sys.problems.ch17, [
-        { id: 'a', title: 'Margins and bandwidth', inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub>', bw: 'ω<sub>bw</sub>' },
-          html: 'For the PID gains in the sliders (load your D.10 gains first). ω<sub>bw</sub>: either the first −3 dB crossing of |T| (what <code>bandwidth</code> returns) or its final roll-off is accepted.',
+        { id: 'a', title: 'Phase and gain margins under PID (D.10 gains)', inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub> [rad/s]', gm: 'GM [dB]' },
+          html: 'For the PID gains in the sliders (load your D.10 gains first). Type <code>inf</code> for an infinite gain margin.',
           check: (v) => {
             const x = l();
             const r = lib.check({ pm: v.pm, wc: v.wc }, { pm: x.mg.pm, wc: x.mg.wc }, { pm: 'PM', wc: 'ωco' });
             if (!r.ok) return r;
-            const g = lib.num(v.bw);
+            const inf = /^\s*(inf|∞|infinity)\s*$/i.test(String(v.gm));
+            if (!x.mg.crossings.length) return inf ? { ok: true, msg: 'Within 1%; the phase never reaches −180°.' } : { ok: false, msg: 'Check GM.' };
+            if (inf) return { ok: false, msg: 'Check GM: the phase does cross −180°.' };
+            return lib.check({ gm: v.gm }, { gm: db(x.mg.gm) }, { gm: 'GM' });
+          },
+          solution: () => {
+            const x = l();
+            return [
+              { tex: `PM = ${tex(x.mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(x.mg.wc)},\\quad GM = ${x.mg.crossings.length ? tex(db(x.mg.gm)) + '\\,\\text{dB}' : '\\infty'}` },
+              ...(x.mg.gcs.length > 1 ? [{ html: `|PC| crosses 0 dB ${x.mg.gcs.length} times (the plant resonance pokes back above 0 dB). The PM is the one smallest in magnitude, as python-control's margin reports: ${x.mg.gcs.map((c) => `${fmt(c.pm, 3)}° at ${fmt(c.w, 3)} rad/s`).join('; ')}.` }] : []),
+              { html: x.mg.crossings.length ? 'GM is 1/|PC| where the phase crosses −180° (p. 305).' : 'The dirty derivative makes C(s) biproper, so PC rolls off at −40 dB/dec with the phase approaching −180° from above: no phase crossover, GM = ∞.' },
+            ];
+          } },
+        { id: 'b', title: 'Open-loop and closed-loop Bode plots on one graph',
+          html: 'In your code, plot P(s)C(s) and T(s) = PC/(1 + PC) together. The Bode panel here shows both for the gains in the sliders.' },
+        { id: 'c', title: 'Closed-loop bandwidth, and how it relates to the crossover frequency', inputs: { bw: 'ω<sub>bw</sub> [rad/s]' },
+          html: 'Either the first −3 dB crossing of |T| (what <code>bandwidth</code> returns) or its final roll-off is accepted. The solution discusses the relation to ω<sub>co</sub>.',
+          check: (v) => {
+            const x = l(), g = lib.num(v.bw);
             if (g === null) return { ok: false, msg: 'Enter ωbw.' };
             if (M.close(g, x.bw) || M.close(g, x.bwLast)) return { ok: true, msg: 'Within 1%.' };
             return { ok: false, msg: 'Check ωbw.' };
@@ -346,10 +367,8 @@
           solution: () => {
             const x = l();
             return [
-              { tex: `PM = ${tex(x.mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(x.mg.wc)},\\; GM = ${x.mg.crossings.length ? tex(db(x.mg.gm)) + '\\,dB' : '\\infty'},\\; \\omega_{bw} = ${tex(x.bw)}${x.bwN > 1 ? ' \\text{ (first)},\\; ' + tex(x.bwLast) + ' \\text{ (final roll-off)}' : ''}` },
-              ...(x.mg.gcs.length > 1 ? [{ html: `|PC| crosses 0 dB ${x.mg.gcs.length} times (the plant resonance pokes back above 0 dB). The PM is the one smallest in magnitude, as python-control's margin reports: ${x.mg.gcs.map((c) => `${fmt(c.pm, 3)}° at ${fmt(c.w, 3)} rad/s`).join('; ')}.` }] : []),
-              { html: (x.mg.crossings.length ? '' : 'The dirty derivative makes C(s) biproper, so PC rolls off at −40 dB/dec with the phase approaching −180° from above: no phase crossover, GM = ∞. ')
-                + (x.bwN > 1 ? 'The −3 dB "bandwidth" is ambiguous for these gains: |T| dips below −3 dB around √(k<sub>I</sub>/k<sub>D</sub>), where the complex PID zeros make a notch in |C|, then recovers and finally rolls off a little above ω<sub>co</sub>. The final roll-off is the one that relates to crossover.' : 'The bandwidth sits a little above ω<sub>co</sub>, as expected when |PC| ≫ 1 below crossover and ≪ 1 above it (p. 306).') },
+              { tex: `\\omega_{bw} = ${tex(x.bw)}${x.bwN > 1 ? ' \\text{ (first)},\\; ' + tex(x.bwLast) + ' \\text{ (final roll-off)}' : ''}\\quad\\text{vs.}\\quad \\omega_{co} = ${tex(x.mg.wc)}` },
+              { html: x.bwN > 1 ? 'The −3 dB "bandwidth" is ambiguous for these gains: |T| dips below −3 dB around √(k<sub>I</sub>/k<sub>D</sub>), where the complex PID zeros make a notch in |C|, then recovers and finally rolls off a little above ω<sub>co</sub>. The final roll-off is the one that relates to crossover.' : 'The bandwidth sits a little above ω<sub>co</sub>, as expected when |PC| ≫ 1 below crossover and ≪ 1 above it (p. 306).' },
             ];
           } },
       ]);
@@ -530,6 +549,8 @@
             return { ok: m.os < 5, msg: `overshoot ${fmt(m.os, 3)}%` };
           },
           solution: () => [{ html: 'A first-order F = p/(s + p) with p well below crossover (p = 1 in the reference design) shapes the reference so the steps never excite the lead\'s peaking: no overshoot, rise time about 2 s on the ±0.5 m square wave. It does not keep F inside F<sub>max</sub> = 6 N: the 1 m jumps demand about 20 N for a moment (the plant saturates; the PI has no anti-windup but recovers here). p ≈ 0.3 keeps the demand near 6 N at the cost of an 8 s rise time. D.18 itself says nothing about F<sub>max</sub>.' }] },
+        { id: 'c', title: 'Implement C(s) and F(s) with state-space or digital-filter equivalents',
+          html: 'In your <code>ctrlLoopshape.py</code> (Listing 18.3 pattern, Eq. 18.3–18.7). The simulation here runs C and F as state-space filters; the dashed trace is the same loop without saturation, disturbance and noise.' },
       ]);
     },
   };

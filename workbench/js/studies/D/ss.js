@@ -165,7 +165,8 @@
   }
   function markers(ctx) {
     const explore = ctx.S.mode === 'explore';
-    const mk = L.eig(ctx.ss.A).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}` }));
+    // The open-loop poles answer D.7(a): hidden in Work mode until it is solved.
+    const mk = lib.showOl(ctx) ? L.eig(ctx.ss.A).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
     closedLoopPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `controller pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 0 : 2) : undefined }));
     observerPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 10 : 12) : undefined }));
     return mk;
@@ -188,10 +189,9 @@
   function ssCard(ctx) {
     const { A, B } = ctx.ss;
     return {
-      title: 'State-space model (D.6)', page: 'p. 379 · D.6',
-      theory: '\\dot x = Ax + Bu,\\quad y = Cx,\\quad x = (z, \\dot z)^\\top',
-      symbolic: 'A = \\begin{bmatrix}0 & 1\\\\ -\\frac km & -\\frac bm\\end{bmatrix},\\quad B = \\begin{bmatrix}0\\\\ \\frac1m\\end{bmatrix},\\quad C = \\begin{bmatrix}1 & 0\\end{bmatrix}',
-      numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`, spoiler: true,
+      title: 'State-space model (D.6)', page: 'p. 379 · D.6', answers: 'D.6/a',
+      theory: 'A = \\begin{bmatrix}0 & 1\\\\ -\\frac km & -\\frac bm\\end{bmatrix},\\quad B = \\begin{bmatrix}0\\\\ \\frac1m\\end{bmatrix},\\quad C = \\begin{bmatrix}1 & 0\\end{bmatrix}',
+      numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
     };
   }
   const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page);
@@ -254,7 +254,10 @@
           numbers: `K = ${texMat([d.K])}`, spoiler: true },
         { title: 'Reference gain', page: 'p. 182 · Eq. 11.35',
           theory: 'k_r = \\frac{-1}{C(A - BK)^{-1}B}',
-          numbers: `k_r = ${tex(d.kr)} = K_1 + k\\quad(\\text{unlike the arm, } k_r \\ne K_1\\text{: the spring needs an extra } k z_r)`, spoiler: true },
+          numbers: `k_r = ${tex(d.kr)}`, spoiler: true },
+        { title: 'Reference gain of the mass-spring-damper', page: 'p. 182 · Eq. 11.35', answers: 'D.11/d',
+          theory: 'k_r = m\\omega_n^2 = K_1 + k',
+          note: 'Unlike the arm, k_r ≠ K₁: the spring needs an extra k z_r to hold the mass at z_r.' },
         { title: 'Control law', page: 'p. 173 · Eq. 11.3',
           theory: 'F = -Kx + k_r z_r',
           numbers: `F = -(${tex(g.K[0])}\\,z + ${tex(g.K[1])}\\,\\dot z) + ${tex(g.kr)}\\,z_r` },
@@ -266,19 +269,25 @@
       const ref = () => ans.stateFeedback(ctx.pModel, poles());
       lib.panel(parent, ctx, prob, [
         {
-          id: 'a', title: '(a) Desired poles −σ ± jω<sub>d</sub>',
+          id: 'a', title: '(a) Closed-loop poles from s² + 2ζω<sub>n</sub>s + ω<sub>n</sub>² = 0 (ω<sub>n</sub>, ζ from D.8)',
+          html: 'Enter the poles as −σ ± jω<sub>d</sub>.',
           inputs: { sig: 'σ', wd: 'ω<sub>d</sub>' },
           check: (v) => lib.check(v, { sig: -poles()[0].re, wd: Math.abs(poles()[0].im) }, { sig: 'σ', wd: 'ωd' }),
           solution: () => [{ tex: `\\omega_n = 1.1,\\; s^2 + 1.54s + 1.21 = 0 \\Rightarrow p = ${texPole(poles()[0], 4)},\\; ${texPole(poles()[1], 4)}` }],
         },
         {
-          id: 'c', title: '(c) Controllability matrix 𝒞<sub>A,B</sub> = [B, AB]',
+          id: 'b', title: '(b) Add A, B, C, D from D.6 to your param file',
+          html: 'Use your A, B, C, D from D.6 (the D.6 tab) in your <code>massParam.py</code>. The model card in the live math unlocks once D.6 is solved.',
+        },
+        {
+          id: 'c', title: '(c) Controllability: rank(𝒞<sub>A,B</sub>) = n',
           inputs: { c11: 'c<sub>11</sub>', c12: 'c<sub>12</sub>', c21: 'c<sub>21</sub>', c22: 'c<sub>22</sub>', rank: 'rank' },
           check: (v) => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return lib.check(v, { c11: Cm[0][0], c12: Cm[0][1], c21: Cm[1][0], c22: Cm[1][1], rank: L.rank(Cm) }, {}); },
           solution: () => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return [{ tex: `\\mathcal{C}_{A,B} = \\begin{bmatrix}0 & \\frac1m\\\\ \\frac1m & -\\frac{b}{m^2}\\end{bmatrix} = ${texMat(Cm)},\\; \\det = -\\frac{1}{m^2} = ${tex(Cm[0][0] * Cm[1][1] - Cm[0][1] * Cm[1][0])} \\ne 0` }]; },
         },
         {
-          id: 'd', title: `(d) K and k<sub>r</sub> for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}`,
+          id: 'd', title: `(d) K and k<sub>r</sub> for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}. Why is K = (k<sub>P</sub>, k<sub>D</sub>)?`,
+          html: 'Enter K and k<sub>r</sub>; the solution explains the "why".',
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', kr: 'k<sub>r</sub>' },
           check: (v) => { const r = ref(); return lib.check(v, { K1: r.K[0], K2: r.K[1], kr: r.kr }, {}); },
           actions: [WB.design.useGains(ctx, ['K1', 'K2', 'kr'])],
@@ -326,13 +335,14 @@
         ssCard(ctx),
         { title: 'Augmented system', page: 'p. 198 · Eq. 12.1',
           theory: '\\dot x_I = r - Cx,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix}',
-          numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}`, spoiler: true },
+          numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}`, answers: 'D.6/a' },
         ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'),
         polesCard(ctx, d),
         { title: 'Gains', page: 'p. 199–201',
           theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I\\int_0^t (r - y)\\,d\\tau',
-          symbolic: '\\det(sI - A_1 + B_1K_1) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\frac{b + K_2}{m},\\; c_1 = \\frac{k + K_1}{m},\\; c_0 = -\\frac{k_I}{m}',
           numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
+        { title: 'Gains for the mass-spring-damper', page: 'p. 199–201', answers: 'D.12/a',
+          theory: '\\det(sI - A_1 + B_1K_1) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\frac{b + K_2}{m},\\; c_1 = \\frac{k + K_1}{m},\\; c_0 = -\\frac{k_I}{m}' },
       ];
     },
     buildProblem(parent, ctx) {
@@ -340,8 +350,8 @@
       const ref = (pI) => ans.integralFeedback(ctx.pModel, [...D.polesFromWnZeta(2.2 / prob.tr, prob.zeta), { re: pI, im: 0 }]);
       lib.panel(parent, ctx, prob, [
         {
-          id: 'a', title: `(a) Gains for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta} and your integrator pole p<sub>I</sub>`,
-          html: 'The problem leaves p<sub>I</sub> to you: enter the one you chose with your gains.',
+          id: 'a', title: '(a) Add an integrator with anti-windup to the D.11 controller',
+          html: `Gains for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta} and your integrator pole p<sub>I</sub>: the problem leaves p<sub>I</sub> to you, so enter the one you chose with your gains. Anti-windup is the switch in the controls on the right.`,
           inputs: { pI: 'p<sub>I</sub>', K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', ki: 'k<sub>I</sub>' },
           check: (v) => {
             const pI = lib.num(v.pI);
@@ -358,7 +368,15 @@
           },
         },
         {
-          id: 'c', title: '(b, c) Tracking with d = 0.25 N and 20% uncertainty',
+          id: 'b', title: '(b) Input disturbance of 0.25 N and parameters varying up to 20%',
+          html: 'Set the input disturbance d and the true-plant mismatch in the left panel (the chapter starts with d = 0.25 N and a fixed 20% draw).',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            return Math.abs(S.sim.dist) > 0 && mis ? { ok: true, msg: `d = ${fmt(S.sim.dist, 3)} N with plant mismatch.` } : { ok: false, msg: 'Set both d ≠ 0 and a plant mismatch.' };
+          },
+        },
+        {
+          id: 'c', title: '(c) Tune the integrator pole for good tracking',
           html: 'Passes when anti-windup is on and |z<sub>r</sub> − z| just before the first switch is under 1% of the step, with the disturbance and mismatch in the left panel.',
           check: () => {
             const { e, amp } = lib.errorBeforeSwitch(ctx);
@@ -407,8 +425,9 @@
           numbers: `\\mathcal{O} = ${texMat(O)},\\quad \\operatorname{rank} = ${L.rank(O)}`, spoiler: true },
         { title: 'Observer gain', page: 'p. 222 · Eq. 13.16',
           theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top',
-          symbolic: '\\det(sI - A + LC) = s^2 + \\beta_1 s + \\beta_0,\\quad \\beta_1 = \\tfrac bm + L_1,\\; \\beta_0 = \\tfrac km + \\tfrac bm L_1 + L_2',
           numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, spoiler: true },
+        { title: 'Observer gain for the mass-spring-damper', page: 'p. 222', answers: 'D.13/c1',
+          theory: '\\det(sI - A + LC) = s^2 + \\beta_1 s + \\beta_0,\\quad \\beta_1 = \\tfrac bm + L_1,\\; \\beta_0 = \\tfrac km + \\tfrac bm L_1 + L_2' },
         { title: 'Separation principle', page: 'p. 222–223',
           theory: '\\text{eig} = \\text{eig}(A_1 - B_1K_1) \\cup \\text{eig}(A - LC)',
           note: 'Holds for the linear model. Saturation breaks it.' },
@@ -419,13 +438,21 @@
       const prob = ctx.sys.problems.ch13;
       lib.panel(parent, ctx, prob, [
         {
-          id: 'b', title: '(b) Observability matrix 𝒪<sub>A,C</sub> = [C; CA]',
+          id: 'a', title: '(a) Exact parameters, no input disturbance (α = 0)',
+          html: 'The chapter starts with α = 0 and d = 0. <em>Exact model</em> in the left panel restores them.',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            return !mis && !(Math.abs(S.sim.dist) > 0) ? { ok: true, msg: 'Exact plant, d = 0.' } : { ok: false, msg: 'Remove the plant mismatch and set d = 0.' };
+          },
+        },
+        {
+          id: 'b', title: '(b) Observability: rank(𝒪<sub>A,C</sub>) = n',
           inputs: { o11: 'o<sub>11</sub>', o12: 'o<sub>12</sub>', o21: 'o<sub>21</sub>', o22: 'o<sub>22</sub>', rank: 'rank' },
           check: (v) => { const O = L.obsv(ctx.ss.A, ctx.ss.C); return lib.check(v, { o11: O[0][0], o12: O[0][1], o21: O[1][0], o22: O[1][1], rank: L.rank(O) }, {}); },
           solution: () => [{ tex: `\\mathcal{O}_{A,C} = \\begin{bmatrix}C\\\\ CA\\end{bmatrix} = ${texMat(L.obsv(ctx.ss.A, ctx.ss.C))} \\Rightarrow \\text{rank } 2` }],
         },
         {
-          id: 'c', title: '(c) Observer gain for your observer poles',
+          id: 'c1', title: '(c) Add an observer: gain L for your observer poles',
           html: 'Enter the two observer poles you chose (complex is fine: <code>-7.8+7.8j</code>; the conjugate is filled in if you leave q<sub>2</sub> blank) and your L.',
           inputs: { q1: 'q<sub>1</sub>', q2: 'q<sub>2</sub>', L1: 'L<sub>1</sub>', L2: 'L<sub>2</sub>' },
           check: (v) => {
@@ -446,7 +473,7 @@
           },
         },
         {
-          id: 'c2', title: '(c, d) Observer and controller working together',
+          id: 'c2', title: '(c) Tune the controller and observer poles',
           html: 'Passes when ẑ has converged (|z − ẑ| < 1 mm at t<sub>end</sub>) and |z<sub>r</sub> − z| before the first switch is under 1% of the step. Use exact parameters and d = 0 (part a).',
           check: () => {
             const res = ctx.app.result(), n = res.t.length - 1;
@@ -455,6 +482,10 @@
             return { ok: est < 1e-3 && e < 0.01 * amp, msg: `|z − ẑ| = ${fmt(1000 * est, 3)} mm at t_end; tracking error ${fmt(1000 * e, 3)} mm.` };
           },
           solution: () => [{ html: `Controller from D.12 (p<sub>I</sub> = ${prob.pIRef}), observer poles ${prob.obsFactor}× faster than the controller pair. A slower observer still converges but couples into the response; a much faster one amplifies noise (D.14).` }],
+        },
+        {
+          id: 'd', title: '(d) Plot the state and the estimated state together',
+          html: 'In your code the controller returns both u and x̂. Here the z plot shows the estimate ẑ with the true z, and the extra plot shows ż and its estimate.',
         },
         {
           id: 'e', title: '(e) Add d = 0.25 N',
@@ -515,13 +546,14 @@
           theory: '\\dot x = Ax + B(u + d),\\quad \\dot e = (A - LC)e + Bd \\Rightarrow e_{ss} \\ne 0 \\text{ for constant } d' },
         { title: 'Augmented model (ḋ = 0)', page: 'p. 240',
           theory: 'A_2 = \\begin{bmatrix}A & B\\\\ 0 & 0\\end{bmatrix},\\quad C_2 = \\begin{bmatrix}C & 0\\end{bmatrix}',
-          numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}`, spoiler: true },
+          numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}`, answers: 'D.6/a' },
         { title: 'Disturbance observer', page: 'p. 241',
           theory: '\\dot{\\hat x} = A\\hat x + B(u + \\hat d) + L(y - C\\hat x),\\quad \\dot{\\hat d} = L_d(y - C\\hat x),\\quad u = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
         { title: 'Observer gains', page: 'p. 241',
           theory: '\\begin{bmatrix}L\\\\ L_d\\end{bmatrix} = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
-          symbolic: '\\det(sI - A_2 + LC_2) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\tfrac bm + L_1,\\; c_1 = \\tfrac km + \\tfrac bm L_1 + L_2,\\; c_0 = \\tfrac{L_d}{m}',
           numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, spoiler: true },
+        { title: 'Observer gains for the mass-spring-damper', page: 'p. 241', answers: 'D.14/b1',
+          theory: '\\det(sI - A_2 + LC_2) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\tfrac bm + L_1,\\; c_1 = \\tfrac km + \\tfrac bm L_1 + L_2,\\; c_0 = \\tfrac{L_d}{m}' },
         polesCard(ctx, d),
       ];
     },
@@ -529,7 +561,15 @@
       const prob = ctx.sys.problems.ch14;
       lib.panel(parent, ctx, prob, [
         {
-          id: 'b1', title: '(b) Disturbance-observer gains for your poles',
+          id: 'a', title: '(a) α = 0.2, input disturbance 0.25, noise σ = 0.001 on z<sub>m</sub>',
+          html: 'The chapter starts with a fixed 20% plant draw, d = 0.25 N and noise σ = 1 mm. Turn the disturbance observer off to see the D.13 bias come back.',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            return mis && Math.abs(S.sim.dist) > 0 && S.sim.noise > 0 ? { ok: true, msg: `d = ${fmt(S.sim.dist, 3)} N, noise σ = ${fmt(S.sim.noise, 3)} m, with plant mismatch.` } : { ok: false, msg: 'Set a plant mismatch, d ≠ 0 and measurement noise.' };
+          },
+        },
+        {
+          id: 'b1', title: '(b) Add a disturbance observer: gains for your poles',
           html: 'Enter your three observer poles (q<sub>3</sub> is usually the real disturbance pole) and your gains.',
           inputs: { q1: 'q<sub>1</sub>', q2: 'q<sub>2</sub>', q3: 'q<sub>3</sub>', L1: 'L<sub>1</sub>', L2: 'L<sub>2</sub>', Ld: 'L<sub>d</sub>' },
           check: (v) => {
