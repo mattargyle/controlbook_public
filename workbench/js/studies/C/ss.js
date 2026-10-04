@@ -207,20 +207,24 @@
   function ssCard(ctx) {
     const { A, B } = lib().ss(ctx.pModel);
     return {
-      title: 'State-space model', page: 'p. 92, p. 193 · Eq. 11.40',
+      title: 'State-space model (C.6)', page: 'p. 92, p. 193 · Eq. 11.40', answers: 'C.6/a',
       theory: '\\dot x = Ax + B\\tau,\\quad x = (\\theta, \\phi, \\dot\\theta, \\dot\\phi)^\\top,\\quad y = (\\theta, \\phi)^\\top,\\quad y_r = \\phi = \\begin{bmatrix}0 & 1 & 0 & 0\\end{bmatrix}x',
-      numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`, spoiler: true,
+      numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
     };
   }
-  function polesCard(ctx, d, level) {
+  // The general method, then this tuning's numbers (locked by `answers` where they
+  // answer a part, otherwise a spoiler).
+  function polesCard(ctx, d, level, answers) {
     const st = ctx.st;
     const wTex = st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}';
-    return {
-      title: 'Desired closed-loop poles', page: 'p. 193, p. 194 (Listing 11.3)',
-      theory: `${wTex},\\quad t_{r_\\phi} = M t_{r_\\theta},\\quad \\Delta^d = (s^2 + 2\\zeta_\\theta\\omega_{n_\\theta}s + \\omega_{n_\\theta}^2)(s^2 + 2\\zeta_\\phi\\omega_{n_\\phi}s + \\omega_{n_\\phi}^2)` + (level === 'sf' ? '' : '(s - p_I)'),
-      numbers: `\\omega_{n_\\theta} = ${tex(d.wnTh)},\\; \\omega_{n_\\phi} = ${tex(d.wnPhi)},\\quad \\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(d.poles))}`,
-      spoiler: true,
-    };
+    return [
+      { title: 'Desired closed-loop poles', page: 'p. 193, p. 194 (Listing 11.3)',
+        theory: `${wTex},\\quad t_{r_\\phi} = M t_{r_\\theta},\\quad \\Delta^d = (s^2 + 2\\zeta_\\theta\\omega_{n_\\theta}s + \\omega_{n_\\theta}^2)(s^2 + 2\\zeta_\\phi\\omega_{n_\\phi}s + \\omega_{n_\\phi}^2)` + (level === 'sf' ? '' : '(s - p_I)') },
+      { title: 'Desired poles for this tuning', page: 'p. 193',
+        theory: `\\omega_{n_\\theta} = ${tex(d.wnTh)},\\; \\omega_{n_\\phi} = ${tex(d.wnPhi)},\\quad \\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(d.poles))}`,
+        note: 'For the t_r, ζ, M tuning (set in Explore mode; the problem\'s tuning by default).',
+        ...(answers ? { answers } : { theory: undefined, numbers: `\\omega_{n_\\theta} = ${tex(d.wnTh)},\\; \\omega_{n_\\phi} = ${tex(d.wnPhi)},\\quad \\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(d.poles))}`, spoiler: true }) },
+    ];
   }
   const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page);
   // Work-mode starting gains: a slow, stable design (t_rθ = 4 s, ζ = 0.8, M = 2.5,
@@ -272,11 +276,12 @@
         { title: 'Open-loop characteristic polynomial', page: 'p. 193 · Step 2',
           theory: '\\Delta_{ol}(s) = \\det(sI - A) = s^4 + a_3s^3 + a_2s^2 + a_1s + a_0',
           numbers: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },
-        polesCard(ctx, d, 'sf'),
+        ...polesCard(ctx, d, 'sf', 'C.11/a'),
         { title: 'Pole placement and reference gain', page: 'p. 194 · Step 4, Eq. 11.35',
           theory: 'K = (\\alpha - a_A)\\mathcal{A}_A^{-1}\\mathcal{C}_{A,B}^{-1},\\quad k_r = \\frac{-1}{C_r(A - BK)^{-1}B},\\; C_r = \\begin{bmatrix}0 & 1 & 0 & 0\\end{bmatrix}',
-          numbers: `K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}`, spoiler: true,
           note: 'At steady state the spring forces θ = φ, so C_r = [1 0 0 0] (what the listing uses) gives the same k_r.' },
+        { title: 'K and k_r for this tuning', page: 'p. 194', answers: 'C.11/d',
+          theory: `K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}` },
         { title: 'Control law', page: 'p. 195 · Listing 11.3',
           theory: '\\tau = \\text{sat}\\left(-Kx + k_r\\phi_r\\right)',
           numbers: `\\tau = -(${g.K.map((v) => tex(v)).join(',\\;')})\\,x + ${tex(g.kr)}\\,\\phi_r` },
@@ -295,6 +300,10 @@
           solution: () => { const r = ref(); return [{ tex: `\\omega_{n_\\theta} = ${tex(r.wnTh)},\\; \\omega_{n_\\phi} = ${tex(r.wnPhi)},\\quad p = ${r.poles.map((q) => texPole(q)).join(',\\;')}` }, { tex: `\\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(r.poles))}` }, { html: 'The printed solution (p. 193) uses ω<sub>θ</sub> = 1.9848, ω<sub>φ</sub> = 1.5, ζ = 0.707 instead; see ISSUES.md.' }]; },
         },
         {
+          id: 'b', title: '(b) Add A, B, C, D from C.6',
+          html: 'Use your matrices from C.6 (the Ch 6 tab). From here on the outputs are y = (θ, φ), as in <code>satelliteParam.py</code> and the C.13 solution, so the second row of C is (0, 1, 0, 0). The model card in the live math unlocks once C.6 is solved.',
+        },
+        {
           id: 'c', title: '(c) Controllability',
           inputs: { rank: 'rank 𝒞<sub>A,B</sub>', det: 'det 𝒞<sub>A,B</sub>' },
           check: (v) => { const Cm = L.ctrb(A, B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: L.det(Cm) }, { det: 'det' }); },
@@ -306,6 +315,16 @@
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], kr: r.kr }, {}); },
           actions: [WB.design.useGains(ctx, ['K1', 'K2', 'K3', 'K4', 'kr'])],
           solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_r = ${tex(r.kr)}` }, { html: 'Book (p. 194): K = (40.28, 255.17, 24.34, 366.18), k<sub>r</sub> = 295.46, for its own poles and a different A.' }]; },
+        },
+        {
+          id: 'e', title: '(e) Implement and tune',
+          html: 'Implement the state feedback in your <code>ctrlStateFeedback.py</code>. Here, set K and k<sub>r</sub> with the sliders (or <em>Use my gains</em> in (d)) and tune. Passes when the closed loop is stable and |φ<sub>r</sub> − φ| just before the first reference switch is under 0.1°. Compare the response with the successive-loop-closure designs of Ch 8 and Ch 10.',
+          check: () => {
+            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
+            const stable = clPoles(ctx, 'sf').every((q) => q.re < 0), e = errBeforeSwitch(ctx);
+            if (!stable) return { ok: false, msg: 'A closed-loop pole is in the right half plane.' };
+            return { ok: e < 0.1, msg: `Error before the switch: ${fmt(e, 3)}°.` };
+          },
         },
       ]);
     },
@@ -332,12 +351,13 @@
         ssCard(ctx),
         { title: 'Augmented system', page: 'p. 211 · Step 1',
           theory: '\\dot x_I = \\phi_r - C_rx,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix},\\quad C_r = \\begin{bmatrix}0 & 1 & 0 & 0\\end{bmatrix}',
-          numbers: `A_1 = ${texMat(A1)}` },
+          numbers: `A_1 = ${texMat(A1)}`, spoiler: true },
         ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 212'),
-        polesCard(ctx, d, 'sfi'),
+        ...polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 212 · Step 3',
-          theory: 'K_1 = \\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad \\tau = -Kx - k_I\\int_0^t(\\phi_r - \\phi)\\,d\\tau',
-          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
+          theory: 'K_1 = \\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad \\tau = -Kx - k_I\\int_0^t(\\phi_r - \\phi)\\,d\\tau' },
+        { title: 'K and k_I for this tuning', page: 'p. 212', answers: 'C.12/a',
+          theory: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}` },
       ];
     },
     buildProblem(parent, ctx) {
@@ -352,7 +372,20 @@
           solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` }, { html: 'Book (p. 212): K = (19.15, 43.41, 16.72, 111.63), k<sub>I</sub> = −14.52, for p<sub>I</sub> = −1 and different poles and A.' }]; },
         },
         {
-          id: 'c', title: '(b, c) Tracking with d = 1 N·m and 20% uncertainty',
+          id: 'a2', title: '(a) Anti-windup',
+          html: 'Add anti-windup to the integrator in your controller. Here, choose <em>hold integrator while saturated</em> in the controls. (The book\'s listing has none; see ISSUES.md.)',
+          check: () => (ctx.st.antiwindup === 'clamp' ? { ok: true, msg: 'The integrator is held while τ is saturated.' } : { ok: false, msg: 'Anti-windup is off.' }),
+        },
+        {
+          id: 'b', title: '(b) Input disturbance of 1 N·m and 20% parameter uncertainty',
+          html: 'Set an input disturbance d and the true-plant mismatch in the left panel (the chapter starts with d = 1 N·m and a fixed 20% draw).',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            return Math.abs(S.sim.dist) > 0 && mis ? { ok: true, msg: `d = ${fmt(S.sim.dist, 3)} N·m with plant mismatch.` } : { ok: false, msg: 'Set both d ≠ 0 and a plant mismatch.' };
+          },
+        },
+        {
+          id: 'c', title: '(c) Tune for good tracking',
           html: 'Passes when |φ<sub>r</sub> − φ| just before the first reference switch is under 0.1° with the current disturbance and mismatch.',
           check: () => { const e = errBeforeSwitch(ctx); return { ok: e < 0.1, msg: `Error before the switch: ${fmt(e, 3)}° (d = ${fmt(ctx.S.sim.dist, 3)} N·m).` }; },
         },
@@ -412,7 +445,7 @@
     },
     math(ctx) {
       const d = design(ctx.pModel, { ...ctx.st, obs: obsOf(ctx) }, 'obs');
-      return [ssCard(ctx), ...obsCards(ctx, d, 'obs'), polesCard(ctx, d, 'obs'),
+      return [ssCard(ctx), ...obsCards(ctx, d, 'obs'), ...polesCard(ctx, d, 'obs'),
         { title: 'Separation principle', page: 'p. 223–224',
           theory: '\\text{eig}\\begin{bmatrix}A - BK & BK\\\\ 0 & A - LC\\end{bmatrix} = \\text{eig}(A - BK) \\cup \\text{eig}(A - LC)' }];
     },
@@ -421,6 +454,14 @@
       const { A, C } = lib().ss(ctx.pModel);
       const od = () => obsDefaults(pr);
       PD().problemPanel(parent, ctx, pr, [
+        {
+          id: 'a', title: '(a) Exact parameters, no input disturbance',
+          html: 'Set α = 0 in your dynamics. Here, the chapter starts with no mismatch and d = 0; <em>Exact model</em> in the left panel restores them.',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            return !mis && !(Math.abs(S.sim.dist) > 0) ? { ok: true, msg: 'Exact model, no disturbance.' } : { ok: false, msg: 'Remove the plant mismatch and the disturbance.' };
+          },
+        },
         {
           id: 'b', title: '(b) Observability',
           inputs: { rank: 'rank 𝒪<sub>A,C</sub>' },
@@ -433,6 +474,10 @@
           inputs: { wTh: 'ω<sub>n,obs,θ</sub>', wPh: 'ω<sub>n,obs,φ</sub>', b3: 'β<sub>3</sub>', b0: 'β<sub>0</sub>' },
           check: (v) => { const o = od(), c = L.polyFromRoots(obsPoles(o)); return PD().checkNumbers(v, { wTh: o.wTh, wPh: o.wPh, b3: c[1], b0: c[4] }, { wTh: 'ωobs,θ', wPh: 'ωobs,φ' }); },
           solution: () => { const o = od(), Lg = WB.yt.observer(A, C, obsPoles(o)); return [{ tex: `\\omega_{obs,\\theta} = ${tex(o.wTh)},\\; \\omega_{obs,\\phi} = ${tex(o.wPh)},\\quad \\Delta_{obs} = ${WB.tf.polyTex(L.polyFromRoots(obsPoles(o)))}` }, { tex: `L^\\top = ${texMat(L.T(Lg))}` }, { html: 'One of many valid L; this is the repo\'s (place → scipy YT).' }]; },
+        },
+        {
+          id: 'd', title: '(d) Plot the states and their estimates',
+          html: 'Return x̂ from your controller and plot it with x. Here, the θ and φ plots show the estimates θ̂, φ̂ dashed, and the extra plot shows the estimation errors.',
         },
         {
           id: 'e', title: '(e) Add an input disturbance of 1.0 N·m',
@@ -479,7 +524,7 @@
       return [
         { title: 'Why the plain observer is biased', page: 'p. 240 · Eq. 14.2–14.3',
           theory: '\\dot x = Ax + B(u + d),\\quad \\dot e = (A - LC)e + Bd \\Rightarrow e_{ss} \\ne 0 \\text{ for constant } d' },
-        ...obsCards(ctx, d, 'dobs'), polesCard(ctx, d, 'dobs'),
+        ...obsCards(ctx, d, 'dobs'), ...polesCard(ctx, d, 'dobs'),
       ];
     },
     buildProblem(parent, ctx) {
