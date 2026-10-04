@@ -41,7 +41,7 @@
     def __init__(self):
         tr_th = 0.5          # B.8(b)
         zeta_th = 0.707
-        M = 10.0             # t_r,z = M t_r,theta (this page's B.8(d) spec)
+        M = 10.0             # t_r,z = M t_r,theta: my outer spec for B.8(d)
         zeta_z = 0.707
         J = P.m1 * P.ell / 6 + P.m2 * 2 * P.ell / 3
         # inner loop
@@ -226,12 +226,13 @@
     kPz: ['k<sub>Pz</sub>', -1, 0.5], kDz: ['k<sub>Dz</sub>', -1.5, 0.5], kIz: ['k<sub>Iz</sub>', -0.5, 0.2],
   };
   const workSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, WORK_SPEC, keys, { steps: 2000 });
-  function knobSliders(parent, ctx, { kI = false } = {}) {
-    slider(parent, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.05, max: 2, step: 0.005, ...bind(ctx, 'trTh') });
-    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zetaTh') });
-    slider(parent, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1.5, max: 30, step: 0.1, sig: 3, hint: 'bandwidth separation between the loops (p. 118)', ...bind(ctx, 'M') });
-    slider(parent, { label: 'ζ<sub>z</sub>', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zetaZ') });
-    if (kI) slider(parent, { label: 'k<sub>Iz</sub>', min: -0.5, max: 0.2, step: 0.0005, sig: 3, ...bind(ctx, 'kIz') });
+  // obj: the object the knobs live in (default ctx.st).
+  function knobSliders(parent, ctx, { kI = false, obj } = {}) {
+    slider(parent, { label: 't<sub>r,θ</sub>', unit: 's', min: 0.05, max: 2, step: 0.005, ...bind(ctx, 'trTh', obj) });
+    slider(parent, { label: 'ζ<sub>θ</sub>', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zetaTh', obj) });
+    slider(parent, { label: 'M = t<sub>r,z</sub>/t<sub>r,θ</sub>', min: 1.5, max: 30, step: 0.1, sig: 3, hint: 'bandwidth separation between the loops (p. 118)', ...bind(ctx, 'M', obj) });
+    slider(parent, { label: 'ζ<sub>z</sub>', min: 0.2, max: 1.5, step: 0.005, ...bind(ctx, 'zetaZ', obj) });
+    if (kI) slider(parent, { label: 'k<sub>Iz</sub>', min: -0.5, max: 0.2, step: 0.0005, sig: 3, ...bind(ctx, 'kIz', obj) });
   }
   function readout(parent, ctx, keys) {
     const names = { kPth: 'kPθ', kDth: 'kDθ', kDC: 'kDC', kPz: 'kPz', kDz: 'kDz', kIz: 'kIz' };
@@ -352,14 +353,16 @@
     linearSim(ctx, c) { return linearSim(ctx, c, (lin) => this.controller(ctx, { linear: lin })); },
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.trTh * ctx.st.M } : {}; },
 
+    // Work-mode target rings: the inner pair only, from B.8(b)'s t_r,θ and ζ_θ (the
+    // book leaves the outer specs to the student).
     specPoles(ctx) {
       const pr = ctx.sys.problems.ch8;
-      return [...WB.design.polesFromWnZeta(2.2 / pr.trTh, pr.zetaTh), ...WB.design.polesFromWnZeta(2.2 / (pr.trTh * pr.M), pr.zetaZ)];
+      return WB.design.polesFromWnZeta(2.2 / pr.trTh, pr.zetaTh);
     },
 
     buildControls(parent, ctx) {
       if (ctx.S.mode === 'work') {
-        workControls(parent, ctx, ['kPth', 'kDth', 'kPz', 'kDz'], 'B.8(e)', 'Dashed rings mark the problem\'s target poles (inner t_r = 0.5 s; outer M = 10).');
+        workControls(parent, ctx, ['kPth', 'kDth', 'kPz', 'kDz'], 'B.8(e)', 'Dashed rings mark the inner-loop target poles of B.8(b) (t_r = 0.5 s, ζ = 0.707).');
         sec8Extra(parent, ctx);
         return;
       }
@@ -481,33 +484,47 @@
         },
         {
           id: 'd2', title: '(d) Outer PD gains that stabilize the cart position',
-          html: `The book leaves the outer specs open; this page uses a bandwidth separation M = ${pr.M} (t<sub>r,z</sub> = ${pr.M} t<sub>r,θ</sub>, ω<sub>n</sub> = 2.2/t<sub>r</sub>) and ζ<sub>z</sub> = ${pr.zetaZ}.`,
-          inputs: { kPz: 'k<sub>Pz</sub>', kDz: 'k<sub>Dz</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { kPz: r.kPz, kDz: r.kDz }, { kPz: 'kPz', kDz: 'kDz' }); },
-          actions: [WB.design.useGains(ctx, ['kPz', 'kDz'])],
+          html: 'The book leaves the outer specs to you. On the model from (d), return k<sub>Pz</sub>, k<sub>Dz</sub> that give the outer closed loop natural frequency ω<sub>nz</sub> and damping ratio ζ<sub>z</sub>; the check calls it at random ω<sub>nz</sub>, ζ<sub>z</sub>. Choose your own ω<sub>nz</sub> well below the inner loop\'s (successive loop closure, p. 117–118).',
+          code: {
+            template: 'def outer_gains(wn_z, zeta_z):\n    # returns kPz, kDz\n    return ...\n',
+            check: pyCheck(ctx, {
+              args: { wn: { label: 'ω_nz', lo: 0.2, hi: 1.5 }, zeta: { label: 'ζ_z', lo: 0.5, hi: 1.0 } },
+              items: [{ fn: 'outer_gains', args: ['wn', 'zeta'], truth: (p, x) => {
+                const k = Math.sqrt(2 * p.ell / (3 * p.g)), a = -(x.wn ** 2) * k, b = (a - 2 * x.zeta * x.wn) * k;
+                const kDz = b / (1 - b);
+                return [a * (1 + kDz), kDz];
+              } }],
+            }),
+          },
           solution: () => {
             const r = ref();
             return [
-              { tex: `\\omega_{nz} = \\frac{2.2}{${pr.M}\\cdot ${pr.trTh}} = ${tex(r.wnZ)},\\quad a = -\\sqrt{\\tfrac{2\\ell}{3g}}\\,\\omega_{nz}^2 = ${tex(r.a)},\\quad b = \\sqrt{\\tfrac{2\\ell}{3g}}(a - 2\\zeta_z\\omega_{nz}) = ${tex(r.b)}` },
-              { tex: `k_{Dz} = \\frac{b}{1-b} = ${tex(r.kDz)},\\quad k_{Pz} = \\frac{a}{1-b} = ${tex(r.kPz)}` },
-              { html: 'Eqs. 8.12–8.13 (p. 127). Listing 8.3 computes k<sub>Dz</sub> with a different expression; try "Listing 8.3 tuning" in Explore mode and compare the outer ζ.' },
+              { tex: 'a = \\frac{k_{Pz}}{1 + k_{Dz}} = -\\sqrt{\\tfrac{2\\ell}{3g}}\\,\\omega_{nz}^2,\\quad b = \\frac{k_{Dz}}{1 + k_{Dz}} = \\sqrt{\\tfrac{2\\ell}{3g}}\\big(a - 2\\zeta_z\\omega_{nz}\\big),\\quad k_{Dz} = \\frac{b}{1 - b},\; k_{Pz} = \\frac{a}{1 - b}' },
+              { code: 'def outer_gains(wn_z, zeta_z):\n    k = np.sqrt(2 * P.ell / (3 * P.g))\n    a = -wn_z**2 * k\n    b = (a - 2 * zeta_z * wn_z) * k\n    kDz = b / (1 - b)\n    return a * (1 + kDz), kDz\n' },
+              { html: `Eqs. 8.12–8.13 (p. 127), matching the (d) characteristic polynomial to s² + 2ζ<sub>z</sub>ω<sub>nz</sub>s + ω<sub>nz</sub>². With t<sub>r,z</sub> = 10 t<sub>r,θ</sub> = 5 s and ζ<sub>z</sub> = 0.707 (one choice): ω<sub>nz</sub> = ${tex(r.wnZ)}, k<sub>Pz</sub> = ${tex(r.kPz)}, k<sub>Dz</sub> = ${tex(r.kDz)}. The book's solution leaves the numbers to Listing 8.3 (t<sub>r,θ</sub> = 0.15 s, M = 15), whose k<sub>Dz</sub> formula differs (ISSUES.md).` },
             ];
           },
         },
         WB.myCtrl.part(ctx, {
           id: 'e', title: '(e) Implement the design with |F| ≤ 5 N; start at θ = 10° and simulate 10 s',
-          html: `Write the controller with the gains from (b) and (d). <code>update</code> gets z<sub>r</sub> and the state x, as in the Ch 8 code; the plant limits the force to F<sub>max</sub> = 5 N. <em>Run my controller</em> drives the time plots; the check starts the rod at θ = 10°, runs the ±0.5 m square wave for 10 s with the nominal and with other parameters, and compares z(t) with the design (within 1 cm).`,
-          check: (code) => {
-            const g = (p) => lib().slcGains(p, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaZ: pr.zetaZ, formula: 'book' });
-            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
-              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(0.5), init: { z0: 0, theta0: 10 }, tEnd: 10, feed: 'state' });
-              return { sc, label: pc.label, ref: () => WB.myCtrl.reference(ctx, sc, lib().slcPD({ g: g(sc.params), p: sc.params, Ts: sc.Ts, filter: true })) };
-            });
-            return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.01, what: 'the design' });
+          html: `Write the controller with the gains from (b) and your outer design from (d). <code>update</code> gets z<sub>r</sub> and the state x, as in the Ch 8 code; the plant limits the force to F<sub>max</sub> = 5 N. <em>Run my controller</em> drives the time plots; the check starts the rod at θ = 10° with z<sub>r</sub> = 0 and simulates 10 s, with the nominal and with other parameters: the rod must never pass 45° and must be within 1° of upright over the last second.`,
+          check: async (code) => {
+            const out = [];
+            for (const pc of WB.myCtrl.paramCases(ctx)) {
+              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: { type: 'step', amplitude: 0, tStep: 0 }, init: { z0: 0, theta0: 10 }, tEnd: 10, feed: 'state' });
+              const res = await WB.myCtrl.run(ctx, code, sc);
+              if (res.ok === false) return res;
+              let maxTh = 0, lastTh = 0;
+              res.t.forEach((t, k) => { const th = Math.abs(res.x[k][1]); maxTh = Math.max(maxTh, th); if (t >= 9 - 1e-9) lastTh = Math.max(lastTh, th); });
+              const msg = `${pc.label}: max |θ| ${fmt(maxTh / DEG, 3)}°, |θ| ≤ ${fmt(lastTh / DEG, 3)}° over the last second`;
+              if (!(maxTh < 45 * DEG && lastTh < DEG)) return { ok: false, msg: `${msg}: the cart does not balance the rod.` };
+              out.push(msg);
+            }
+            return { ok: true, msg: `${out.join('; ')}.` };
           },
           solution: () => [
             { code: SOL.ch8 },
-            { html: 'Listing 8.3 (p. 128–129, the repo\'s ctrlPD.py) with t<sub>r,θ</sub> = 0.5 s and M = 10, and the outer gains from Eqs. 8.12–8.13 (the listing\'s own k<sub>Dz</sub> formula differs: ISSUES.md). θ<sub>r</sub> passes through the zero-canceling filter, integrated with one Euler step per sample.' },
+            { html: 'Listing 8.3 (p. 128–129, the repo\'s ctrlPD.py) with t<sub>r,θ</sub> = 0.5 s, and the outer gains from Eqs. 8.12–8.13 for one choice of outer spec (t<sub>r,z</sub> = 10 t<sub>r,θ</sub>, ζ<sub>z</sub> = 0.707; the listing uses t<sub>r,θ</sub> = 0.15 s, M = 15 and its own k<sub>Dz</sub> formula, ISSUES.md). θ<sub>r</sub> passes through the zero-canceling filter, integrated with one Euler step per sample. Outer separations from about 5 to 25 pass.' },
           ],
         }),
       ]);
@@ -751,7 +768,6 @@
 
     buildProblem(parent, ctx) {
       const pr = ctx.sys.problems.ch10;
-      const ref = () => lib().slcGains(ctx.pModel, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaZ: pr.zetaZ, formula: 'book' });
       PD().problemPanel(parent, ctx, pr, [
         {
           id: 'a', title: '(a) Parameters vary by up to 20%',
@@ -764,13 +780,6 @@
         {
           id: 'b', title: '(b) The controller knows only z, θ and r<sub>z</sub>',
           html: 'From here on your controller\'s <code>update(z_r, y)</code> receives the noisy measurements y = [[z], [θ]] and the reference, not the state.',
-        },
-        {
-          id: 'c1', title: `(c) Gains for the listing's t<sub>r,θ</sub> = ${pr.trTh} s, ζ<sub>θ</sub> = ${pr.zetaTh}, M = ${pr.M}, ζ<sub>z</sub> = ${pr.zetaZ}`,
-          inputs: { kPth: 'k<sub>Pθ</sub>', kDth: 'k<sub>Dθ</sub>', kDC: 'k<sub>DC</sub>', kPz: 'k<sub>Pz</sub>', kDz: 'k<sub>Dz</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { kPth: r.kPth, kDth: r.kDth, kDC: r.kDC, kPz: r.kPz, kDz: r.kDz }, { kPth: 'kPθ', kDth: 'kDθ', kDC: 'kDC', kPz: 'kPz', kDz: 'kDz' }); },
-          actions: [WB.design.useGains(ctx, ['kPth', 'kDth', 'kPz', 'kDz'])],
-          solution: () => { const r = ref(); return [{ tex: `k_{P\\theta} = ${tex(r.kPth)},\\; k_{D\\theta} = ${tex(r.kDth)},\\; k_{DC} = ${tex(r.kDC)},\\; k_{Pz} = ${tex(r.kPz)},\\; k_{Dz} = ${tex(r.kDz)}` }, { html: 'Listing 10.3 (p. 163–164). B.10 says "use B.8", but the listing changes t<sub>r,θ</sub> from 0.5 to 0.2 s and fixes M = 10.' }]; },
         },
         WB.myCtrl.part(ctx, {
           id: 'c', title: '(c) Implement the nested PID loops with σ = 0.05; tune the integrator', seed: 'B.8/e',
@@ -804,9 +813,13 @@
   B.chapters.p6 = {
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–472',
 
-    defaults() { return { trTh: 0.2, zetaTh: 0.707, M: 10, zetaZ: 0.707, formula: 'book', kappa: 0, model: 'filter', filter: true, kMax: 1 }; },
+    // Explore starts from the B.10 listing's tuning; Work mode's knobs (wk) start from
+    // B.8(b)'s inner spec and an arbitrary outer one, since the listing's values
+    // are not part of the problem.
+    defaults() { return { trTh: 0.2, zetaTh: 0.707, M: 10, zetaZ: 0.707, formula: 'book', kappa: 0, model: 'filter', filter: true, kMax: 1, wk: { trTh: 0.5, zetaTh: 0.707, M: 6, zetaZ: 0.8 } }; },
+    knobs(ctx) { return ctx.S && ctx.S.mode === 'work' && ctx.st.wk ? { ...ctx.st, ...ctx.st.wk } : ctx.st; },
     simDefaults(sys) { return sys.problems.p6.sim; },
-    gains(ctx) { const g = designed(ctx, { ...ctx.st, kIz: -ctx.st.kappa }); return g; },
+    gains(ctx) { return designed(ctx, { ...this.knobs(ctx), kIz: -ctx.st.kappa }); },
     controller(ctx, { linear = false } = {}) {
       return lib().slcPID({ g: ctx.gains, p: ctx.pModel, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(ctx.pModel), filter: ctx.st.model === 'filter', linear });
     },
@@ -814,7 +827,7 @@
 
     // Characteristic equation den(s) + κ num(s) = 0 with k_I = −κ.
     evans(ctx) {
-      const p = ctx.pModel, g = designed(ctx, { ...ctx.st, kIz: 0 }), q = qOf(p);
+      const p = ctx.pModel, g = designed(ctx, { ...this.knobs(ctx), kIz: 0 }), q = qOf(p);
       if (ctx.st.model === 'filter') {
         return { den: [1 + g.kDz, g.kPz - q * g.kDz, -q * g.kPz, 0], num: [-1, q], g };
       }
@@ -834,13 +847,13 @@
     },
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'B.10 PD gains, then add k_Iz', 'p. 471');
+      const sec = section(parent, ctx.S.mode === 'work' ? 'Outer PD design, then add k_Iz' : 'B.10 PD gains, then add k_Iz', 'p. 471');
       segmented(sec, {
         label: 'Outer-loop model',
         options: [{ value: 'filter', label: 'k_DC + zero-canceling filter (B.8, B.10)' }, { value: 'book', label: 'k_DC only (Fig. 6-9)' }],
         ...bind(ctx, 'model'),
       });
-      knobSliders(sec, ctx);
+      knobSliders(sec, ctx, { obj: ctx.S.mode === 'work' && ctx.st.wk ? () => ctx.st.wk : undefined });
       slider(sec, { label: 'κ = −k<sub>Iz</sub>', min: 0, max: 1, step: 0.0005, sig: 3, ...bind(ctx, 'kappa') });
       slider(sec, { label: 'locus to κ =', min: 0.05, max: 10, log: true, sig: 3, ...bind(ctx, 'kMax') });
       sec.append(el('p', { class: 'muted small', text: 'k_Pz and k_Dz are negative for this plant, so the useful integrator gain is negative too; the locus is drawn for k_Iz = −κ, κ ≥ 0. Drag a closed-loop pole along it to set κ.' }));

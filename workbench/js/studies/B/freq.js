@@ -87,11 +87,9 @@
         ctx.update();
       } }));
     }
-    if (shows(ctx, 'B.10/c1')) {
+    if (shows(ctx, 'B.10/c')) {
       row.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'B.10 gains', onclick: () => {
         const g = b10(ctx.sys);
-        // the listing's k_Iz is the B.10(c) tuning answer
-        if (!shows(ctx, 'B.10/c')) delete g.kIz;
         Object.assign(gainsOf(ctx), g);
         ctx.update();
       } }));

@@ -18,16 +18,6 @@
   const KEYS = ['K1', 'K2', 'K3', 'K4'];
   // Python answers: module-level matrices, checked at random parameter sets.
   const pyVars = (ctx, names, truth) => (code) => WB.py.check(ctx, { items: names.map((k) => ({ var: k, truth: (p) => truth(p)[k] })) }, code);
-  // Every pole in `given` matches a distinct pole in `truth` (1%).
-  function polesMatchAll(given, truth) {
-    const left = truth.slice();
-    for (const g of given) {
-      const i = left.findIndex((q) => M.close(g.re, q.re, 0.01, 1e-3) && M.close(g.im, q.im, 0.01, 1e-3));
-      if (i < 0) return false;
-      left.splice(i, 1);
-    }
-    return left.length === 0;
-  }
   const tuning = (st) => ({ trTh: st.trTh, zetaTh: st.zetaTh, M: st.M, zetaZ: st.zetaZ, rule: st.rule, pI: st.pI, obsFactor: st.obsFactor, obsRule: st.obsRule, pD: st.pD });
 
   // Gains designed from the knobs. Work mode has no gains of its own: the plots
@@ -222,6 +212,8 @@ class Controller:
 `,
   };
 
+  // ζ_z is the student's B.8 choice: B.11(a), (d) and B.12(a) are functions of it.
+  const ZZ_ARGS = { zz: { label: 'ζ_z', lo: 0.5, hi: 0.95 } };
   const SQUARE = (amplitude, frequency = 0.04) => ({ type: 'square', amplitude, frequency, tStep: 0 });
   const misText = (m) => Object.entries(m).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}%`).join(', ');
   // |z − z_r| (m) at time t.
@@ -308,22 +300,11 @@ class Controller:
         const op = ctx.st.dobs || level === 'obs' ? g.obsPoles : g.obsPoles.slice(0, 4);
         tagged({ poles: op }, 10).forEach((p) => mk.push({ ...p, kind: 'obs', label: `observer ${p.dragId === 12 ? 'disturbance pole' : names[p.dragId - 10]}`, noFit: Math.hypot(p.re, p.im) > 80 }));
       }
-    } else {
-      // Work mode has no gains (the plots run the student's own controller). The
-      // target poles (B.11(a)) are an answer: shown once revealed or solved.
-      if (polesRevealed(ctx) || ctx.app.isSolved('B.11/a')) {
-        const t = lib().ssPoles({ ...prob, pI: level === 'sf' ? null : prob.pI });
-        t.poles.forEach((p) => mk.push({ ...p, kind: 'target', label: 'target pole (problem)' }));
-      }
     }
+    // Work mode has no gains (the plots run the student's own controller) and no
+    // target poles: they depend on ζ_z, p_I and observer speeds the book leaves
+    // to the student.
     return mk;
-  }
-
-  const polesRevealed = (ctx) => !!(ctx.app && ctx.app.isRevealed(`B:${ctx.S.chapter}:poles`));
-  function revealPoles(parent, ctx, what) {
-    const btn = WB.ui.revealButton(ctx, `B:${ctx.S.chapter}:poles`, `Reveal ${what} in the s-plane`);
-    parent.append(btn);
-    WB.ui.addRefresher(() => { btn.hidden = polesRevealed(ctx); });
   }
 
   function onDrag(ctx, id, re, im) {
@@ -453,9 +434,8 @@ class Controller:
     ] } };
   }
   // Work-mode control panel: the plots show the student's controller.
-  function workPanel(parent, ctx, part, what) {
+  function workPanel(parent, ctx, part) {
     WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
-    revealPoles(section(parent, 'Target poles'), ctx, what);
   }
 
   // ------------------------------------------------------------ Chapter 11 --
@@ -463,7 +443,7 @@ class Controller:
     defaults(sys) { return { ...stateDefaults(sys.problems.ch11.book), extra: 'thd' }; },
     simDefaults(sys) { return sys.problems.ch11.sim; },
     buildControls(parent, ctx) {
-      if (ctx.S.mode === 'work') workPanel(parent, ctx, 'B.11(e)', 'the B.11(a) target poles');
+      if (ctx.S.mode === 'work') workPanel(parent, ctx, 'B.11(e)');
       else {
         const sec = section(parent, 'F = −Kx + k_r z_r', 'p. 175 · Eq. 11.3, p. 190');
         knobs(sec, ctx); presets(sec, ctx, ctx.sys.problems.ch11);
@@ -501,14 +481,16 @@ class Controller:
       PD().problemPanel(parent, ctx, pr, [
         {
           id: 'a', title: '(a) Desired closed-loop poles',
-          html: 'Use ζ<sub>z</sub>, ω<sub>n<sub>θ</sub></sub> and ζ<sub>θ</sub> from B.8 (t<sub>r<sub>θ</sub></sub> = 0.5 s, ζ = 0.707, ω<sub>n</sub> = 2.2/t<sub>r</sub>) and an ω<sub>n<sub>z</sub></sub> that gives t<sub>z</sub> = 3t<sub>θ</sub>. Complex values are fine: <code>-1+2j</code>.',
-          inputs: { p1: 'p<sub>1</sub>', p2: 'p<sub>2</sub>', p3: 'p<sub>3</sub>', p4: 'p<sub>4</sub>' },
-          check: (v) => {
-            const g = ['p1', 'p2', 'p3', 'p4'].map((k) => M.parseComplex(v[k]));
-            if (g.some((x) => !x)) return { ok: false, msg: 'Enter all four poles.' };
-            return polesMatchAll(g, ref().poles) ? { ok: true, msg: '' } : { ok: false, msg: 'Roots of (s² + 2ζ_θω_nθ s + ω_nθ²)(s² + 2ζ_zω_nz s + ω_nz²)?' };
+          html: 'Use ω<sub>n<sub>θ</sub></sub> and ζ<sub>θ</sub> from B.8(b) (t<sub>r<sub>θ</sub></sub> = 0.5 s, ζ<sub>θ</sub> = 0.707, ω<sub>n</sub> = 2.2/t<sub>r</sub>), the ζ<sub>z</sub> you chose in B.8, and an ω<sub>n<sub>z</sub></sub> that gives t<sub>z</sub> = 3t<sub>θ</sub>. Return the coefficients of the desired characteristic polynomial Δ<sup>d</sup>(s) = s⁴ + α₃s³ + α₂s² + α₁s + α₀ (highest power first) as a function of ζ<sub>z</sub>; the check calls it at random ζ<sub>z</sub>.',
+          code: {
+            template: 'def delta_d(zeta_z):\n    # [1, alpha3, alpha2, alpha1, alpha0]\n    return ...\n',
+            check: (code) => WB.py.check(ctx, { args: ZZ_ARGS, items: [{ fn: 'delta_d', args: ['zz'], truth: (p, x) => L.polyFromRoots(lib().ssPoles({ ...pr.book, zetaZ: x.zz, pI: null }).poles) }] }, code),
           },
-          solution: () => { const r = ref(); return [{ tex: `\\omega_{n\\theta} = 2.2/0.5 = ${tex(r.wnTh)},\; \\omega_{nz} = 2.2/1.5 = ${tex(r.wnZ)},\\quad p = ${r.poles.map((x) => texPole(x)).join(',\;')}` }, { html: 'These give the book\'s Δ<sup>d</sup> = s⁴ + 8.2955s³ + 34.414s² + 53.533s + 41.646 (p. 190). The listing instead uses ζ = 0.9, t<sub>z</sub> = 5t<sub>θ</sub> and the π/(2t<sub>r</sub>√(1−ζ²)) rule.' }]; },
+          solution: () => { const r = ref(); return [
+            { tex: `\\omega_{n\\theta} = 2.2/0.5 = ${tex(r.wnTh)},\; \\omega_{nz} = 2.2/1.5 = ${tex(r.wnZ)},\\quad \\Delta^d = (s^2 + 2\\zeta_\\theta\\omega_{n\\theta}s + \\omega_{n\\theta}^2)(s^2 + 2\\zeta_z\\omega_{nz}s + \\omega_{nz}^2)` },
+            { code: 'def delta_d(zeta_z):\n    wn_th, zeta_th = 2.2 / 0.5, 0.707\n    wn_z = 2.2 / (3 * 0.5)\n    return np.convolve([1, 2 * zeta_th * wn_th, wn_th**2],\n                       [1, 2 * zeta_z * wn_z, wn_z**2])\n' },
+            { html: `With ζ<sub>z</sub> = 0.707 (the book's choice): p = ${r.poles.map((x) => M.fmtPole(x)).join(', ')}, and the book's Δ<sup>d</sup> = s⁴ + 8.2955s³ + 34.414s² + 53.533s + 41.646 (p. 190). The listing instead uses ζ = 0.9, t<sub>z</sub> = 5t<sub>θ</sub> and the π/(2t<sub>r</sub>√(1−ζ²)) rule.` },
+          ]; },
         },
         {
           id: 'b', title: '(b) Add A, B, C, D from B.6 to the parameter file',
@@ -522,13 +504,20 @@ class Controller:
         },
         {
           id: 'd', title: '(d) K and k<sub>r</sub> for the (a) poles',
-          inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', kr: 'k<sub>r</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], kr: r.kr }, {}); },
-          solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_r = ${tex(r.kr)}` }, { html: 'The book prints K = (−1.5050, −24.9399, −1.9847, −3.5829), k<sub>r</sub> = −1.5050 (p. 190). Those are exactly the gains for ℓ = 0.5 m; with the stated ℓ = 1 m the answer is the one above. Note k<sub>r</sub> = K<sub>1</sub>: the plant has a free integrator in z, so unity DC gain needs the reference to enter like the z feedback.' }]; },
+          html: 'Return K = (K₁, K₂, K₃, K₄) placing the (a) poles and the k<sub>r</sub> that makes the DC gain from z<sub>r</sub> to z one, as a function of your ζ<sub>z</sub>, flattened as [K₁, K₂, K₃, K₄, k<sub>r</sub>]. <code>import control as cnt</code> gives <code>cnt.place</code>.',
+          code: {
+            template: 'def gains(zeta_z):\n    # [K1, K2, K3, K4, kr]\n    return ...\n',
+            check: (code) => WB.py.check(ctx, { args: ZZ_ARGS, items: [{ fn: 'gains', args: ['zz'], truth: (p, x) => { const d = lib().ssDesign(ctx.sys.stateSpace(p), 'sf', { ...pr.book, zetaZ: x.zz }); return [...d.K, d.kr]; } }] }, code),
+          },
+          solution: () => { const r = ref(); return [
+            { tex: `\\zeta_z = 0.707:\\quad K = ${texMat([r.K])},\\quad k_r = ${tex(r.kr)}` },
+            { code: 'import control as cnt\n\nd = 0.25 * P.m1 + P.m2\nA = np.array([[0, 0, 1, 0], [0, 0, 0, 1],\n              [0, -0.75 * P.m1 * P.g / d, -P.b / d, 0],\n              [0, 1.5 * (P.m1 + P.m2) * P.g / (d * P.ell), 1.5 * P.b / (d * P.ell), 0]])\nB = np.array([[0], [0], [1 / d], [-1.5 / (d * P.ell)]])\nCr = np.array([[1, 0, 0, 0]])\n\ndef gains(zeta_z):\n    wn_th, zeta_th = 2.2 / 0.5, 0.707\n    wn_z = 2.2 / (3 * 0.5)\n    poles = np.roots(np.convolve([1, 2 * zeta_th * wn_th, wn_th**2],\n                                 [1, 2 * zeta_z * wn_z, wn_z**2]))\n    K = cnt.place(A, B, poles)\n    kr = -1.0 / (Cr @ np.linalg.inv(A - B @ K) @ B)[0, 0]\n    return np.append(K[0], kr)\n' },
+            { html: 'The book prints K = (−1.5050, −24.9399, −1.9847, −3.5829), k<sub>r</sub> = −1.5050 (p. 190). Those are exactly the gains for ℓ = 0.5 m; with the stated ℓ = 1 m the answer is the one above. Note k<sub>r</sub> = K<sub>1</sub>: the plant has a free integrator in z, so unity DC gain needs the reference to enter like the z feedback.' },
+          ]; },
         },
         WB.myCtrl.part(ctx, {
           id: 'e', title: '(e) Implement state feedback and tune the poles for a good response', seed: 'B.8/e',
-          html: '<code>update(z_r, x)</code> gets the state, as in Listing 11.2. The check runs the ±0.5 m square wave (0.04 Hz) with the nominal parameters: the first step must rise (10–90%) in under 1.2 s, |θ| must stay under 30°, and F may sit at F<sub>max</sub> for at most 2 samples over the whole run (the later switches are 1 m steps). B.8\'s successive-loop design takes about 3.9 s.',
+          html: '<code>update(z_r, x)</code> gets the state, as in Listing 11.2. The check runs the ±0.5 m square wave (0.04 Hz) with the nominal parameters: the first step must rise (10–90%) in under 1.2 s, |θ| must stay under 30°, and F may sit at F<sub>max</sub> for at most 2 samples over the whole run (the later switches are 1 m steps).',
           check: async (code) => {
             const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(0.5), tEnd: 25 });
             const res = await WB.myCtrl.run(ctx, code, sc);
@@ -556,7 +545,7 @@ class Controller:
     defaults(sys) { return { ...stateDefaults(sys.problems.ch12.book), antiwindup: 'clamp', extra: 'int' }; },
     simDefaults(sys) { return { ...sys.problems.ch12.sim, mismatch: sys.problems.ch12.mismatch }; },
     buildControls(parent, ctx) {
-      if (ctx.S.mode === 'work') { workPanel(parent, ctx, 'B.12(a) and (c)', 'the target poles (p_I = −2)'); return; }
+      if (ctx.S.mode === 'work') { workPanel(parent, ctx, 'B.12(a) and (c)'); return; }
       const sec = section(parent, 'F = −Kx − k_I ∫(z_r − z)', 'p. 199 · Eq. 12.1, p. 210');
       segmented(sec, {
         label: 'Anti-windup (B.12a)',
@@ -584,7 +573,7 @@ class Controller:
           theory: 'C_r = (1, 0, 0, 0)',
           numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}` },
         { ...ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 207 · Step 2'), answers: 'B.12/a1' },
-        polesCard(ctx, d, 'sfi', ctx.S.mode === 'work' ? 'B.11/a' : undefined),
+        polesCard(ctx, d, 'sfi', ctx.S.mode === 'work' ? ['B.11/a', 'B.12/a2'] : undefined),
         { title: 'Gains', page: 'p. 208 · Step 3',
           theory: 'K_1 = (K, k_I) = (\\boldsymbol\\alpha - \\mathbf a_{A_1})\\mathcal{A}_{A_1}^{-1}\\mathcal{C}_{A_1,B_1}^{-1},\\quad F = -Kx - k_I x_I',
           numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true, answers: 'B.12/a2' },
@@ -608,30 +597,43 @@ class Controller:
           ],
         },
         {
-          id: 'a2', title: '(a) K and k<sub>I</sub> for the B.11 poles with p<sub>I</sub> = −2',
-          inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', ki: 'k<sub>I</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], ki: r.ki }, { ki: 'kI' }); },
-          solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` }, { html: 'The book prints K = (−5.3744, −32.1057, −4.5745, −5.1545), k<sub>I</sub> = 3.0101 (p. 208): the ℓ = 0.5 m gains. Its Step 2 text names p<sub>I</sub> = −10 and different B.11 poles, but the polynomial it then uses has (s + 2) and the B.8 poles.' }]; },
+          id: 'a2', title: '(a) K and k<sub>I</sub> for the B.11 poles plus an integrator pole',
+          html: 'Return K and k<sub>I</sub> (F = −Kx − k<sub>I</sub>x<sub>I</sub>) placing the B.11(a) poles and an integrator pole p<sub>I</sub>, as a function of your ζ<sub>z</sub> and p<sub>I</sub>, flattened as [K₁, K₂, K₃, K₄, k<sub>I</sub>]; the check calls it at random values.',
+          code: {
+            template: 'def gains(zeta_z, p_I):\n    # [K1, K2, K3, K4, kI]\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { ...ZZ_ARGS, pI: { label: 'p_I', lo: -6, hi: -0.5 } },
+              items: [{ fn: 'gains', args: ['zz', 'pI'], truth: (p, x) => { const d = lib().ssDesign(ctx.sys.stateSpace(p), 'sfi', { ...pr.book, zetaZ: x.zz, pI: x.pI }); return [...d.K, d.ki]; } }],
+            }, code),
+          },
+          solution: () => { const r = ref(); return [
+            { tex: `\\zeta_z = 0.707,\; p_I = ${pr.book.pI}:\\quad K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` },
+            { code: 'import control as cnt\n\nd = 0.25 * P.m1 + P.m2\nA = np.array([[0, 0, 1, 0], [0, 0, 0, 1],\n              [0, -0.75 * P.m1 * P.g / d, -P.b / d, 0],\n              [0, 1.5 * (P.m1 + P.m2) * P.g / (d * P.ell), 1.5 * P.b / (d * P.ell), 0]])\nB = np.array([[0], [0], [1 / d], [-1.5 / (d * P.ell)]])\nCr = np.array([[1, 0, 0, 0]])\nA1 = np.block([[A, np.zeros((4, 1))], [-Cr, np.zeros((1, 1))]])\nB1 = np.vstack([B, [[0]]])\n\ndef gains(zeta_z, p_I):\n    wn_th, zeta_th = 2.2 / 0.5, 0.707\n    wn_z = 2.2 / (3 * 0.5)\n    char = np.convolve(np.convolve([1, 2 * zeta_th * wn_th, wn_th**2],\n                                   [1, 2 * zeta_z * wn_z, wn_z**2]), [1, -p_I])\n    return cnt.place(A1, B1, np.roots(char))[0]\n' },
+            { html: 'The book prints K = (−5.3744, −32.1057, −4.5745, −5.1545), k<sub>I</sub> = 3.0101 (p. 208): the ℓ = 0.5 m gains with p<sub>I</sub> = −2. Its Step 2 text names p<sub>I</sub> = −10 and different B.11 poles, but the polynomial it then uses has (s + 2) and the B.8 poles.' },
+          ]; },
         },
         WB.myCtrl.part(ctx, {
           id: 'a3', title: '(a) Add the integrator with anti-windup to your B.11 controller', seed: 'B.11/e',
-          html: `Use the gains from above. The check (1) runs a ±0.2 m square wave with the nominal and with other parameters and compares z(t) with the design (within 3%), then (2) feeds your controller a fixed state for ${WINDUP.hold / 100} s with z<sub>r</sub> = 1 m, so F saturates while the error persists (once with the cart at rest, once moving at ż = 1 m/s), and reverses z<sub>r</sub>: in one of the two, F must come off the limit within ${WINDUP.maxSat / 100} s.`,
+          html: `Use your gains from above. The check (1) runs a ±0.2 m square wave with a constant input disturbance of 0.5 N, with the nominal and with other parameters: |z − z<sub>r</sub>| just before the first switch (t = 12.5 s) must be under 1 cm and the rod within 30°; then (2) feeds your controller a fixed state for ${WINDUP.hold / 100} s with z<sub>r</sub> = 1 m, so F saturates while the error persists (once with the cart at rest, once moving at ż = 1 m/s), and reverses z<sub>r</sub>: in one of the two, F must come off the limit within ${WINDUP.maxSat / 100} s.`,
           check: async (code) => {
-            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
-              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(0.2), tEnd: 20, feed: 'state' });
-              const d = lib().ssDesign(ctx.sys.stateSpace(sc.params), 'sfi', { ...pr.book });
-              return { sc, label: pc.label, ref: () => WB.myCtrl.reference(ctx, sc, lib().sfiCtrl({ K: d.K, ki: d.ki, uLim: ctx.sys.uLimit(sc.params), Ts: sc.Ts, antiwindup: 'clamp' })) };
-            });
-            const m = await WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * 0.2 });
-            if (!m.ok) return m;
+            const msgs = [];
+            for (const pc of WB.myCtrl.paramCases(ctx)) {
+              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(0.2), dist: 0.5, tEnd: 12.5, feed: 'state' });
+              const res = await WB.myCtrl.run(ctx, code, sc);
+              if (res.ok === false) return res;
+              const e = errAt(res, 12.45), th = maxTheta(res);
+              const m = `${pc.label}: |z − z_r| = ${fmt(e * 100, 3)} cm before the switch, max |θ| ${fmt(th / DEG, 3)}°`;
+              if (!(e < 0.01 && th < 30 * DEG)) return { ok: false, msg: `${m}. With a constant disturbance, an integrator on z should remove the error.` };
+              msgs.push(m);
+            }
             const w = await windupCheck(ctx, code);
             if (w.ok === false) return w;
-            if (!(w.n <= WINDUP.maxSat)) return { ok: false, msg: `Tracking matches, but after ${WINDUP.hold / 100} s of saturation F stays at the limit for ${fmt(w.n / 100, 3)} s once z_r reverses: the integrator winds up while F is saturated.` };
-            return { ok: true, msg: `${m.msg} After the saturated hold F leaves the limit after ${w.n} sample${w.n === 1 ? '' : 's'}.` };
+            if (!(w.n <= WINDUP.maxSat)) return { ok: false, msg: `Tracking works, but after ${WINDUP.hold / 100} s of saturation F stays at the limit for ${fmt(w.n / 100, 3)} s once z_r reverses: the integrator winds up while F is saturated.` };
+            return { ok: true, msg: `${msgs.join('; ')}. After the saturated hold F leaves the limit after ${w.n} sample${w.n === 1 ? '' : 's'}.` };
           },
           solution: () => [
             { code: SOL.ch12 },
-            { html: 'The repo\'s ctrlStateFeedbackIntegrator.py (which has no anti-windup) with the B.11 poles and p<sub>I</sub> = −2, holding the integrator while F saturates. Unwinding by (F<sub>sat</sub> − F<sub>unsat</sub>)/k<sub>I</sub> passes too. Integrating only while |ż| &lt; v̄ passes only with v̄ above the cart\'s speed in ordinary tracking (about 0.24 m/s on the ±0.2 m steps): with B.10\'s v̄ = 0.07 m/s the integrator is off for most of every step, and the response is no longer the design\'s.' },
+            { html: 'The repo\'s ctrlStateFeedbackIntegrator.py (which has no anti-windup) with the B.11 poles (ζ<sub>z</sub> = 0.707) and p<sub>I</sub> = −2, holding the integrator while F saturates. Unwinding by (F<sub>sat</sub> − F<sub>unsat</sub>)/k<sub>I</sub>, or integrating only while |ż| is below a threshold, pass too.' },
           ],
         }),
         {
@@ -671,7 +673,7 @@ class Controller:
     outputSeries: estSeries,
     extraPlot: estExtra,
     buildControls(parent, ctx) {
-      if (ctx.S.mode === 'work') workPanel(parent, ctx, 'B.13(c)', 'the target poles');
+      if (ctx.S.mode === 'work') workPanel(parent, ctx, 'B.13(c)');
       else {
         const sec = section(parent, 'Controller (uses x̂)', 'p. 231 · Listing 13.2');
         knobs(sec, ctx, { pI: true }); presets(sec, ctx, ctx.sys.problems.ch13);
@@ -699,7 +701,7 @@ class Controller:
           theory: 't_{r,obs} = t_r / 10 \\text{ for each pair (repo)},\\quad L = \\text{place}(A^\\top, C^\\top, q)^\\top',
           numbers: `\\omega_{n\\theta,obs} = ${tex(g.wnThObs)},\; \\omega_{nz,obs} = ${tex(g.wnZObs)},\\quad L^\\top = ${texMat(L.T(g.L))}`, spoiler: true, answers: 'B.13/c',
           note: 'With two outputs many L place the same poles; this is the one scipy\'s YT iteration returns.' },
-        polesCard(ctx, d, 'sfi'),
+        polesCard(ctx, d, 'sfi', ctx.S.mode === 'work' ? 'B.13/c' : undefined),
         { title: 'Separation principle', page: 'p. 222–223',
           theory: '\\begin{pmatrix}\\dot x\\\\ \\dot e\\end{pmatrix} = \\begin{pmatrix}A - BK & BK\\\\ 0 & A - LC\\end{pmatrix}\\begin{pmatrix}x\\\\ e\\end{pmatrix} \\Rightarrow \\text{eig} = \\text{eig}(A - BK)\\cup\\text{eig}(A - LC)',
           note: 'Holds for the linear model only; saturation and mismatch break it.' },
@@ -775,7 +777,7 @@ class Controller:
     outputSeries: estSeries,
     extraPlot: estExtra,
     buildControls(parent, ctx) {
-      if (ctx.S.mode === 'work') workPanel(parent, ctx, 'B.14(b)', 'the target poles');
+      if (ctx.S.mode === 'work') workPanel(parent, ctx, 'B.14(b)');
       else {
         const sec = section(parent, 'Controller (uses x̂, subtracts d̂)', 'p. 250 · Listing 14.4');
         segmented(sec, {
@@ -809,7 +811,7 @@ class Controller:
           theory: '\\omega_{n,obs} = 2.2/(t_r/10) \\text{ for each pair},\\quad p_d = -1,\\quad L_2 = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
           numbers: ctx.st.dobs ? `L_2^\\top = ${texMat(L.T(g.L2))}` : `L^\\top = ${texMat(L.T(g.L))}`, spoiler: true, answers: 'B.14/b',
           note: 'Listing 14.4 switches the observer to the 2.2/t_r rule while the controller keeps π/(2t_r√(1−ζ²)), and its disturbance pole at −1 is slower than every controller pole.' },
-        polesCard(ctx, g, 'sfi'),
+        polesCard(ctx, g, 'sfi', ctx.S.mode === 'work' ? 'B.14/b' : undefined),
       ];
     },
     buildProblem(parent, ctx) {
