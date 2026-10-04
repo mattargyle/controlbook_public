@@ -4,7 +4,9 @@
 // the inner loop replaced by its DC gain k_DCθ = 1 (C.8, pp. 130–132).
 //
 // Modes (as in study A):
-//   work    - you set the five gains; anything that answers a problem stays hidden.
+//   work    - C.8(e, f) and C.10(c) are your own Python controllers (WB.myCtrl), which
+//             drive the plots; the five gain sliders only place the s-plane poles (and
+//             drive the C.9 and P.6 analyses). Anything that answers a problem stays hidden.
 //   explore - gains come from (t_rθ, ζ_θ, M, ζ_φ); drag the inner- or outer-loop poles.
 (function () {
   const { el, slider, segmented, section, bind } = WB.ui;
@@ -50,6 +52,112 @@
         return { u: tauU, thetaR: thr, thetaRunsat: thrU, integrator: I, thdHat: thd, phdHat: phd };
       },
     };
+  }
+
+  // ------------------------------------------------- solution controllers --
+  // C.8(e): ctrlPD.py with the C.8 spec (t_rθ = 1 s), φ_r fed forward (Fig. 8-20).
+  // The C.8(f) solution adds the torque limit and a slower t_rθ.
+  const SOL8 = `class Controller:
+    def __init__(self):
+        tr_th = 1.0          # C.8(b)
+        zeta_th = 0.9
+        M = 10.0             # C.8(d): t_r,phi = M t_r,theta
+        zeta_phi = 0.9
+        # inner loop on 1/((Js + Jp) s^2)
+        J = P.Js + P.Jp
+        wn_th = 0.5 * np.pi / (tr_th * np.sqrt(1 - zeta_th**2))
+        self.kp_th = wn_th**2 * J
+        self.kd_th = 2 * zeta_th * wn_th * J
+        DC_th = 1.0          # C.8(c)
+        # outer loop with the inner loop replaced by its DC gain
+        wn_phi = 0.5 * np.pi / (M * tr_th * np.sqrt(1 - zeta_phi**2))
+        AA = np.array([[P.k * DC_th, -P.b * DC_th * wn_phi**2],
+                       [P.b * DC_th, P.k * DC_th - 2 * zeta_phi * wn_phi * P.b * DC_th]])
+        bb = np.array([[-P.k + P.Jp * wn_phi**2],
+                       [-P.b + 2 * P.Jp * zeta_phi * wn_phi]])
+        gains = np.linalg.solve(AA, bb)
+        self.kp_phi = gains[0, 0]
+        self.kd_phi = gains[1, 0]
+
+    def update(self, phi_r, x):
+        theta = x[0, 0]
+        phi = x[1, 0]
+        thetadot = x[2, 0]
+        phidot = x[3, 0]
+        # outer loop: body reference, with phi_r fed forward (Fig. 8-20)
+        theta_r = self.kp_phi * (phi_r - phi) - self.kd_phi * phidot + phi_r
+        # inner loop: torque on the body
+        tau = self.kp_th * (theta_r - theta) - self.kd_th * thetadot
+        return tau
+`;
+  const SOL8F = SOL8.replace('tr_th = 1.0          # C.8(b)', 'tr_th = 1.9          # tuned: the 30 deg step just reaches tau_max')
+    .replace('        return tau\n', '        return max(-P.tau_max, min(P.tau_max, tau))\n');
+  // C.10(c): ctrlPID.py (Listing 10.4) as a Controller.
+  const SOL10 = `class Controller:
+    def __init__(self):
+        # the book's C.10 tuning (Listing 10.4)
+        tr_th = 0.4
+        zeta_th = 0.9
+        M = 15.0
+        zeta_phi = 0.9
+        self.ki_phi = 0.15
+        self.theta_max = 30 * np.pi / 180      # limit on theta_r
+        self.sigma = 0.05
+        self.beta = (2 * self.sigma - P.Ts) / (2 * self.sigma + P.Ts)
+        # inner loop
+        J = P.Js + P.Jp
+        wn_th = 2.2 / tr_th
+        self.kp_th = wn_th**2 * J
+        self.kd_th = 2 * zeta_th * wn_th * J
+        # outer loop (inner loop -> DC gain 1)
+        wn_phi = 2.2 / (M * tr_th)
+        AA = np.array([[P.k, -P.b * wn_phi**2],
+                       [P.b, P.k - 2 * zeta_phi * wn_phi * P.b]])
+        bb = np.array([[-P.k + P.Jp * wn_phi**2],
+                       [-P.b + 2 * P.Jp * zeta_phi * wn_phi]])
+        gains = np.linalg.solve(AA, bb)
+        self.kp_phi = gains[0, 0]
+        self.kd_phi = gains[1, 0]
+        # integrator and dirty derivatives
+        self.integrator = 0.0
+        self.error_prev = 0.0
+        self.phi_dot = P.phidot0
+        self.phi_prev = P.phi0
+        self.theta_dot = P.thetadot0
+        self.theta_prev = P.theta0
+
+    def update(self, phi_r, y):
+        theta = y[0, 0]
+        phi = y[1, 0]
+        # outer loop: PID on phi, derivative of the measured phi (Eq. 10.4)
+        error = phi_r - phi
+        self.integrator += P.Ts / 2 * (error + self.error_prev)
+        self.phi_dot = self.beta * self.phi_dot + 2 / (2 * self.sigma + P.Ts) * (phi - self.phi_prev)
+        theta_r_unsat = self.kp_phi * error + self.ki_phi * self.integrator - self.kd_phi * self.phi_dot
+        theta_r = max(-self.theta_max, min(self.theta_max, theta_r_unsat))
+        # anti-windup: unwind the integrator by what the limit cut off
+        self.integrator += P.Ts / self.ki_phi * (theta_r - theta_r_unsat)
+        # inner loop: PD on theta
+        self.theta_dot = self.beta * self.theta_dot + 2 / (2 * self.sigma + P.Ts) * (theta - self.theta_prev)
+        tau = self.kp_th * (theta_r - theta) - self.kd_th * self.theta_dot
+        tau = max(-P.tau_max, min(P.tau_max, tau))
+        self.error_prev = error
+        self.phi_prev = phi
+        self.theta_prev = theta
+        return tau
+`;
+
+  // C.10(c): |φ_r − φ| before the first switch (the book only says "tune the integrator").
+  const C10_TOL = 0.5;
+
+  // The workbench's cascade with given gains on a check scenario (reference for
+  // lib.matchAny): true-state derivatives, no |θ_r| limit, with or without the
+  // φ_r feedforward.
+  function cascadeRef(ctx, sc, g, ff) {
+    const rc = WB.myCtrl.refCtx(ctx, sc);
+    rc.gains = g;
+    rc.st = { ...ctx.st, ff, deriv: 'state', antiwindup: 'none', thetaMaxDeg: 1e9 };
+    return WB.myCtrl.reference(ctx, sc, makeCascade(rc));
   }
 
   // Gains: work mode from the sliders, explore mode from the design knobs.
@@ -167,11 +275,25 @@
         ...bind(ctx, 'antiwindup', () => st),
       });
     }
+    zoomControl(parent, ctx);
+  }
+  function zoomControl(parent, ctx) {
     segmented(parent, {
       label: 's-plane view',
       options: [{ value: 'all', label: 'all poles' }, { value: 'outer', label: 'zoom on outer loop' }],
-      ...bind(ctx, 'zoom', () => st),
+      ...bind(ctx, 'zoom', () => ctx.st),
     });
+  }
+
+  // Work mode (C.8, C.10): the gain sliders only place the s-plane poles; the time
+  // plots show the student's own controller, written in part `part`.
+  function workControls(parent, ctx, { withI, targetKey, part }) {
+    const sec = section(parent, 'Gains (s-plane)', 'p. 129 · C.8(a)');
+    workSliders(sec, ctx, withI);
+    sec.append(el('p', { class: 'muted small', text: 'These place the design-model × and the full-loop circles in the s-plane. They do not drive the simulation.' }));
+    zoomControl(sec, ctx);
+    targetToggle(sec, ctx, targetKey);
+    WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
   }
 
   // Loads C.8's loops into the Work-mode sliders, keeping the current k_Iφ. Used where
@@ -305,6 +427,9 @@
   CH.ch8 = {
     id: 'ch8', num: 8, tab: 'Ch 8', title: 'Successive loop closure (PD)', pages: 'pp. 129–134',
     controller: (ctx) => makeCascade(ctx),
+    // Work mode simulates the student's C.8(e)/(f) controller, which gets the state (as
+    // ctrlPD.py); no linear overlay (it would need gains the student doesn't set).
+    implement: { feed: 'state', linear: false },
     defaults(sys) {
       const pr = sys.problems.ch8;
       return {
@@ -327,12 +452,11 @@
     spec(ctx) { const pr = ctx.sys.problems.ch8; return designOf(ctx, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaPhi: pr.zetaPhi, rule: pr.rule }); },
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'PD inner loop, PD outer loop', 'p. 129 · C.8(a)');
-      commonControls(sec, ctx, { ff: true });
       if (ctx.S.mode === 'work') {
-        workSliders(sec, ctx, false);
-        targetToggle(sec, ctx, 'C.8/b');
+        workControls(parent, ctx, { withI: false, targetKey: 'C.8/b', part: 'C.8(e) or (f)' });
       } else {
+        const sec = section(parent, 'PD inner loop, PD outer loop', 'p. 129 · C.8(a)');
+        commonControls(sec, ctx, { ff: true });
         const des = section(parent, 'Design knobs', 'p. 131–132');
         designSliders(des, ctx);
         des.append(el('p', { class: 'muted small', text: 'Drag an inner-loop pole (green ×) to set t_rθ and ζ_θ, or an outer-loop pole (blue ×) to set M and ζ_φ.' }));
@@ -365,6 +489,9 @@
       const s = () => this.spec(ctx);
       // Peak demanded |τ| for a satStepDeg step from rest, designed from trTh (M = 10).
       const TAU_MAX = ctx.sys.params.find((q) => q.key === 'tau_max').value;   // the problem's 5 N·m
+      // C.8(e) check step: small enough that the feedforward never drives θ_r near
+      // ctrlPD.py's 30° limit, with the nominal or the second parameter set.
+      const E_STEP = 5;
       const peakFor = (trTh) => {
         const p = ctx.pModel;
         const g = lib().slcDesign(p, { trTh, zetaTh: prob.zetaTh, M: prob.M, zetaPhi: prob.zetaPhi, rule: prob.rule });
@@ -456,40 +583,43 @@
             { html: 'Book: (0.834, 8.253) and 0.455 (p. 132). The k<sub>D<sub>φ</sub></sub> printed there differs from what its own formula gives; see ISSUES.md.' },
           ],
         },
-        {
-          id: 'e', title: '(e) Simulate the 15° square wave',
-          html: 'Click <em>Use my gains</em> in (b) and in (d). Saturation only enters in part (f): with t<sub>r<sub>θ</sub></sub> = 1 s the first sample of the square wave demands several times τ<sub>max</sub>, so raise τ<sub>max</sub> in the left panel (up to 100) to run (e) unsaturated. Passes when the simulated design poles match the C.8 targets.',
-          check: () => {
-            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
-            const p = ctx.pModel, g = ctx.gains, sp = s();
-            const ok = M.polesMatch(lib().innerPoles(p, g), lib().innerPoles(p, sp), 0.02, 0.01) && M.polesMatch(lib().outerPoles(p, g), lib().outerPoles(p, sp), 0.02, 0.005);
-            return ok ? { ok, msg: 'Both loops sit on their targets. Compare the φ trace with the dashed design model.' } : { ok, msg: 'At least one loop is off its target rings.' };
+        WB.myCtrl.part(ctx, {
+          id: 'e', title: '(e) Implement the successive-loop-closure design and simulate the 15° square wave',
+          html: `Write the controller with the gains from (b) and (d). <code>update</code> gets φ<sub>r</sub> and the state x = (θ, φ, θ̇, φ̇), as in the book's C.8 code. <em>Run my controller</em> drives the time plots. Saturation only enters in (f): with t<sub>r<sub>θ</sub></sub> = 1 s the square wave demands several times τ<sub>max</sub>, so raise τ<sub>max</sub> in the left panel (up to 100) to see the design run unsaturated. The check simulates a ${E_STEP}° step on φ<sub>r</sub> with τ<sub>max</sub> raised out of the way, with the nominal and with other parameters, and compares θ(t) and φ(t) with the design (within 3% of the step).`,
+          check: (code) => {
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const params = { ...pc.params, tau_max: 1000 };
+              const sc = WB.myCtrl.scenario(ctx, { params, ref: { type: 'step', amplitude: E_STEP, tStep: 0 }, tEnd: 60 });
+              const g = lib().slcDesign(params, { trTh: prob.trTh, zetaTh: prob.zetaTh, M: prob.M, zetaPhi: prob.zetaPhi, rule: prob.rule });
+              // with or without the φ_r feedforward of Fig. 8-20
+              return { sc, label: pc.label, refs: [() => cascadeRef(ctx, sc, g, true), () => cascadeRef(ctx, sc, g, false)] };
+            });
+            return lib().matchAny(ctx, code, cases, { tol: 0.03 * E_STEP * DEG, outputs: [0, 1] });
           },
-        },
-        {
-          id: 'f', title: `(f) Fastest t<sub>r<sub>θ</sub></sub> (with t<sub>r<sub>φ</sub></sub> = ${prob.M} t<sub>r<sub>θ</sub></sub>) that does not saturate τ on a ${prob.satStepDeg}° step`,
-          inputs: { tr: 't<sub>r<sub>θ</sub></sub> [s]' },
-          html: `Checked by simulation: a ${prob.satStepDeg}° step on φ<sub>r</sub> from rest, ζ = 0.9 in both loops, feedforward on and |θ<sub>r</sub>| ≤ 30°. The peak demanded |τ| should be 95–100% of τ<sub>max</sub>.`,
-          check: (v) => {
-            const tr = PD().num(v.tr);
-            if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-            const pk = peakFor(tr), pct = (100 * pk).toFixed(1);
-            if (pk > 1.0005) return { ok: false, msg: `Peak demand is ${pct}% of τmax, so it saturates. Slow it down.` };
-            if (pk < 0.95) return { ok: false, msg: `Peak demand is ${pct}% of τmax. You can go faster.` };
-            return { ok: true, msg: `Peak demand is ${pct}% of τmax.` };
+          solution: () => [
+            { code: SOL8 },
+            { html: 'As the repo\'s ctrlPD.py with t<sub>r<sub>θ</sub></sub> = 1 s: PD on both loops with the derivative on the measured angle, and φ<sub>r</sub> fed forward into θ<sub>r</sub> (Fig. 8-20) so the outer DC gain is one. Without the feedforward (Fig. 8-19) the check passes too. ctrlPD.py also limits |θ<sub>r</sub>| to 30°, which this step never reaches.' },
+          ],
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'f', title: `(f) Saturate τ at τ<sub>max</sub> = 5 N·m; tune the outer rise time for the fastest ${prob.satStepDeg}° step without saturation`, seed: 'C.8/e',
+          html: `Your controller must keep its output within ±τ<sub>max</sub> (<code>P.tau_max</code>). Keep ζ = ${prob.zetaTh} in both loops. The check gives your controller a large error (its output must stay within ±τ<sub>max</sub>), then simulates a ${prob.satStepDeg}° step on φ<sub>r</sub> from rest: your peak |τ| must reach 95% of τ<sub>max</sub>, and τ may sit at the limit for at most 2 samples.`,
+          check: async (code) => {
+            const tmax = TAU_MAX;
+            const pr = await WB.myCtrl.probe(ctx, code, [[Math.PI, [0, 0, 0, 0]]], { params: { ...ctx.pModel, tau_max: tmax } });
+            if (pr.ok === false) return pr;
+            const u0 = pr.u[0][0];
+            if (Math.abs(u0) > tmax * (1 + 1e-9)) return { ok: false, msg: `For φ_r = 180° from rest your controller returns τ = ${fmt(u0, 4)} N·m. Saturate its output at ±τ_max (P.tau_max).` };
+            const sc = WB.myCtrl.scenario(ctx, { params: { ...ctx.pModel, tau_max: tmax }, ref: { type: 'step', amplitude: prob.satStepDeg, tStep: 0 }, tEnd: 40 });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            let peak = 0, nAt = 0;
+            for (const u of res.uDemand) { peak = Math.max(peak, Math.abs(u)); if (Math.abs(u) >= tmax * (1 - 1e-6)) nAt++; }
+            const pct = (100 * peak / tmax).toFixed(1);
+            if (nAt > 2) return { ok: false, msg: `τ sits at the limit for ${nAt} samples, so the input saturates. Slow it down.` };
+            if (peak < 0.95 * tmax) return { ok: false, msg: `Peak |τ| is ${pct}% of τmax. You can go faster.` };
+            return { ok: true, msg: `Peak |τ| is ${pct}% of τmax${nAt ? `, at the limit for ${nAt} sample${nAt > 1 ? 's' : ''}` : ''}.` };
           },
-          actions: [{
-            label: 'Try it',
-            run: (v) => {
-              const tr = PD().num(v.tr);
-              if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-              ctx.app.setMode('explore');
-              Object.assign(ctx.st, { trTh: tr, zetaTh: prob.zetaTh, M: prob.M, zetaPhi: prob.zetaPhi, rule: prob.rule, ff: true, thetaMaxDeg: prob.thetaMaxDeg });
-              Object.assign(ctx.S.sim, { type: 'step', amplitude: prob.satStepDeg, tStep: 0, y0: 0, tEnd: Math.max(ctx.S.sim.tEnd, 8 * prob.M * tr) });
-              ctx.S.sim.init.phi0 = 0;
-              ctx.update(); return null;
-            },
-          }],
           solution: () => {
             const p = ctx.pModel, thMax = prob.thetaMaxDeg * DEG, step = prob.satStepDeg * DEG;
             // Fastest t_rθ whose peak demand is exactly τ_max (bisection on the simulated peak).
@@ -500,10 +630,11 @@
             return [
               { html: 'The largest demand is the first sample after the step: θ = φ = θ̇ = φ̇ = 0, so θ<sub>r</sub>(0) = sat((1 + k<sub>P<sub>φ</sub></sub>)·30°, 30°) and τ(0) = k<sub>P<sub>θ</sub></sub>θ<sub>r</sub>(0) ≤ τ<sub>max</sub> (Eq. 8.8). Both gains depend on t<sub>rθ</sub> (k<sub>P<sub>φ</sub></sub> turns negative for a slow outer loop), so solve numerically:' },
               { tex: `t_{r_\\theta} = ${tex(hi)}\\,\\text{s}:\\quad k_{P_\\theta} = ${tex(g.kPth)},\\; k_{P_\\phi} = ${tex(g.kPphi)},\\; \\theta_r(0) = ${tex(thr0 / DEG)}^\\circ,\\; \\tau(0) = ${tex(g.kPth * thr0)}\\,\\text{N·m}` },
-              { html: `The repo\'s PD controller uses t<sub>r<sub>θ</sub></sub> = ${prob.repoTr} s ("tuned to not saturate the input"); with it the step demands ${(100 * peakFor(prob.repoTr)).toFixed(0)}% of τ<sub>max</sub>.` },
+              { code: SOL8F },
+              { html: `This tunes t<sub>r<sub>θ</sub></sub> with t<sub>r<sub>φ</sub></sub> = ${prob.M} t<sub>r<sub>θ</sub></sub>, as the repo does; the problem's knob, the outer rise time alone, works too (it needs a much slower outer loop). Without the feedforward the fastest t<sub>r<sub>θ</sub></sub> is about 2.49 s. The repo\'s PD controller uses t<sub>r<sub>θ</sub></sub> = ${prob.repoTr} s ("tuned to not saturate the input"); with it the step demands ${(100 * peakFor(prob.repoTr)).toFixed(0)}% of τ<sub>max</sub>.` },
             ];
           },
-        },
+        }),
       ]);
     },
   };
@@ -840,6 +971,8 @@
   CH.ch10 = {
     id: 'ch10', num: 10, tab: 'Ch 10', title: 'Digital PID (successive loops)', pages: 'pp. 166–169',
     controller: (ctx) => makeCascade(ctx),
+    // Work mode simulates the student's C.10(c) controller, from the measured y = (θ, φ).
+    implement: { feed: 'y', linear: false },
     defaults(sys) {
       const pr = sys.problems.ch10;
       return {
@@ -858,23 +991,29 @@
       return [{ label: 'θ_r (outer-loop output)', y: sc(res.extras.thetaR), color: '--series-2', dash: [4, 3], width: 1.5 }];
     },
     spec(ctx) { const pr = ctx.sys.problems.ch10; return designOf(ctx, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaPhi: pr.zetaPhi, rule: pr.rule, kIx: pr.ki }); },
+    // σ of the s-plane's full-loop circles: the problem's in Work mode.
+    sigmaOf(ctx) { return ctx.S.mode === 'work' ? ctx.sys.problems.ch10.sigma : ctx.st.deriv === 'dirty' ? ctx.st.sigma : null; },
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'Digital PID, measured angles only', 'p. 166 · Listing 10.4');
-      if (ctx.S.mode === 'work') { workSliders(sec, ctx, true); targetToggle(sec, ctx, 'C.10/c1'); }
-      else { designSliders(sec, ctx, { withI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi']); }
-      const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.3–10.4');
-      commonControls(imp, ctx, { ff: true, deriv: true, aw: true });
-      segmented(imp, {
-        label: 'Extra plot',
-        options: [{ value: 'int', label: 'integrator' }, { value: 'deriv', label: 'rate estimates' }],
-        ...bind(ctx, 'extra'),
-      });
+      if (ctx.S.mode === 'work') {
+        workControls(parent, ctx, { withI: true, targetKey: 'C.10/c', part: 'C.10(c)' });
+      } else {
+        const sec = section(parent, 'Digital PID, measured angles only', 'p. 166 · Listing 10.4');
+        designSliders(sec, ctx, { withI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi']);
+        const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.3–10.4');
+        commonControls(imp, ctx, { ff: true, deriv: true, aw: true });
+        segmented(imp, {
+          label: 'Extra plot',
+          options: [{ value: 'int', label: 'integrator' }, { value: 'deriv', label: 'rate estimates' }],
+          ...bind(ctx, 'extra'),
+        });
+      }
       const sep = section(parent, 'Bandwidth separation', 'p. 129');
-      separationBox(sep, ctx, () => (ctx.st.deriv === 'dirty' ? ctx.st.sigma : null));
+      separationBox(sep, ctx, () => this.sigmaOf(ctx));
     },
 
     extraPlot(ctx, res) {
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       if (ctx.st.extra === 'deriv') {
         return { opts: { title: 'rate estimates', yLabel: 'rate [°/s]', unit: '°/s' }, data: { series: [
           { label: 'θ̇ estimate', y: Array.from(res.extras.thdHat || [], (v) => v * R2D), color: '--series-2', width: 1.5 },
@@ -887,22 +1026,23 @@
 
     splane(ctx) {
       const s = this.spec(ctx);
-      const tg = ctx.S.mode === 'work' && ctx.st.showTargets && lib().shows(ctx, 'C.10/c1') ? [...lib().innerPoles(ctx.pModel, s), ...lib().outerPoles(ctx.pModel, { ...s, kIphi: 0 })] : null;
-      return cascadeMarkers(ctx, { targets: tg, sigma: ctx.st.deriv === 'dirty' ? ctx.st.sigma : null });
+      const tg = ctx.S.mode === 'work' && ctx.st.showTargets && lib().shows(ctx, 'C.10/c') ? [...lib().innerPoles(ctx.pModel, s), ...lib().outerPoles(ctx.pModel, { ...s, kIphi: 0 })] : null;
+      return cascadeMarkers(ctx, { targets: tg, sigma: this.sigmaOf(ctx) });
     },
     onPoleDrag: onCascadeDrag,
 
     math(ctx) {
       const st = ctx.st, Ts = ctx.S.sim.Ts;
-      const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
+      const sigma = this.sigmaOf(ctx) ?? st.sigma;
+      const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
       const g = ctx.gains, d = ctx.S.mode === 'work' ? this.spec(ctx) : designOf(ctx);
       return [
-        ...generalCards(ctx), ...innerCards(ctx, g), outerCard(ctx, { ...g, kIphi: 0 }), ...designCards(ctx, d, { inner: 'C.10/c1', outer: 'C.10/c1' }),
+        ...generalCards(ctx), ...innerCards(ctx, g), outerCard(ctx, { ...g, kIphi: 0 }), ...designCards(ctx, d, { inner: 'C.10/c', outer: 'C.10/c' }),
         { title: 'Dirty derivative of the measured angles', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)' },
-        { title: 'Dirty-derivative coefficients', page: 'p. 157 · Eq. 10.4', answers: 'C.10/c2',
-          theory: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad \\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}` },
-        { title: 'Outer PID and anti-windup (Listing 10.4)', page: 'p. 167–168',
+        { title: 'Dirty-derivative coefficients', page: 'p. 157 · Eq. 10.4', answers: 'C.10/c',
+          theory: `\\sigma = ${tex(sigma)},\; T_s = ${tex(Ts)}:\\quad \\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}` },
+        { title: 'Outer PID and anti-windup (Listing 10.4)', page: 'p. 167–168', answers: 'C.10/c',
           theory: '\\theta_r = \\text{sat}\\big(k_{P_\\phi}e + k_{I_\\phi}u_I - k_{D_\\phi}\\dot{\\hat\\phi}\\big),\\quad u_I \\mathrel{+}= \\frac{T_s}{k_{I_\\phi}}(\\theta_r - \\theta_{r,unsat})',
           note: 'The listing uses t_rθ = 0.4 s with ω_n = 2.2/t_r and M = 15, not the C.8 values, and drops C.8\'s φ_r feedforward (the integrator removes the error instead).' },
       ];
@@ -910,7 +1050,6 @@
 
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch10;
-      const s = () => this.spec(ctx);
       const misSet = () => Object.values(ctx.S.mismatch || {}).some((v) => Math.abs(v) > 0);
       PD().problemPanel(parent, ctx, prob, [
         {
@@ -920,47 +1059,30 @@
         },
         {
           id: 'b', title: '(b) Controller uses only the measured outputs',
-          html: 'Pass y = (θ, φ) and φ<sub>r</sub> to the controller instead of the state. Here, choose <em>dirty derivative of y</em> under Implementation, so the D terms no longer use the true θ̇ and φ̇.',
-          check: () => (ctx.st.deriv === 'dirty' ? { ok: true, msg: 'The controller sees only the measured angles.' } : { ok: false, msg: 'The controller still uses the true rates: choose the dirty derivative.' }),
+          html: 'From here on your controller\'s <code>update(phi_r, y)</code> receives the measured y = [[θ], [φ]], not the state.',
         },
-        {
-          id: 'c1', title: `(c) Gains with the listing's tuning: t<sub>r<sub>θ</sub></sub> = ${prob.trTh} s (ω<sub>n</sub> = 2.2/t<sub>r</sub>), ζ = ${prob.zetaTh}, M = ${prob.M}`,
-          inputs: { kPth: 'k<sub>P<sub>θ</sub></sub>', kDth: 'k<sub>D<sub>θ</sub></sub>', kPphi: 'k<sub>P<sub>φ</sub></sub>', kDphi: 'k<sub>D<sub>φ</sub></sub>' },
-          check: (v) => PD().checkNumbers(v, { kPth: s().kPth, kDth: s().kDth, kPphi: s().kPphi, kDphi: s().kDphi }, { kPth: 'kPθ', kDth: 'kDθ', kPphi: 'kPφ', kDphi: 'kDφ' }),
-          actions: [{
-            label: 'Use my gains',
-            run: (v) => {
-              const vals = ['kPth', 'kDth', 'kPphi', 'kDphi'].map((k) => PD().num(v[k]));
-              if (vals.some((x) => x === null)) return { ok: false, msg: 'Enter all four gains first.' };
-              ctx.app.setMode('work');
-              Object.assign(ctx.st.w, { kPth: vals[0], kDth: vals[1], kPphi: vals[2], kDphi: vals[3] });
-              ctx.update(); return null;
-            },
-          }],
-          solution: () => [
-            { tex: `k_{P_\\theta} = ${tex(s().kPth)},\\; k_{D_\\theta} = ${tex(s().kDth)},\\; k_{P_\\phi} = ${tex(s().kPphi)},\\; k_{D_\\phi} = ${tex(s().kDphi)}` },
-            { html: 'Same C.8 procedure, with the Listing 10.4 tuning (p. 167).' },
-          ],
-        },
-        {
-          id: 'c2', title: '(c) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
-          inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
-          check: (v) => PD().checkNumbers(v, { a: 0.09 / 0.11, b: 2 / 0.11 }, {}),
-          solution: () => [{ tex: '\\frac{0.09}{0.11} = 0.8182,\\quad \\frac{2}{0.11} = 18.18' }],
-        },
-        {
-          id: 'c3', title: '(c) Tune k<sub>I<sub>φ</sub></sub> to remove the steady-state error',
-          html: 'Checks the current simulation, with the plant mismatch in the left panel. The book only says "tune the integrator"; the workbench asks for |φ<sub>r</sub> − φ| under 0.5° just before the first reference switch (15° step, 25 s later).',
-          check: () => {
-            const res = ctx.app.result(), S = ctx.S;
-            const tSw = WB.sim.switchTime(S);
-            const i = WB.sim.indexBefore(S, res, tSw);
-            const e = Math.abs(res.rAll[0][i] - res.yAll[1][i]) * R2D;
-            if (!(ctx.gains.kIphi > 0)) return { ok: false, msg: `kIφ = 0: error before the switch is ${fmt(e, 3)}°.` };
-            return { ok: e < 0.5, msg: `Error before the switch: ${fmt(e, 3)}° (workbench limit 0.5°).` };
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Implement the nested PID loops of C.8 with σ = 0.05; tune the integrator', seed: ['C.8/f', 'C.8/e'],
+          html: `Start from your C.8 controller. The check (1) feeds your controller a small constant error and requires its torque to change over 3 s (integral action), then (2) runs the ±15° square wave (0.02 Hz) on a plant that differs from the model by ${lib().misText(prob.mismatch)}: |φ<sub>r</sub> − φ| just before the first switch (t = 25 s) must be under ${C10_TOL}°.`,
+          check: async (code) => {
+            // (1) integral action: a constant 0.1° error from rest must move τ
+            const calls = Array.from({ length: 301 }, () => [0.1 * DEG, [0, 0]]);
+            const pr = await WB.myCtrl.probe(ctx, code, calls);
+            if (pr.ok === false) return pr;
+            const u1 = pr.u[10][0], u2 = pr.u[300][0];
+            if (!(Math.abs(u2 - u1) > 1e-6 + 1e-4 * Math.abs(u1))) return { ok: false, msg: `With φ_r = 0.1° and y = 0 held for 3 s your τ stays at ${fmt(u1, 4)} N·m: the controller has no integral action.` };
+            // (2) tracking on the mismatched plant
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'square', amplitude: 15, frequency: 0.02, tStep: 0 }, tEnd: 25, mismatch: prob.mismatch });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const e = lib().phiErrAt(res, 24.95);
+            return { ok: e < C10_TOL, msg: `Error before the switch: ${fmt(e, 3)}°.` };
           },
-          solution: () => [{ html: `The C.10 solution uses k<sub>I<sub>φ</sub></sub> = ${prob.ki} (Listing 10.4, p. 167). With the listing's PD gains and the left panel's mismatch that leaves about 0.23° just before the switch, inside the 0.5° limit; larger k<sub>I<sub>φ</sub></sub> settles faster but overshoots more.` }],
-        },
+          solution: () => [
+            { code: SOL10 },
+            { html: `The repo's ctrlPID.py (Listing 10.4, p. 167): dirty derivatives of the measured angles (σ = 0.05), |θ<sub>r</sub>| ≤ 30° with the listing's back-calculation anti-windup, k<sub>I<sub>φ</sub></sub> = ${prob.ki}. It uses t<sub>r<sub>θ</sub></sub> = ${prob.trTh} s, M = ${prob.M} and ω<sub>n</sub> = 2.2/t<sub>r</sub>, not the C.8 values; the C.8 loops (t<sub>r<sub>θ</sub></sub> = 1 s, M = 10) with k<sub>I<sub>φ</sub></sub> ≈ 0.15 pass too. With this satellite the parameter error alone leaves no steady-state error (P<sub>out</sub>(0) = 1): the integrator removes the 1/(1 + k<sub>P<sub>φ</sub></sub>) error of PD without the φ<sub>r</sub> feedforward (see ISSUES.md).` },
+          ],
+        }),
       ]);
     },
   };

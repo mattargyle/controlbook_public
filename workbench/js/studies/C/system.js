@@ -51,6 +51,17 @@ WB.studies.C = WB.studies.C || { chapters: {} };
 
     x0(init) { return [init.theta0 || 0, init.phi0 || 0, 0, 0]; },
 
+    // The plant for student controllers (WB.myCtrl), as Python: f(state, tau) as
+    // satelliteDynamics.py, and the measured outputs h(state) = [θ, φ]. Python names
+    // for the controller template.
+    plantPy: 'def f(state, tau):\n    theta = state[0][0]\n    phi = state[1][0]\n    thetadot = state[2][0]\n    phidot = state[3][0]\n    c1 = tau - P.b * (thetadot - phidot) - P.k * (theta - phi)\n    c2 = -P.b * (phidot - thetadot) - P.k * (phi - theta)\n    return np.array([[thetadot], [phidot], [(1 / P.Js) * c1], [(1 / P.Jp) * c2]])\n\ndef h(state):\n    return [state[0][0], state[1][0]]\n',
+    py: { r: 'phi_r', y: ['theta', 'phi'], x: ['theta', 'phi', 'thetadot', 'phidot'], u: 'tau' },
+    // A second parameter set for controller checks (gains must come from P, not
+    // numbers): k_Pθ grows 29%, the C.8 outer gains about 4× and 2×.
+    altParams(p) { return { ...p, Js: p.Js * 1.3, Jp: p.Jp * 1.25, k: p.k * 0.75, b: p.b * 1.4 }; },
+    // Entries of P beyond the parameters (as in satelliteParam.py): the initial state.
+    pyParams(x0) { return { theta0: x0[0], phi0: x0[1], thetadot0: x0[2], phidot0: x0[3] }; },
+
     // Eq. 3.3 (p. 53). The repo solves M qdd = c with inv(M) @ c; for this
     // diagonal M that is (1/Js)·c1 and (1/Jp)·c2, written the same way here so
     // the floating-point results match.
@@ -386,8 +397,48 @@ WB.studies.C = WB.studies.C || { chapters: {} };
   // The satellite's open-loop poles (eig A) answer C.5(b) (poles of Θ/τ) and C.6.
   const showsOl = (ctx) => shows(ctx, 'C.5/b') || shows(ctx, 'C.6/a');
 
+  // ------------------------------------------------- student controllers --
+  // WB.myCtrl.matchCheck, but the student's run may match any of several reference
+  // runs (C.8(e): with or without the φ_r feedforward of Fig. 8-20; C.18: both
+  // filter conventions), and several outputs can be compared (C.8(e): θ too, since
+  // φ hardly depends on the inner loop). cases: [{ sc, label, refs: [() -> WB.sim
+  // result, ...] }], the first with the nominal parameters; tol in rad.
+  async function matchAny(ctx, code, cases, { tol, t0 = 0, what = 'the design', outputs = [1] }) {
+    const f = (v) => `${M.fmt(v * R2D, 3)}°`;
+    const name = (o) => ctx.sys.outputs[o].label;
+    // largest difference over the compared outputs: {e, t, o}
+    const diff = (mine, ref) => outputs.map((o) => ({ ...WB.myCtrl.maxDiff(mine, ref, { t0, output: o }), o })).reduce((a, b) => (b.e > a.e ? b : a));
+    let worst = 0;
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i];
+      const mine = await WB.myCtrl.run(ctx, code, c.sc);
+      if (mine.ok === false) return mine;
+      const refs = c.refs.map((mk) => mk());
+      const ds = refs.map((ref) => diff(mine, ref));
+      const j = ds.reduce((b, d, q) => (d.e < ds[b].e ? q : b), 0), d = ds[j];
+      const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
+      if (!(d.e <= tol)) {
+        if (i > 0) {
+          const keys = ctx.sys.uncertain.map((q) => `P.${q}`).join(', ');
+          return { ok: false, msg: `Matches ${what} with the nominal parameters but not with ${c.label} (${name(d.o)} off by ${f(d.e)}). Compute the gains from ${keys} rather than numbers.`, detail };
+        }
+        const n = mine.t.length - 1, ref = refs[j];
+        const off = mine.r[n] - mine.yAll[1][n], refOff = ref.r[n] - ref.yAll[1][n];
+        let msg = `Your ${name(d.o)} differs from ${what} by ${f(d.e)} at t = ${M.fmt(d.t, 3)} s.`;
+        if (Math.abs(off - refOff) > tol) msg += ` At the end φ is ${f(off)} from φ_r (${what}: ${f(refOff)}).`;
+        return { ok: false, msg, detail };
+      }
+      worst = Math.max(worst, d.e);
+    }
+    return { ok: true, msg: `Your ${outputs.map((o) => `${name(o)}(t)`).join(' and ')} match${outputs.length > 1 ? '' : 'es'} ${what} to within ${f(Math.max(worst, 1e-6))} (${cases.map((c) => c.label).join('; ')}).` };
+  }
+  // |φ_r − φ| (deg) at the sample nearest t.
+  const phiErrAt = (res, t) => { const k = Math.round(t / (res.t[1] - res.t[0])); return Math.abs(res.r[k] - res.yAll[1][k]) * R2D; };
+  // A mismatch {Js: -12, b: 7} as "Js -12%, b +7%", for part texts.
+  const misText = (mis) => Object.entries(mis).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}%`).join(', ');
+
   WB.studies.C.lib = {
     R2D, ss, wnRule, pairPoles, slcDesign, innerPoles, outerPoles, outerCharPoly, fullLoopPoles,
-    deg, shows, showsOl,
+    deg, shows, showsOl, matchAny, phiErrAt, misText,
   };
 })();
