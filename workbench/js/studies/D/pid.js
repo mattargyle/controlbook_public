@@ -888,7 +888,7 @@
           theory: '\\text{pick } k_P, k_D \\text{ (Ch. 8)},\\; \\text{then raise } k_I \\text{ from 0 until the steady-state error is gone}' },
         { title: 'Gains from t_r, ζ (D.8)', page: 'p. 113 · Eq. 8.5, p. 160 · §10.1.3', answers: ['D.8/a', 'D.10/c'],
           theory: '\\omega_n = \\frac{2.2}{t_r},\\quad k_P = m\\omega_n^2 - k,\\quad k_D = 2m\\zeta\\omega_n - b',
-          numbers: `\\omega_n = ${tex(d.wn)},\\quad k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)},\\quad k_I = ${tex(d.kI)}` },
+          numbers: `\\omega_n = ${tex(d.wn)},\\quad k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)}${explore(ctx) ? `,\\quad k_I = ${tex(d.kI)}` : ''}` },
         ...(explore(ctx) ? [compCard(ctx)] : []),
       ];
     },

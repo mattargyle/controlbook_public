@@ -333,9 +333,9 @@ class Controller:
     }
     return [];
   }
-  // Work mode's target poles: the problem's design, shown once the part that
-  // computes it is solved (D.11: the pair; D.12: plus p_I, fixed for (a)).
-  const TARGETS = { sf: 'D.11/a', sfi: 'D.12/a' };
+  // Work mode's target poles: the D.11 pair from the D.8 specs (book values), shown
+  // once D.11(a) is solved. The integrator and observer poles are the student's choice.
+  const TARGETS = { sf: 'D.11/a' };
   function markers(ctx) {
     const explore = ctx.S.mode === 'explore';
     // The open-loop poles answer D.7(a): hidden in Work mode until it is solved.
@@ -345,9 +345,8 @@ class Controller:
       closedLoopPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `controller pole ${i + 1}`, dragId: Math.abs(p.im) > 1e-9 ? 0 : 2 }));
       observerPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, dragId: Math.abs(p.im) > 1e-9 ? 10 : 12 }));
     } else if (TARGETS[ctx.level] && ctx.app.isSolved(TARGETS[ctx.level])) {
-      const pr = ctx.sys.problems[ctx.level === 'sf' ? 'ch11' : 'ch12'];
+      const pr = ctx.sys.problems.ch11;
       const poles = D.polesFromWnZeta(2.2 / pr.tr, pr.zeta);
-      if (ctx.level === 'sfi') poles.push({ re: pr.pIRef, im: 0 });
       for (const q of poles) mk.push({ ...q, kind: 'target', label: 'target pole (problem)' });
     }
     return mk;
@@ -378,6 +377,16 @@ class Controller:
   // The controllability matrix answers D.11(c) (and for (A₁, B₁) also shows A, B).
   const ctrbCard = (A, B, title, page, answers) => ({ ...WB.ss.ctrbCard(A, B, title, page), spoiler: false, answers });
   function polesCard(ctx, d) {
+    // Work mode: only the pair from the D.8 specs; p_I is the student's choice.
+    if (ctx.level !== 'sf' && ctx.S.mode === 'work') {
+      const pair = d.poles.slice(0, 2);
+      return {
+        title: 'Desired closed-loop poles', page: 'p. 113 · Eq. 8.5, p. 198',
+        theory: '\\omega_n = \\frac{2.2}{t_r},\\quad \\Delta^d_{cl} = (s^2 + 2\\zeta\\omega_n s + \\omega_n^2)(s - p_I)',
+        numbers: `\\omega_n = ${tex(2.2 / ctx.st.tr)},\\quad p = ${pair.map((p) => texPole(p)).join(',\\;')},\\quad p_I \\text{ is yours to choose}`,
+        answers: 'D.11/a',
+      };
+    }
     return {
       title: 'Desired closed-loop poles', page: 'p. 113 · Eq. 8.5, p. 184',
       theory: '\\omega_n = \\frac{2.2}{t_r},\\quad \\Delta^d_{cl} = (s^2 + 2\\zeta\\omega_n s + \\omega_n^2)' + (ctx.level === 'sf' ? '' : '(s - p_I)'),
@@ -416,10 +425,11 @@ class Controller:
     return WB.myCtrl.reference(ctx, sc, makeSS(rc));
   }
 
-  // D.12(a) windup test: the mass starts 1 m from z_r = 0 with F_max lowered, so F
-  // saturates for about 3 s. Without anti-windup z undershoots by 0.55 m; holding the
-  // integrator (0.33 m) or back-calculation (0.08 m) pass. Unsaturated: 0.31 m.
-  const WINDUP = { Fmax: 1.5, z0: 1, us: 0.44 };
+  // D.12(a) windup probe: a fresh controller sees z = 0 (so ż = 0) with z_r = 1 m for
+  // 10 s, an error it can't remove, then z_r = −0.5 m. Without anti-windup F stays at
+  // +F_max for the whole 3 s after the switch (any p_I); holding the integrator,
+  // conditional integration or back-calculation release it within 1 sample.
+  const WINDUP = { n1: 1000, n2: 300, r1: 1, r2: -0.5, maxAt: 50 };
   const SQUARE = (amplitude, frequency = 0.04) => ({ type: 'square', amplitude, frequency, tStep: 0 });
   const errAt = (res, t) => { const k = Math.round(t / (res.t[1] - res.t[0])); return Math.abs(res.r[k] - res.y[k]); };
   const mm = (v) => `${fmt(1000 * v, 3)} mm`;
@@ -575,47 +585,53 @@ class Controller:
         polesCard(ctx, d),
         { title: 'Gains', page: 'p. 199–201',
           theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I\\int_0^t (r - y)\\,d\\tau',
-          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, answers: 'D.12/a' },
+          numbers: ctx.S.mode === 'work' ? null : `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, answers: 'D.12/a' },
         { title: 'Gains for the mass-spring-damper', page: 'p. 199–201', answers: 'D.12/a',
           theory: '\\det(sI - A_1 + B_1K_1) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\frac{b + K_2}{m},\\; c_1 = \\frac{k + K_1}{m},\\; c_0 = -\\frac{k_I}{m}' },
       ];
     },
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch12;
-      const ref = (pI) => ans.integralFeedback(ctx.pModel, [...D.polesFromWnZeta(2.2 / prob.tr, prob.zeta), { re: pI, im: 0 }]);
+      const ref = (pI, p = ctx.pModel) => ans.integralFeedback(p, [...D.polesFromWnZeta(2.2 / prob.tr, prob.zeta), { re: pI, im: 0 }]);
       lib.panel(parent, ctx, prob, [
         {
-          id: 'a', title: `(a) Gains for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}, p<sub>I</sub> = ${prob.pIRef}`,
-          html: `The book leaves the integrator pole to you. Here (a) uses p<sub>I</sub> = ${prob.pIRef} (a workbench choice, so the controller can be compared with a design), and (c) tunes it.`,
-          inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', ki: 'k<sub>I</sub>' },
-          check: (v) => { const r = ref(prob.pIRef); return lib.check(v, { K1: r.K[0], K2: r.K[1], ki: r.ki }, { ki: 'kI' }); },
+          id: 'a', title: '(a) Gains for the D.8 specs and an integrator pole p<sub>I</sub>',
+          html: `The integrator pole is yours to choose, so write the gains as a function of it: <code>gains(p_I)</code> returns (K<sub>1</sub>, K<sub>2</sub>, k<sub>I</sub>) for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta} (D.8) with u = −Kx − k<sub>I</sub>∫(z<sub>r</sub> − z)dt. The check calls it at random p<sub>I</sub> < 0.`,
+          code: {
+            template: 'def gains(p_I):\n    return ...\n',
+            // the book's u = -Kx - kI xI gives kI < 0; the opposite sign convention is accepted too
+            ...lib.pyEither(ctx, [1, -1].map((sg) => ({
+              args: { pI: { label: 'p_I', lo: -5, hi: -0.1 } },
+              items: [{ fn: 'gains', args: ['pI'], truth: (p, a) => { const r = ref(a.pI, p); return [r.K[0], r.K[1], sg * r.ki]; } }],
+            })), [null, '(with the opposite sign convention for k_I)']),
+          },
           solution: () => {
             const r = ref(prob.pIRef);
             return [
-              { tex: 'K_1 = m c_1 - k,\\quad K_2 = m c_2 - b,\\quad k_I = -m c_0 \\quad\\text{for } \\Delta^d = s^3 + c_2s^2 + c_1s + c_0' },
-              { tex: `p_I = ${prob.pIRef}:\; \\Delta^d = ${WB.tf.polyTex(L.polyFromRoots([...D.polesFromWnZeta(1.1, 0.7), { re: prob.pIRef, im: 0 }]))},\; K = ${texMat([r.K])},\; k_I = ${tex(r.ki)}` },
+              { tex: 'K_1 = m c_1 - k,\\quad K_2 = m c_2 - b,\\quad k_I = -m c_0 \\quad\\text{for } \\Delta^d = (s^2 + 2\\zeta\\omega_n s + \\omega_n^2)(s - p_I) = s^3 + c_2s^2 + c_1s + c_0' },
+              { code: `def gains(p_I):\n    tr, zeta = ${prob.tr}, ${prob.zeta}   # D.8\n    wn = 2.2 / tr\n    c = np.convolve([1, 2 * zeta * wn, wn**2], [1, -p_I])   # [1, c2, c1, c0]\n    return P.m * c[2] - P.k, P.m * c[1] - P.b, -P.m * c[3]\n` },
+              { tex: `\\text{e.g. } p_I = ${prob.pIRef}:\\; K = ${texMat([r.K])},\\; k_I = ${tex(r.ki)}` },
             ];
           },
         },
         WB.myCtrl.part(ctx, {
           id: 'a2', title: '(a) Add the integrator with anti-windup to your D.11 controller', seed: 'D.11/e',
-          html: `Use the gains from above. The check (1) runs a ±0.5 m square wave (0.04 Hz) with the nominal and with other parameters and compares z(t) with the design (within 3% of the step), then (2) starts the mass at z = ${WINDUP.z0} m with z<sub>r</sub> = 0 and lowers F<sub>max</sub> to ${WINDUP.Fmax} N, so F saturates for about 3 s: z may undershoot past 0 by at most ${WINDUP.us} m (the design without saturation undershoots by 0.31 m).`,
+          html: `Choose your integrator pole and use the gains from above. The check (1) runs the ±${prob.sim.amplitude} m square wave (${prob.sim.frequency} Hz) on the nominal plant with a constant input disturbance of ${prob.sim.dist} N: |z<sub>r</sub> − z| just before the first switch (t = 25 s) must be under ${mm(0.01 * prob.sim.amplitude)}; then (2) feeds a fresh controller z = 0 with z<sub>r</sub> = ${WINDUP.r1} m for ${WINDUP.n1 / 100} s (an error it can't remove, so F saturates), then z<sub>r</sub> = ${WINDUP.r2} m: F may stay at +F<sub>max</sub> for at most ${WINDUP.maxAt / 100} s after the switch.`,
           check: async (code) => {
-            const tune = { tr: prob.tr, zeta: prob.zeta, pI: prob.pIRef };
-            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
-              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(0.5), tEnd: 20 });
-              return { sc, label: pc.label, ref: () => refRun(ctx, sc, 'sfi', tune) };
-            });
-            const m = await WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * 0.5 });
-            if (!m.ok) return m;
-            const sc = WB.myCtrl.scenario(ctx, { params: { ...ctx.pModel, Fmax: WINDUP.Fmax }, init: { z0: WINDUP.z0 }, ref: { type: 'step', amplitude: 0, tStep: 0 }, tEnd: 20 });
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(prob.sim.amplitude, prob.sim.frequency), tEnd: 25, dist: prob.sim.dist });
             const res = await WB.myCtrl.run(ctx, code, sc);
             if (res.ok === false) return res;
-            const us = -Math.min(...res.y);
-            if (!(us <= WINDUP.us)) return { ok: false, msg: `Tracking matches, but with F_max = ${WINDUP.Fmax} N, z undershoots past 0 by ${fmt(us, 3)} m: the integrator winds up while F is saturated.` };
-            return { ok: true, msg: `${m.msg} Saturated run: undershoot ${fmt(Math.max(0, us), 3)} m.` };
+            const e = errAt(res, 24.95);
+            if (!(e < 0.01 * prob.sim.amplitude)) return { ok: false, msg: `With d = ${prob.sim.dist} N the error before the switch is ${mm(e)}: the integrator should remove it.` };
+            const calls = [...Array(WINDUP.n1).fill([WINDUP.r1, [0]]), ...Array(WINDUP.n2).fill([WINDUP.r2, [0]])];
+            const pr = await WB.myCtrl.probe(ctx, code, calls);
+            if (pr.ok === false) return pr;
+            const Fmax = ctx.sys.uLimit(ctx.pModel);
+            const nAt = pr.u.slice(WINDUP.n1).filter((u) => u[0] >= Fmax * (1 - 1e-9)).length;
+            if (nAt > WINDUP.maxAt) return { ok: false, msg: `Error before the switch ${mm(e)}, but after ${WINDUP.n1 / 100} s of an error it can't remove, your F stays at +F_max for ${fmt(nAt / 100, 3)} s once z_r drops: the integrator winds up while F is saturated.` };
+            return { ok: true, msg: `Error before the switch: ${mm(e)}. Windup probe: F releases from the limit after ${fmt(nAt / 100, 3)} s.` };
           },
-          solution: () => [{ code: SOL.ch12 }, { html: 'Integral state feedback with the D.11 dirty derivative. Anti-windup here holds the integrator while F is saturated; unwinding it by (F<sub>sat</sub> − F<sub>unsat</sub>)/k<sub>I</sub> passes too. Integrating only while |ż| is small (Listing 10.2) does not fit this controller: the reference enters only through the integrator, so freezing it during every motion changes the tracking.' }],
+          solution: () => [{ code: SOL.ch12 }, { html: `Integral state feedback with the D.11 dirty derivative, here with p<sub>I</sub> = ${prob.pIRef} (any pole that removes d in time works). Anti-windup holds the integrator while F is saturated; unwinding it by (F<sub>sat</sub> − F<sub>unsat</sub>)/k<sub>I</sub> passes too. Integrating only while |ż| is small (Listing 10.2) does not stop windup when the mass can't move, and slows this controller's tracking (the reference enters only through the integrator).` }],
         }),
         {
           id: 'b', title: '(b) Input disturbance of 0.25 N and parameters varying up to 20%',
@@ -676,7 +692,7 @@ class Controller:
           numbers: `\\mathcal{O} = ${texMat(O)},\\quad \\operatorname{rank} = ${L.rank(O)}`, answers: 'D.13/b' },
         { title: 'Observer gain', page: 'p. 222 · Eq. 13.16',
           theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top',
-          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, answers: 'D.13/c2' },
+          numbers: ctx.S.mode === 'work' ? null : `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, answers: 'D.13/c2' },
         { title: 'Observer gain for the mass-spring-damper', page: 'p. 222', answers: 'D.13/c2',
           theory: '\\det(sI - A + LC) = s^2 + \\beta_1 s + \\beta_0,\\quad \\beta_1 = \\tfrac bm + L_1,\\; \\beta_0 = \\tfrac km + \\tfrac bm L_1 + L_2' },
         { title: 'Separation principle', page: 'p. 222–223',
@@ -791,7 +807,7 @@ class Controller:
           theory: '\\dot{\\hat x} = A\\hat x + B(u + \\hat d) + L(y - C\\hat x),\\quad \\dot{\\hat d} = L_d(y - C\\hat x),\\quad u = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
         { title: 'Observer gains', page: 'p. 241',
           theory: '\\begin{bmatrix}L\\\\ L_d\\end{bmatrix} = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
-          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, answers: 'D.14/b' },
+          numbers: ctx.S.mode === 'work' ? null : `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, answers: 'D.14/b' },
         { title: 'Observer gains for the mass-spring-damper', page: 'p. 241', answers: 'D.14/b',
           theory: '\\det(sI - A_2 + LC_2) = s^3 + c_2s^2 + c_1s + c_0,\\quad c_2 = \\tfrac bm + L_1,\\; c_1 = \\tfrac km + \\tfrac bm L_1 + L_2,\\; c_0 = \\tfrac{L_d}{m}' },
         polesCard(ctx, d),
