@@ -141,12 +141,13 @@ WB.F = (function () {
     const zB = blk(g.kPz, g.kIz || 0, g.kDz, st.vbarZ);
     const tB = blk(g.kPth, 0, g.kDth);
     const latOn = st.lat !== 'off';
+    const fl = compOf(ctx) === 'fl';
     return {
       update(r, x, y) {
         const meas = dirty ? y : [x[0], x[1], x[2]];
         const Ft = hB.update(r[0], meas[1], dirty ? {} : { ydot: x[4] });
         let F = Ft;
-        if (!linear) F = st.comp === 'fl' ? (m.Fe + Ft) / Math.cos(meas[2]) : m.Fe + Ft;
+        if (!linear) F = fl ? (m.Fe + Ft) / Math.cos(meas[2]) : m.Fe + Ft;
         let tau = 0, thD = 0;
         if (latOn) {
           thD = zB.update(r[1], meas[0], dirty ? {} : { ydot: x[3] });
@@ -166,7 +167,9 @@ WB.F = (function () {
     const view = ctx.st.view || 'lat';
     const mk = [];
     const names = {};
-    const push = (poles, kind, label, dragId) => poles.forEach((q) => mk.push({ ...q, kind, label, dragId: draggable ? dragId : undefined }));
+    // open-loop poles answer F.7(a) (altitude) and F.5(c) (lateral): Work mode hides them until solved
+    const olShown = showsAnswer(ctx, view === 'lon' ? 'F.7/a' : 'F.5/c');
+    const push = (poles, kind, label, dragId) => { if (kind !== 'ol' || olShown) poles.forEach((q) => mk.push({ ...q, kind, label, dragId: draggable ? dragId : undefined })); };
     if (view === 'lon') {
       push([{ re: 0, im: 0 }, { re: 0, im: 0 }], 'ol', 'open-loop pole');
       push(rootsOf(lonPoly(m, g)), 'cl', 'altitude closed-loop pole', 0);
@@ -271,6 +274,56 @@ WB.F = (function () {
     });
   }
 
+  // ------------------------------------------------------ Work-mode gates --
+  // In Work mode, anything that answers problem part `key` ('F.4/c') stays
+  // hidden until that part is solved (a passing Check, or a "done" button).
+  const showsAnswer = (ctx, key) => ctx.S.mode === 'explore' || [].concat(key).every((k) => ctx.app.isSolved(k));
+
+  // Force law F = F_e + F̃ or the feedback-linearized F = (F_e + F̃)/cos θ. The
+  // second one is the answer to F.4(c), so Work mode offers it only once solved.
+  const compOf = (ctx) => (ctx.st.comp === 'fl' && showsAnswer(ctx, 'F.4/c') ? 'fl' : 'eq');
+  function forceLawControl(parent, ctx, { label = 'Force law', eqLabel = 'F = F<sub>e</sub> + F̃' } = {}) {
+    if (!showsAnswer(ctx, 'F.4/c')) {
+      parent.append(el('p', { class: 'muted small', text: 'Force law: F = F_e + F̃. A second option appears here once you solve F.4(c) (Ch 4 tab).' }));
+      return;
+    }
+    segmented(parent, {
+      label,
+      options: [{ value: 'eq', label: eqLabel }, { value: 'fl', label: 'F = (F<sub>e</sub> + F̃)/cos θ' }],
+      get: () => compOf(ctx), set: (v) => { ctx.st.comp = v; ctx.update(); },
+    });
+  }
+
+  // ------------------------------------------------------ Python answers --
+  // Every parameter of the model is randomized in the checks (m_r too, which
+  // the "true plant" mismatch leaves alone), so answers must use P.<name>.
+  const VARY = ['mc', 'mr', 'Jc', 'd', 'mu', 'g'];
+  const ARGS = {
+    z: { label: 'z', lo: -5, hi: 5 },
+    h: { label: 'h', lo: -5, hi: 10 },
+    theta: { label: 'θ', lo: -Math.PI, hi: Math.PI },
+    zdot: { label: 'ż', lo: -3, hi: 3 },
+    hdot: { label: 'ḣ', lo: -3, hi: 3 },
+    thetadot: { label: 'θ̇', lo: -3, hi: 3 },
+    fr: { label: 'f_r', lo: 0, hi: 10 },
+    fl: { label: 'f_ℓ', lo: 0, hi: 10 },
+    state: { col: ['z', 'h', 'theta', 'zdot', 'hdot', 'thetadot'] },
+    u: { col: ['fr', 'fl'] },
+    z_e: { label: 'z_e', lo: -5, hi: 5 },
+    h_e: { label: 'h_e', lo: 0, hi: 10 },
+    s: { label: 's', complex: true, re: [-6, 3], im: [0.3, 12] },
+  };
+  // code part {template, check}; spec as in WB.py.check, with ARGS and VARY filled in.
+  const pyPart = (ctx, spec, template) => ({ template, check: (code) => WB.py.check(ctx, { vary: VARY, ...spec, args: { ...ARGS, ...(spec.args || {}) } }, code) });
+  const pyError = (out) => ({ ok: false, msg: out.timeout ? out.error : 'Python raised an error.', detail: [out.error, out.where, (out.stdout || '').trim()].filter(Boolean).join('\n') });
+  // explain() helper: is component j of the failing value the negative of the expected one?
+  const flatV = (v) => (Array.isArray(v) ? v.flatMap(flatV) : [v]);
+  function negated(f) {
+    if (!f.e) return false;
+    const g = Number(flatV(f.e.got)[f.j]), w = Number(flatV(f.e.want)[f.j]);
+    return Math.abs(w) > 1e-12 && Math.abs(g + w) < 1e-6 * Math.max(1, Math.abs(w));
+  }
+
   // ------------------------------------------------------ problem helpers --
   const PD = () => WB.pd;
   const useGains = (ctx, map, target = () => ctx.st.w) => WB.design.useGains(ctx, map, { target, msg: 'Fill in every gain first.' });
@@ -335,6 +388,7 @@ WB.F = (function () {
     makePID, pidSplane, pidDrag, W0, gainSliders, readout, metricRow,
     offsetControls, zMetrics, zMetricsSection, separationRows, viewControl,
     useGains, errorBefore, chapter, register, refF8, refF10,
+    showsAnswer, compOf, forceLawControl, VARY, ARGS, pyPart, pyError, negated,
     tex, texPole, fmt, fmtPole,
   };
 })();

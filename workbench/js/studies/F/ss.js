@@ -275,10 +275,10 @@
     const cl = clPoles(ctx, this.level), ob = obsPolesOf(ctx, this.level);
     const mk = [];
     const ol = view === 'lon' ? L.eig(S.lon.A) : L.eig(S.lat.A);
-    ol.forEach((q) => mk.push({ ...q, kind: 'ol', label: 'open-loop pole' }));
+    if (F.showsAnswer(ctx, olKey(view))) ol.forEach((q) => mk.push({ ...q, kind: 'ol', label: 'open-loop pole' }));
     cl[view].forEach((q) => mk.push({ ...q, kind: 'cl', label: `controller pole (${view === 'lon' ? 'altitude' : 'lateral'})` }));
     ob[view].forEach((q) => mk.push({ ...q, kind: 'obs', label: 'observer pole', noFit: Math.hypot(q.re, q.im) > 8 }));
-    if (ctx.S.mode === 'work') {
+    if (ctx.S.mode === 'work' && ctx.app.isSolved('F.11/a')) {
       const P = ctrlPoles(ctx.st.k);
       (view === 'lon' ? P.lon : [...P.outer, ...P.inner]).forEach((q) => mk.push({ ...q, kind: 'target', label: 'target pole (spec)' }));
     }
@@ -289,19 +289,22 @@
   function ssCards(ctx) {
     const S = sub(ctx.pModel);
     return [
-      { title: 'Decoupled models (F.6)', page: 'F.6 p. 396',
+      { title: 'Decoupled models (F.6)', page: 'F.6 p. 396', answers: ['F.6/a', 'F.6/b'],
         theory: 'x_{lon} = (h, \\dot h),\\; u = \\tilde F;\\quad x_{lat} = (z, \\theta, \\dot z, \\dot\\theta),\\; u = \\tilde\\tau',
-        numbers: `A_{lon} = ${texMat(S.lon.A)},\\; B_{lon} = ${texMat(S.lon.B)},\\quad A_{lat} = ${texMat(S.lat.A)},\\; B_{lat} = ${texMat(S.lat.B)}`, spoiler: true },
+        numbers: `A_{lon} = ${texMat(S.lon.A)},\\; B_{lon} = ${texMat(S.lon.B)},\\quad A_{lat} = ${texMat(S.lat.A)},\\; B_{lat} = ${texMat(S.lat.B)}` },
     ];
   }
-  const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page, { sig: 3 });
+  // The controllability matrices are built from the F.6 models (and answer F.11(c)).
+  const ctrbCard = (A, B, title, page, answers) => ({ ...WB.ss.ctrbCard(A, B, title, page, { sig: 3 }), answers });
+  // In Work mode the open-loop poles (eig A, F.6) and the target rings (F.11(a)) stay off until solved.
+  const olKey = (view) => (view === 'lon' ? 'F.6/a' : 'F.6/b');
   function polesCard(ctx, d, level) {
     const P = d.poles;
     const lat = [...P.outer, ...P.inner];
     return {
-      title: 'Desired closed-loop poles', page: 'F.11(a) p. 399',
+      title: 'Desired closed-loop poles', page: 'F.11(a) p. 399', answers: 'F.11/a',
       theory: '\\Delta^d_{lon} = s^2 + 2\\zeta_h\\omega_{n_h}s + \\omega_{n_h}^2,\\quad \\Delta^d_{lat} = (s^2 + 2\\zeta_z\\omega_{n_z}s + \\omega_{n_z}^2)(s^2 + 2\\zeta_\\theta\\omega_{n_\\theta}s + \\omega_{n_\\theta}^2)' + (level === 'sf' ? '' : '\\,(s - p_I)'),
-      numbers: `p_{lon} = ${P.lon.map((q) => texPole(q)).join(',\\;')},\\quad p_{lat} = ${lat.map((q) => texPole(q)).join(',\\;')}`, spoiler: true,
+      numbers: `p_{lon} = ${P.lon.map((q) => texPole(q)).join(',\\;')},\\quad p_{lat} = ${lat.map((q) => texPole(q)).join(',\\;')}`,
       note: 'The F.8 pairs: the outer pair is the slow lateral mode, the inner pair the fast roll mode.',
     };
   }
@@ -349,20 +352,23 @@
       const sec = section(parent, 'u = −Kx + k_r r (per loop)', 'p. 183 · Eq. 11.38');
       viewSeg(sec, ctx);
       sec.append(el('p', { class: 'muted small', text: 'F = F_e − K_h(h, ḣ) + k_r,h h_r;  τ = −K_z(z, θ, ż, θ̇) + k_r,z z_r. The true state is fed back.' }));
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'sf'); knobControls(parent, ctx, 'sf', 'Specs (target rings)'); }
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'sf'); knobControls(parent, ctx, 'sf', 'Specs'); }
       else { knobControls(parent, ctx, 'sf', 'Design'); gainReadout(section(parent, 'Gains', 'p. 182'), ctx, 'sf'); }
     },
     math(ctx) {
       const S = sub(ctx.pModel), d = design(ctx.pModel, ctx.st.k, 'sf');
       return [
         ...ssCards(ctx),
-        ctrbCard(S.lon.A, S.lon.B, 'Controllability (altitude)', 'p. 180, F.11(c)'),
-        ctrbCard(S.lat.A, S.lat.B, 'Controllability (lateral)', 'p. 180, F.11(c)'),
+        { title: 'Controllability', page: 'p. 180 · Eq. 11.29',
+          theory: '\\mathcal{C}_{A,B} = \\begin{bmatrix} B & AB & \\cdots & A^{n-1}B\\end{bmatrix},\\quad \\text{controllable} \\iff \\operatorname{rank}\\mathcal{C}_{A,B} = n' },
+        ctrbCard(S.lon.A, S.lon.B, 'Controllability (altitude)', 'F.11(c) p. 399', ['F.6/a', 'F.11/c']),
+        ctrbCard(S.lat.A, S.lat.B, 'Controllability (lateral)', 'F.11(c) p. 399', ['F.6/b', 'F.11/c']),
         polesCard(ctx, d, 'sf'),
         { title: 'Gains (place / Ackermann)', page: 'p. 182 · Eq. 11.32, 11.35',
-          theory: 'K = \\text{place}(A, B, p),\\quad k_r = \\frac{-1}{C_r(A - BK)^{-1}B}',
-          numbers: `K_h = ${texMat([d.Kh])},\\; k_{r,h} = ${tex(d.krh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{r,z} = ${tex(d.krz)}`, spoiler: true,
-          symbolic: '\\text{each loop has a free integrator, so } k_{r,h} = K_{h,1},\\; k_{r,z} = K_{z,1}' },
+          theory: 'K = \\text{place}(A, B, p),\\quad k_r = \\frac{-1}{C_r(A - BK)^{-1}B}' },
+        { title: 'Gains for the desired poles', page: 'F.11(d) p. 399', answers: ['F.11/d', 'F.11/d2'],
+          theory: '\\text{each loop has a free integrator, so } k_{r,h} = K_{h,1},\\; k_{r,z} = K_{z,1}',
+          numbers: `K_h = ${texMat([d.Kh])},\\; k_{r,h} = ${tex(d.krh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{r,z} = ${tex(d.krz)}` },
         { title: 'Tuning (F.11e)', page: 'p. 110–113',
           theory: 't_r \\approx \\frac{2.2}{\\omega_n}:\\; \\text{move poles farther from the origin to speed up};\\quad M_p = e^{-\\zeta\\pi/\\sqrt{1-\\zeta^2}}:\\; \\text{raise } \\zeta \\text{ (smaller angle from the real axis) to cut overshoot}' },
       ];
@@ -375,13 +381,36 @@
       const num = (v) => PD().num(v);
       PD().problemPanel(parent, ctx, prob, [
         {
+          id: 'a', title: '(a) Closed-loop pole locations',
+          html: 'Using ω<sub>n<sub>h</sub></sub>, ζ<sub>h</sub>, ω<sub>n<sub>z</sub></sub>, ζ<sub>z</sub> from F.8, choose two longitudinal poles with damping ratios above ζ<sub>h</sub> and natural frequencies above ω<sub>n<sub>h</sub></sub>, and four lateral poles with damping ratios above ζ<sub>z</sub> and natural frequencies above ω<sub>n<sub>z</sub></sub>. Complex values are fine (<code>-1+2j</code>); give complex poles with their conjugates.',
+          inputs: { p1: 'p<sub>lon,1</sub>', p2: 'p<sub>lon,2</sub>', q1: 'p<sub>lat,1</sub>', q2: 'p<sub>lat,2</sub>', q3: 'p<sub>lat,3</sub>', q4: 'p<sub>lat,4</sub>' },
+          check: (v) => {
+            const lon = [v.p1, v.p2].map(M.parseComplex), lat = [v.q1, v.q2, v.q3, v.q4].map(M.parseComplex);
+            if ([...lon, ...lat].some((q) => !q)) return { ok: false, msg: 'Enter all six poles.' };
+            const conj = (ps) => ps.every((q) => Math.abs(q.im) < 1e-9 || ps.some((r) => Math.abs(r.re - q.re) < 1e-6 && Math.abs(r.im + q.im) < 1e-6));
+            if (!conj(lon) || !conj(lat)) return { ok: false, msg: 'Complex poles come in conjugate pairs (K is real).' };
+            if (!meetsSpec(lon, P().wnh, prob.zetah || 0.707)) return { ok: false, msg: 'A longitudinal pole misses the ζ_h / ω_n,h spec (find both from F.8).' };
+            if (!meetsSpec(lat, P().wnz, 0.707)) return { ok: false, msg: 'A lateral pole misses the ζ_z / ω_n,z spec (find both from F.8).' };
+            return { ok: true, msg: 'All six poles meet the specs.' };
+          },
+          solution: () => [
+            { tex: `\\omega_{n_h} = \\frac{2.2}{8} = ${tex(P().wnh)},\\; \\omega_{n_z} = \\frac{2.2}{8} = ${tex(P().wnz)},\\; \\zeta_h = \\zeta_z = 0.707` },
+            { tex: `\\text{e.g. the F.8 pairs: } p_{lon} = ${P().lon.map((q) => texPole(q, 4)).join(',\\;')},\\quad p_{lat} = ${[...P().outer, ...P().inner].map((q) => texPole(q, 4)).join(',\\;')}` },
+            { html: 'The lateral set is the F.8 outer pair (the slow position mode) plus the inner pair (the fast roll mode). Any poles that are faster and better damped also pass.' },
+          ],
+        },
+        {
+          id: 'b', title: '(b) State-space matrices from F.6',
+          html: 'Add your A, B, C, D from F.6 (Ch 6 tab) to your param file. The model cards in the live math unlock once F.6 is solved.',
+        },
+        {
           id: 'c', title: '(c) Controllability ranks', inputs: { rl: 'rank 𝒞 (altitude)', rz: 'rank 𝒞 (lateral)' },
           check: (v) => PD().checkNumbers(v, { rl: L.rank(L.ctrb(S().lon.A, S().lon.B)), rz: L.rank(L.ctrb(S().lat.A, S().lat.B)) }, {}),
           solution: () => [{ tex: `\\mathcal{C}_{lon} = ${texMat(L.ctrb(S().lon.A, S().lon.B))},\\quad \\mathcal{C}_{lat} = ${texMat(L.ctrb(S().lat.A, S().lat.B), 3)}` }, { html: 'Both full rank (2 and 4): each loop is controllable from its own input.' }],
         },
         {
-          id: 'dh', title: '(d) Altitude: K<sub>h</sub> and k<sub>r,h</sub>',
-          html: 'Any K whose poles have ζ ≥ ζ<sub>h</sub> = 0.707 and ω<sub>n</sub> ≥ ω<sub>n<sub>h</sub></sub> = 0.275 rad/s passes; k<sub>r,h</sub> must give unity DC gain for your K.',
+          id: 'd', title: '(d) Altitude: K<sub>h</sub> and k<sub>r<sub>h</sub></sub>',
+          html: 'Any K whose poles meet the longitudinal spec of (a) passes; k<sub>r<sub>h</sub></sub> must give unity DC gain from h<sub>r</sub> to h for your K.',
           inputs: { K1: 'K<sub>h,1</sub>', K2: 'K<sub>h,2</sub>', kr: 'k<sub>r,h</sub>' },
           check: (v) => {
             const K = [num(v.K1), num(v.K2)], k = num(v.kr);
@@ -398,8 +427,8 @@
           ]; },
         },
         {
-          id: 'dz', title: '(d) Lateral: K<sub>z</sub> and k<sub>r,z</sub>',
-          html: 'Any K whose four poles have ζ ≥ ζ<sub>z</sub> = 0.707 and ω<sub>n</sub> ≥ ω<sub>n<sub>z</sub></sub> = 0.275 rad/s passes.',
+          id: 'd2', title: '(d) Lateral: K<sub>z</sub> and k<sub>r<sub>z</sub></sub>',
+          html: 'Any K whose four poles meet the lateral spec of (a) passes; k<sub>r<sub>z</sub></sub> must give unity DC gain from z<sub>r</sub> to z for your K.',
           inputs: { K1: 'K<sub>z,1</sub>', K2: 'K<sub>z,2</sub>', K3: 'K<sub>z,3</sub>', K4: 'K<sub>z,4</sub>', kr: 'k<sub>r,z</sub>' },
           check: (v) => {
             const K = [num(v.K1), num(v.K2), num(v.K3), num(v.K4)], k = num(v.kr);
@@ -446,7 +475,7 @@
       const sec = section(parent, 'u = −Kx − k_I ∫(r − y)', 'p. 199');
       viewSeg(sec, ctx);
       segmented(sec, { label: 'Anti-windup (F.12a)', options: [{ value: 'clamp', label: 'hold integrators while a rotor saturates' }, { value: 'none', label: 'none' }], ...bind(ctx, 'antiwindup') });
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'sfi'); knobControls(parent, ctx, 'sfi', 'Specs (target rings)'); }
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'sfi'); knobControls(parent, ctx, 'sfi', 'Specs'); }
       else { knobControls(parent, ctx, 'sfi', 'Design'); gainReadout(section(parent, 'Gains', 'p. 199'), ctx, 'sfi'); }
     },
     extraPlot(ctx, res) {
@@ -460,13 +489,15 @@
       const ah = augI(S.lon.A, S.lon.B, S.lon.C), az = augI(S.lat.A, S.lat.B, S.Cz);
       return [
         { title: 'Augmented systems', page: 'p. 198 · Eq. 12.1',
-          theory: '\\dot x_I = r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\0\\end{bmatrix}',
-          numbers: `A_{1,lon} = ${texMat(ah.A1)},\\quad A_{1,lat} = ${texMat(az.A1, 3)}`, spoiler: true },
-        ctrbCard(az.A1, az.B1, 'Controllability of (A₁, B₁), lateral', 'p. 198'),
+          theory: '\\dot x_I = r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\0\\end{bmatrix}' },
+        { title: 'Augmented VTOL models', page: 'F.6 p. 396', answers: ['F.6/a', 'F.6/b'],
+          numbers: `A_{1,lon} = ${texMat(ah.A1)},\\quad A_{1,lat} = ${texMat(az.A1, 3)}` },
+        ctrbCard(az.A1, az.B1, 'Controllability of (A₁, B₁), lateral', 'p. 198', 'F.6/b'),
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 199–201',
-          theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I x_I',
-          numbers: `K_h = ${texMat([d.Kh])},\\; k_{I,h} = ${tex(d.kIh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{I,z} = ${tex(d.kIz)}`, spoiler: true },
+          theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I x_I' },
+        { title: 'Gains for the desired poles', page: 'F.12(a) p. 400', answers: 'F.12/a',
+          numbers: `K_h = ${texMat([d.Kh])},\\; k_{I,h} = ${tex(d.kIh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{I,z} = ${tex(d.kIz)}` },
         { title: 'Wind as a lateral force', page: 'F.12(b) p. 400',
           theory: '\\ddot z = \\frac{-(f_r + f_\\ell)\\sin\\theta - \\mu\\dot z + F_{wind}}{m_c + 2m_r}', symbolic: '\\theta_{ss} = \\frac{F_{wind}}{F_e}', spoiler: true,
           note: 'The integrator on z finds the steady tilt that cancels the wind; without it z settles off target.' },
@@ -485,7 +516,18 @@
           solution: () => { const r = ref(); return [{ tex: `K_h = ${texMat([r.Kh])},\\; k_{I,h} = ${tex(r.kIh)},\\quad K_z = ${texMat([r.Kz])},\\; k_{I,z} = ${tex(r.kIz)}` }]; },
         },
         {
-          id: 'c', title: '(b, c) Tracking with 20% uncertainty and F<sub>wind</sub> = 0.1 N',
+          id: 'b', title: '(b) 20% parameter variation and a 0.1 N wind force',
+          html: 'In your dynamics, add F<sub>wind</sub> to the z equation (the hint in the statement) and let the parameters vary. Here: the wind F<sub>wind</sub> slider and the plant mismatch in the left panel (the chapter starts with both). Passes when both are set and every mismatch is within ±20%.',
+          check: () => {
+            const mis = ctx.S.mismatch || {}, v = Object.values(mis).map((x) => x || 0);
+            const w = F.distValues(ctx).Fwind || 0;
+            if (!w) return { ok: false, msg: 'Set the wind force F_wind (left panel, disturbances).' };
+            if (!v.some((x) => Math.abs(x) > 0)) return { ok: false, msg: 'Set a plant mismatch in the left panel.' };
+            return v.every((x) => Math.abs(x) <= 20.0001) ? { ok: true, msg: `F_wind = ${fmt(w, 3)} N with plant mismatch.` } : { ok: false, msg: 'Keep every parameter within ±20%.' };
+          },
+        },
+        {
+          id: 'c', title: '(c) Tune the integrator poles for good tracking',
           html: 'Passes when |h<sub>r</sub> − h| and |z<sub>r</sub> − z| at t<sub>end</sub> are both under 2 cm with the current mismatch and wind.',
           check: () => { const r = trackCheck(ctx); return { ok: r.ok, msg: `|e_h| = ${fmt(r.eh, 3)} m, |e_z| = ${fmt(r.ez, 3)} m.` }; },
           solution: () => [{ html: `The reference design keeps the F.11 poles and adds p<sub>I,h</sub> = ${prob.pIh}, p<sub>I,z</sub> = ${prob.pIz}. Both integrators settle the loops with the wind and the parameter errors; making p<sub>I</sub> faster speeds up the recovery but adds overshoot.` }],
@@ -499,14 +541,17 @@
     const S = sub(ctx.pModel), d = design(ctx.pModel, ctx.st.k, level);
     const Ol = L.obsv(S.lon.A, S.lon.C), Oz = L.obsv(S.lat.A, S.lat.C);
     return [
-      { title: 'Observability', page: 'p. 221, F.13(b)',
-        theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix}C\\\\ CA\\\\ \\vdots\\\\ CA^{n-1}\\end{bmatrix}',
-        numbers: `\\operatorname{rank}\\mathcal{O}_{lon} = ${L.rank(Ol)},\\quad \\operatorname{rank}\\mathcal{O}_{lat} = ${L.rank(Oz)}\\;(C_{lat} \\text{ is } 2\\times4)`, spoiler: true },
-      { title: 'Lateral observer gain (block structure)', page: 'p. 222 · Eq. 13.16',
+      { title: 'Observability', page: 'p. 221',
+        theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix}C\\\\ CA\\\\ \\vdots\\\\ CA^{n-1}\\end{bmatrix},\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = n' },
+      { title: 'Observability of the VTOL', page: 'F.13(b) p. 400', answers: 'F.13/b',
+        numbers: `\\operatorname{rank}\\mathcal{O}_{lon} = ${L.rank(Ol)},\\quad \\operatorname{rank}\\mathcal{O}_{lat} = ${L.rank(Oz)}\\;(C_{lat} \\text{ is } 2\\times4)` },
+      { title: 'Lateral observer gain (workbench block structure)', page: 'p. 222 · Eq. 13.16',
         theory: 'L_{lat} = \\begin{bmatrix}L_{z1} & 0\\\\ 0 & L_{\\theta1}\\\\ L_{z2} & 0\\\\ 0 & L_{\\theta2}\\end{bmatrix}',
-        symbolic: '\\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
-        numbers: d.Lz ? `L_h = ${texMat(d.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(d.Lz[0])}, ${tex(d.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(d.Lt[0])}, ${tex(d.Lt[1])})` : '', spoiler: true,
-        note: 'With two outputs L is not unique; place() on the full (A, C) would return a different L with the same eigenvalues.' },
+        note: 'With two outputs L is not unique. This structure lets the z innovation correct only (ẑ, ż̂) and the θ innovation only (θ̂, θ̇̂).' },
+      { title: 'Observer gains for the VTOL', page: 'F.13(c) p. 400', answers: ['F.6/b', 'F.13/c'],
+        symbolic:'\\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
+        numbers: d.Lz ? `L_h = ${texMat(d.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(d.Lz[0])}, ${tex(d.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(d.Lt[0])}, ${tex(d.Lt[1])})` : '',
+        note: 'place() on the full (A, C) would return a different L with the same eigenvalues.' },
       { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224',
         theory: '\\dot{\\hat x} = A\\hat x + B\\tilde u + L(y - C\\hat x),\\quad \\tilde u = (F_{sat} - F_e,\\; \\tau_{sat})' },
     ];
@@ -537,7 +582,7 @@
       const sec = section(parent, 'Controller uses x̂', 'p. 222 · Fig. 13-3');
       viewSeg(sec, ctx);
       segmented(sec, { label: 'Extra plot', options: [{ value: 'v', label: 'velocities' }, { value: 'd', label: 'disturbances' }], ...bind(ctx, 'extra') });
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'obs'); knobControls(parent, ctx, 'obs', 'Specs (target rings)'); }
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'obs'); knobControls(parent, ctx, 'obs', 'Specs'); }
       else { knobControls(parent, ctx, 'obs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 222'), ctx, 'obs'); }
     },
     extraPlot: obsExtraPlot,
@@ -547,6 +592,16 @@
       const S = () => sub(ctx.pModel);
       const ref = () => design(ctx.pModel, knobs(ctx.sys), 'obs');
       PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a', title: '(a) Exact parameters, no input disturbance',
+          html: 'Use α = 0 in your dynamics. Here: set every plant mismatch and every disturbance in the left panel to zero (the chapter starts that way). Passes when they are all zero.',
+          check: () => {
+            const mis = Object.values(ctx.S.mismatch || {}).some((x) => Math.abs(x || 0) > 0);
+            const dist = Object.values(F.distValues(ctx)).some((x) => Math.abs(x || 0) > 0);
+            if (mis) return { ok: false, msg: 'Set the plant mismatch to zero (α = 0).' };
+            return dist ? { ok: false, msg: 'Set the disturbances to zero.' } : { ok: true, msg: 'The controller knows the true parameters, and nothing disturbs the plant.' };
+          },
+        },
         {
           id: 'b', title: '(b) Observability ranks', inputs: { rl: 'rank 𝒪 (altitude)', rz: 'rank 𝒪 (lateral)' },
           check: (v) => PD().checkNumbers(v, { rl: L.rank(L.obsv(S().lon.A, S().lon.C)), rz: L.rank(L.obsv(S().lat.A, S().lat.C)) }, {}),
@@ -562,6 +617,10 @@
             { tex: `L_h = ${texMat(r.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(r.Lz[0])}, ${tex(r.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(r.Lt[0])}, ${tex(r.Lt[1])})` },
             { html: 'Each block is a SISO observer design: L = place(Aᵀ, Cᵀ, q)ᵀ (p. 222). For the z block, det(sI − A + LC) = s² + (L<sub>z1</sub> + μ/M)s + (μ/M·L<sub>z1</sub> + L<sub>z2</sub>).' },
           ]; },
+        },
+        {
+          id: 'd', title: '(d) Plot the states and their estimates',
+          html: 'In your code, have the controller return both u and x̂, and plot them on the same graph. Here the estimates ẑ, ĥ, θ̂ are the dashed traces on the output plots, and the extra plot shows ż, ḣ with their estimates (choose "velocities" on the right).',
         },
         {
           id: 'e', title: '(e) Add d<sub>F</sub> = 1.0 N and d<sub>τ</sub> = 0.1 N·m',
@@ -588,7 +647,7 @@
       viewSeg(sec, ctx);
       segmented(sec, { label: 'Disturbance observer', options: [{ value: true, label: 'on' }, { value: false, label: 'off (F.14a)' }], ...bind(ctx, 'dobs') });
       segmented(sec, { label: 'Extra plot', options: [{ value: 'd', label: 'disturbance estimates' }, { value: 'v', label: 'velocities' }], ...bind(ctx, 'extra') });
-      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'dobs'); knobControls(parent, ctx, 'dobs', 'Specs (target rings)'); }
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'dobs'); knobControls(parent, ctx, 'dobs', 'Specs'); }
       else { knobControls(parent, ctx, 'dobs', 'Design'); gainReadout(section(parent, 'Gains', 'p. 241'), ctx, 'dobs'); }
     },
     extraPlot: obsExtraPlot,
@@ -599,11 +658,13 @@
           theory: '\\text{altitude: } \\dot{\\hat d}_F = L_{d,h}(h - \\hat h)\\text{ at the input};\\quad \\text{lateral: } d_\\tau \\text{ at the input, } d_z \\text{ a force in } \\ddot z',
           note: 'A constant wind speed w added to ż (the F.14 snippet) is exactly a force μw in the observer\'s ż coordinates, so the d_z state absorbs it.' },
         { title: 'Augmented blocks', page: 'p. 240',
-          theory: 'A_2 = \\begin{bmatrix}A & B_d\\\\ 0 & 0\\end{bmatrix},\\quad C_2 = \\begin{bmatrix}C & 0\\end{bmatrix}\\;(\\dot d = 0)', spoiler: true,
-          symbolic: 'A_{h} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{z} = \\begin{bmatrix}0&1&0\\\\0&-\\frac{\\mu}{M}&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{\\theta} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1J\\\\0&0&0\\end{bmatrix},\\; C = \\begin{bmatrix}1&0&0\\end{bmatrix}' },
+          theory: 'A_2 = \\begin{bmatrix}A & B_d\\\\ 0 & 0\\end{bmatrix},\\quad C_2 = \\begin{bmatrix}C & 0\\end{bmatrix}\\;(\\dot d = 0)' },
+        { title: 'Augmented VTOL blocks', page: 'F.14(b) p. 401', answers: ['F.6/a', 'F.6/b', 'F.14/b'],
+          symbolic:'A_{h} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{z} = \\begin{bmatrix}0&1&0\\\\0&-\\frac{\\mu}{M}&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{\\theta} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1J\\\\0&0&0\\end{bmatrix},\\; C = \\begin{bmatrix}1&0&0\\end{bmatrix}' },
         { title: 'Observer gains', page: 'p. 241',
-          theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top \\text{ per block}',
-          numbers: `L_h = ${texMat(d.Lh)},\\; L_z = ${texMat(d.Lz)},\\; L_\\theta = ${texMat(d.Lt)}`, spoiler: true },
+          theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top \\text{ per block}' },
+        { title: 'Observer gains for the specs', page: 'F.14(b) p. 401', answers: 'F.14/b',
+          numbers: `L_h = ${texMat(d.Lh)},\\; L_z = ${texMat(d.Lz)},\\; L_\\theta = ${texMat(d.Lt)}` },
         { title: 'Control law', page: 'p. 241',
           theory: '\\tilde F = -K_h\\hat x_{lon} - k_{I,h}x_{I,h} - \\hat d_F,\\quad \\tau = -K_z\\hat x_{lat} - k_{I,z}x_{I,z} - \\hat d_\\tau',
           note: 'd_z is not matched to τ, so it is not cancelled directly; removing the estimator bias lets the z integrator do the rest.' },
@@ -614,13 +675,25 @@
       const ref = () => design(ctx.pModel, knobs(ctx.sys), 'dobs');
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'g', title: `(b) Disturbance-observer gains (observers ${prob.obsFactor || 10}× faster, p<sub>d,h</sub> = ${prob.pDh}, p<sub>d,z</sub> = ${prob.pDz}, p<sub>d,θ</sub> = ${prob.pDth})`,
+          id: 'a', title: '(a) α = 0.2 with altitude and wind disturbances, no disturbance observer',
+          html: 'Add the book snippet&#39;s disturbances to your dynamics. Here: plant mismatch, the wind w and the altitude disturbance d<sub>h</sub> in the left panel (the chapter starts with all three), and the disturbance observer off. Passes when that is set up; then look at the tracking and the estimate errors.',
+          check: () => {
+            const dv = F.distValues(ctx), mis = Object.values(ctx.S.mismatch || {}).some((x) => Math.abs(x || 0) > 0);
+            if (ctx.st.dobs !== false) return { ok: false, msg: 'Turn the disturbance observer off (right panel) for this part.' };
+            if (!mis) return { ok: false, msg: 'Set a plant mismatch (α = 0.2) in the left panel.' };
+            if (!dv.wind || !dv.ah) return { ok: false, msg: 'Set the wind w and the altitude disturbance d_h in the left panel.' };
+            const res = ctx.app.result(), n = res.t.length - 1;
+            return { ok: true, msg: `Without the disturbance observer: h − ĥ = ${fmt(res.yAll[1][n] - res.extras.hhat[n], 3)} m, z − ẑ = ${fmt(res.yAll[0][n] - res.extras.zhat[n], 3)} m at t_end.` };
+          },
+        },
+        {
+          id: 'b', title: `(b) Disturbance-observer gains (observers ${prob.obsFactor || 10}× faster, p<sub>d,h</sub> = ${prob.pDh}, p<sub>d,z</sub> = ${prob.pDz}, p<sub>d,θ</sub> = ${prob.pDth})`,
           inputs: { Ldh: 'L<sub>d,h</sub>', Ldz: 'L<sub>d,z</sub>', Ldt: 'L<sub>d,θ</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { Ldh: r.Lh[2], Ldz: r.Lz[2], Ldt: r.Lt[2] }, {}); },
           solution: () => { const r = ref(); return [{ tex: `L_h = ${texMat(r.Lh)},\\quad L_z = ${texMat(r.Lz)},\\quad L_\\theta = ${texMat(r.Lt)}` }, { html: 'Same block structure as F.13, each block augmented with its disturbance state.' }]; },
         },
         {
-          id: 'b', title: '(b) Estimator bias removed',
+          id: 'b2', title: '(b) Estimator bias removed and disturbances compensated',
           html: 'Passes when |h − ĥ| and |z − ẑ| at t<sub>end</sub> are under 1 cm with the observer on. Compare with it off.',
           check: () => {
             if (!ctx.st.dobs) return { ok: false, msg: 'Turn the disturbance observer on.' };
