@@ -858,7 +858,8 @@ window.WB = window.WB || {};
   // Progress (answers, solved parts, student controllers, sliders) lives in
   // localStorage under `wb.*`. Save writes those keys to a JSON file; Load
   // replaces them from one and reloads, so a student can move to another
-  // computer. Layout and theme are per-device and stay out of the file.
+  // computer; Clear work erases them. Layout and theme are per-device and stay
+  // out of the file.
   const SAVE_FORMAT = 'controlbook-workbench-progress';
   const isProgressKey = (k) => k.startsWith('wb.') && !k.startsWith('wb.collapsed.') &&
     !['wb.theme', 'wb.leftCollapsed', 'wb.problemFrac'].includes(k);
@@ -922,6 +923,15 @@ window.WB = window.WB || {};
     saveBtn.addEventListener('click', saveProgress);
     loadBtn.addEventListener('click', () => input.click());
     document.getElementById('reset-all').before(saveBtn, loadBtn, input);
+    const clearBtn = el('button', { type: 'button', class: 'btn btn-quiet', title: 'Erase all your answers and settings in this browser', text: 'Clear work' });
+    clearBtn.addEventListener('click', clearProgress);
+    document.getElementById('reset-all').after(clearBtn);
+  }
+
+  function clearProgress() {
+    if (!confirm('Erase all of your work in this browser?\n\nThis deletes every answer, solved part, controller you wrote, and setting, in all six studies. It cannot be undone. Use Save first if you want to keep a copy.')) return;
+    try { for (const k of progressKeys()) localStorage.removeItem(k); } catch (e) { /* storage unavailable */ }
+    location.reload();
   }
 
   // Optional deep link: #A/ch8/explore
@@ -991,7 +1001,7 @@ window.WB = window.WB || {};
     });
 
     document.getElementById('reset-all').addEventListener('click', () => {
-      S = freshState(S.sysId, S.chapter);
+      S = { ...freshState(S.sysId, S.chapter), mode: S.mode };
       rebuild();
     });
 
