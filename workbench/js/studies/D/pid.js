@@ -131,9 +131,14 @@
     const mk = lib.showOl(ctx) ? M.roots2(t.a1, t.a0).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole p${i + 1}` })) : [];
     clPoles(t, g).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole ${i + 1}`, dragId: draggable && Math.abs(p.im) > 1e-9 ? 0 : (draggable && !g.kI ? i : undefined) }));
     if (g.kI && g.kP) mk.push({ re: -g.kI / g.kP, im: 0, kind: 'zero', label: 'closed-loop zero −kI/kP' });
-    if (!g.kI && ctx.st.arch === 'error' && g.kD > 1e-9) mk.push({ re: -g.kP / g.kD, im: 0, kind: 'zero', label: 'zero −kP/kD' });
+    if (!g.kI && archOf(ctx) === 'error' && g.kD > 1e-9) mk.push({ re: -g.kP / g.kD, im: 0, kind: 'zero', label: 'zero −kP/kD' });
     return mk;
   }
+
+  // Work mode has no architecture or compensation switches (the plots run the
+  // student's own controller), so the cards describe Fig. 7-2 as the problem draws it.
+  const archOf = (ctx) => (ctx.S.mode === 'work' ? 'output' : ctx.st.arch);
+  const explore = (ctx) => ctx.S.mode === 'explore';
 
   // ------------------------------------------------------------ math cards --
   function plantCard(ctx) {
@@ -145,7 +150,7 @@
     };
   }
   function pdLoopCard(ctx) {
-    const t = ctx.model, g = ctx.gains, err = ctx.st.arch === 'error';
+    const t = ctx.model, g = ctx.gains, err = archOf(ctx) === 'error';
     const cl = M.roots2(t.a1 + t.b0 * g.kD, t.a0 + t.b0 * g.kP);
     return {
       title: `Closed loop, derivative on ${err ? 'error (Fig. 7-1)' : 'output (Fig. 7-2)'}`, page: err ? 'p. 100 · Eq. 7.4' : 'p. 101 · Eq. 7.5',
@@ -164,11 +169,126 @@
     };
   }
 
+  // ------------------------------------------------- student controllers --
+  const mis = (m) => Object.entries(m).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}%`).join(', ');
+  // Work mode: the gain sliders only move the closed-loop poles in the s-plane; the
+  // time plots show the student's own controller (WB.myCtrl), named by `part`.
+  function workControls(parent, ctx, part, { keys = ['kP', 'kD'], note = '' } = {}) {
+    const sec = section(parent, keys.length > 2 ? 'PID gains (s-plane)' : 'PD gains (s-plane)', keys.length > 2 ? 'p. 142' : 'p. 99–101');
+    gainSliders(sec, ctx, keys);
+    lib.note(sec, `These place the closed-loop × in the s-plane. They do not drive the simulation.${note ? ' ' + note : ''}`);
+    WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
+  }
+
+  // WB.myCtrl.matchCheck with two accepted references per case (cases: [{sc, label,
+  // refs: [() -> result, ...]}]): the problem doesn't say whether the PD adds the
+  // spring's equilibrium force F_e = k z_r (ISSUES.md), so either version passes.
+  async function matchEither(ctx, code, cases, tol) {
+    const f = (v) => `${fmt(v, 3)} m`;
+    let worst = 0;
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i];
+      const mine = await WB.myCtrl.run(ctx, code, c.sc);
+      if (mine.ok === false) return mine;
+      const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
+      const runs = c.refs.map((r) => r());
+      const ds = runs.map((ref) => WB.myCtrl.maxDiff(mine, ref));
+      const j = ds[1] && ds[1].e < ds[0].e ? 1 : 0, d = ds[j], ref = runs[j];
+      if (!(d.e <= tol)) {
+        if (i > 0) return { ok: false, msg: `Matches the design with the nominal parameters but not with ${c.label} (off by ${f(d.e)}). Compute the gains from P.m, P.k, P.b rather than numbers.`, detail };
+        const n = mine.t.length - 1;
+        const off = mine.r[n] - mine.y[n], refOff = ref.r[n] - ref.y[n];
+        let msg = `Your z differs from the design by ${f(d.e)} at t = ${fmt(d.t, 3)} s.`;
+        if (Math.abs(off - refOff) > tol) msg += ` At the end it is ${f(off)} from the reference (the design: ${f(refOff)}).`;
+        return { ok: false, msg, detail };
+      }
+      worst = Math.max(worst, d.e);
+    }
+    return { ok: true, msg: `Your z(t) matches the design to within ${f(worst)} (${cases.map((c) => c.label).join('; ')}).` };
+  }
+
+  // A student's PD controller (fed the state, as in the Ch 7-8 code) against the
+  // workbench's (Fig. 7-2, derivative on the output, with or without F_e) for a step,
+  // with the nominal and a second parameter set. gainsFor(p) gives the design's kP, kD.
+  function pdMatch(ctx, code, gainsFor, step, tEnd) {
+    const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+      const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: { type: 'step', amplitude: step, tStep: 0 }, tEnd, feed: 'state' });
+      const ref = (comp) => () => {
+        const rc = WB.myCtrl.refCtx(ctx, sc);
+        rc.gains = { ...gainsFor(pc.params), kI: 0 };
+        rc.st = { ...ctx.st, arch: 'output', comp };
+        return WB.myCtrl.reference(ctx, sc, makePD(rc));
+      };
+      return { sc, label: pc.label, refs: [ref('none'), ref('eq')] };
+    });
+    return matchEither(ctx, code, cases, 0.02 * step);
+  }
+
+  // Solution code: D.7(d), the D.8 rise-time design with the given tr line, and D.10(c).
+  const D7_SOL = `class Controller:
+    def __init__(self):
+        # Delta_cl^d = (s + 1)(s + 1.5) = s^2 + 2.5 s + 1.5  (D.7(c))
+        self.kp = P.m * 1.5 - P.k
+        self.kd = P.m * 2.5 - P.b
+
+    def update(self, z_r, x):
+        z = x[0, 0]
+        zdot = x[1, 0]
+        F = self.kp * (z_r - z) - self.kd * zdot   # Fig. 7-2: D on the output
+        return F
+`;
+  const PD_SOL = (trLine) => `class Controller:
+    def __init__(self):
+        ${trLine}
+        zeta = 0.7
+        wn = 2.2 / tr
+        self.kp = P.m * wn**2 - P.k
+        self.kd = 2 * P.m * zeta * wn - P.b
+
+    def update(self, z_r, x):
+        z = x[0, 0]
+        zdot = x[1, 0]
+        F = self.kp * (z_r - z) - self.kd * zdot
+        return max(-P.Fmax, min(P.Fmax, F))
+`;
+  const D10_SOL = `class Controller:
+    def __init__(self):
+        tr = 2.0          # the D.8(a) design
+        zeta = 0.7
+        wn = 2.2 / tr
+        self.kp = P.m * wn**2 - P.k
+        self.kd = 2 * P.m * zeta * wn - P.b
+        self.ki = 0.75
+        self.sigma = 0.05
+        self.beta = (2 * self.sigma - P.Ts) / (2 * self.sigma + P.Ts)
+        self.z_dot = P.zdot0
+        self.z_prev = P.z0
+        self.error_prev = 0.0
+        self.integrator = 0.0
+
+    def update(self, z_r, y):
+        z = y[0, 0]
+        error = z_r - z
+        # dirty derivative (Eq. 10.4)
+        self.z_dot = self.beta * self.z_dot + 2 / (2 * self.sigma + P.Ts) * (z - self.z_prev)
+        # anti-windup: integrate only while z_dot is small
+        if abs(self.z_dot) < 0.05:
+            self.integrator += P.Ts / 2 * (error + self.error_prev)
+        F_e = P.k * z_r   # equilibrium force for z_e = z_r (D.4)
+        F = F_e + self.kp * error + self.ki * self.integrator - self.kd * self.z_dot
+        F = max(-P.Fmax, min(P.Fmax, F))
+        self.error_prev = error
+        self.z_prev = z
+        return F
+`;
+
   // -------------------------------------------------------------- D.7 --
   CH.ch7 = {
     id: 'ch7', num: 7, tab: 'Ch 7', title: 'Pole placement (PD)', pages: 'pp. 99–106, p. 379',
     controller: (ctx) => makePD(ctx),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePD),
+    // Work mode simulates the student's D.7(d) controller, which gets the state.
+    implement: { feed: 'state', linear: false },
     defaults(sys) {
       const pr = sys.problems.ch7;
       return { arch: 'output', comp: 'none', kP: 1, kD: 1, form: 'real', p1: pr.desiredPoles[0].re, p2: pr.desiredPoles[1].re, sigma: -1.25, wd: 0.5 };
@@ -184,14 +304,13 @@
     },
 
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') {
+        workControls(parent, ctx, 'D.7(d)', { note: 'The target poles from (c) are dashed rings. The open-loop poles stay hidden until you check (a).' });
+        return;
+      }
       const sec = section(parent, 'PD controller', 'p. 99–101');
       archControl(sec, ctx);
       compControl(sec, ctx);
-      if (ctx.S.mode === 'work') {
-        gainSliders(sec, ctx, ['kP', 'kD']);
-        lib.note(sec, 'The target poles from (c) are dashed rings in the s-plane. The open-loop poles stay hidden until you check (a).');
-        return;
-      }
       const des = section(parent, 'Desired closed-loop poles', 'p. 100');
       segmented(des, {
         label: 'Pole pair', options: [{ value: 'real', label: 'two real' }, { value: 'complex', label: 'complex pair' }],
@@ -240,7 +359,7 @@
           theory: '\\Delta^d_{cl}(s) = (s - p_1)(s - p_2) = s^2 + \\alpha_1 s + \\alpha_0,\\quad \\text{set } \\Delta_{cl}(s) = \\Delta^d_{cl}(s) \\text{ and match coefficients}',
           symbolic: 'k_P = \\frac{\\alpha_0 - a_0}{b_0},\\quad k_D = \\frac{\\alpha_1 - a_1}{b_0}',
           numbers: `\\Delta^d_{cl} = s^2 + ${tex(g.alpha1)}\\,s + ${tex(g.alpha0)} \\Rightarrow k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}`, answers: 'D.7/c' },
-        compCard(ctx),
+        ...(explore(ctx) ? [compCard(ctx)] : []),
       ];
     },
 
@@ -294,38 +413,20 @@
             return [{ tex: `\\Delta^d = (s+1)(s+1.5) = s^2 + 2.5s + 1.5 \\Rightarrow k_P = m\\,(1.5) - k = ${tex(g.kP)},\\; k_D = m\\,(2.5) - b = ${tex(g.kD)}` }];
           },
         },
-        {
-          id: 'd', title: '(d) Simulate a 1 m step',
-          html: 'Click <em>Use my gains</em> in (c), then compare the closed-loop × with the dashed target rings and look at the 1 m step response. The dashed orange trace is the linear design model.',
-          check: () => {
-            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
-            const cl = M.roots2(t().a1 + t().b0 * ctx.st.kD, t().a0 + t().b0 * ctx.st.kP);
-            return M.polesMatch(cl, prob.desiredPoles, 0.02, 0.02)
-              ? { ok: true, msg: 'The simulated loop has the target poles.' }
-              : { ok: false, msg: `Current closed-loop poles: ${lib.polesOf(cl)}.` };
-          },
-          solution: () => [{ html: 'Two real poles: no overshoot, and the slower pole at −1 gives a 2% settling time of about 5 s (the 4/σ rule of thumb with σ = 1 gives 4 s; the second pole stretches it). The pure Fig. 7-2 loop settles at k<sub>P</sub>/(k + k<sub>P</sub>) of the step (D.9 explains why). With the spring compensation F = kz<sub>r</sub> + F̃ it reaches 1 m, but with these gains that asks for 7.5 N at the step, above the 6 N limit that D.8(b) introduces.' }],
-        },
+        WB.myCtrl.part(ctx, {
+          id: 'd', title: '(d) Implement the PD control and plot the response to a 1 m step',
+          html: 'Write the controller with the gains from (c). <code>update</code> gets the reference and the state x, as in the Ch 7 code. <em>Run my controller</em> drives the time plots; the check simulates a 1 m step with the nominal and with other parameters and compares z(t) with the design (within 2% of the step).',
+          check: (code) => pdMatch(ctx, code, (p) => ans.pdGains(p, prob.desiredPoles), 1, 12),
+          solution: () => [
+            { code: D7_SOL },
+            { html: 'Fig. 7-2 exactly (D on the output, no saturation yet). Two real poles: no overshoot, and the slower pole at −1 gives a 2% settling time of about 5 s (the 4/σ rule of thumb with σ = 1 gives 4 s; the second pole stretches it). This loop settles at k<sub>P</sub>/(k + k<sub>P</sub>) of the step (D.9 explains why). Adding the equilibrium force F<sub>e</sub> = kz<sub>r</sub> (D.4) makes it reach 1 m and passes too, but with these gains it asks for 7.5 N at the step, above the 6 N limit that D.8(b) introduces.' },
+          ],
+        }),
       ]);
     },
   };
 
   // -------------------------------------------------------------- D.8 --
-  // Peak |F| demanded for a step of `step` meters from rest, with gains from (tr, zeta).
-  function peakForTr(ctx, tr, zeta, step, comp) {
-    const p = ctx.pModel, sys = ctx.sys;
-    const g = ans.spec(p, tr, zeta);
-    const fake = { ...ctx, gains: g, st: { ...ctx.st, arch: 'output', comp } };
-    const out = WB.sim.simulate({
-      plant: { f: (x, u) => sys.f(x, u, p), h: sys.h, uLimit: p.Fmax },
-      controller: makePD(fake),
-      reference: WB.sim.makeReference({ type: 'step', amplitude: step, tStep: 0 }),
-      disturbance: () => 0, x0: [0, 0], Ts: ctx.S.sim.Ts, tEnd: 15,
-    });
-    let peak = 0;
-    for (const u of out.uDemand) peak = Math.max(peak, Math.abs(u));
-    return peak / p.Fmax;
-  }
   // Largest kP so the demand right after the step fits: (Fmax - F_e) / step (Eq. 8.8)
   function satBound(ctx, step, zeta, comp) {
     const p = ctx.pModel, t = ans.tf(p);
@@ -343,12 +444,16 @@
     defaults(sys) { const pr = sys.problems.ch8; return { arch: 'output', comp: 'none', kP: 1, kD: 1, tr: pr.tr, zeta: pr.zeta }; },
     simDefaults(sys) { return sys.problems.ch8.sim; },
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kD: ctx.st.kD, kI: 0 } : { ...designed(ctx), kI: 0 }; },
+    // Work mode simulates the student's D.8 controller, which gets the state.
+    implement: { feed: 'state', linear: false },
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'PD controller', 'p. 119 · Fig. 8-12');
-      archControl(sec, ctx);
-      compControl(sec, ctx);
-      if (ctx.S.mode === 'work') gainSliders(sec, ctx, ['kP', 'kD']);
+      if (ctx.S.mode === 'work') workControls(parent, ctx, 'D.8(a) and (b)');
+      else {
+        const sec = section(parent, 'PD controller', 'p. 119 · Fig. 8-12');
+        archControl(sec, ctx);
+        compControl(sec, ctx);
+      }
       const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (targets)' : 'Design knobs', 'p. 113 · Eq. 8.5');
       specSliders(spec, ctx);
       if (ctx.S.mode === 'explore') {
@@ -373,7 +478,8 @@
       const st = ctx.st;
       const d = ans.spec(ctx.pModel, st.tr, st.zeta);
       const step = Math.abs(ctx.S.sim.amplitude - ctx.S.sim.y0) || 1;
-      const sb = satBound(ctx, step, st.zeta, lib.comp(ctx));
+      // Work mode has no compensation switch: the bound for Fig. 7-2 as drawn (F_e = 0).
+      const sb = satBound(ctx, step, st.zeta, explore(ctx) ? lib.comp(ctx) : 'none');
       return [
         plantCard(ctx), pdLoopCard(ctx),
         { title: 'Spec → desired characteristic polynomial', page: 'p. 110 · Eq. 8.2, p. 113 · Eq. 8.5',
@@ -387,8 +493,8 @@
         { title: 'Saturation limits the rise time', page: 'p. 119 · Eq. 8.8, p. 121 · Fig. 8-13',
           theory: 'k_P \\le \\frac{\\tilde{u}_{max}}{e_{max}},\\quad \\omega_n \\le \\sqrt{a_0 + b_0\\frac{\\tilde{u}_{max}}{e_{max}}},\\quad t_r \\ge \\frac{2.2}{\\omega_{n,max}},\\quad \\tilde{u}_{max} = u_{max} - |u_e|',
           numbers: `F_e = ${tex(sb.Fe)},\\; e_{max} = ${tex(step)}\\,\\text{m}\\Rightarrow k_{P,max} = ${tex(sb.kP)},\\; \\omega_{n,max} = ${tex(sb.wn)},\\; t_{r,min} = ${tex(sb.tr)}\\,\\text{s}`, answers: 'D.8/b',
-          note: 'u_e is the equilibrium force the controller adds (it depends on the spring-compensation setting), which changes the D.8(b) answer.' },
-        compCard(ctx),
+          note: explore(ctx) ? 'u_e is the equilibrium force the controller adds (it depends on the spring-compensation setting), which changes the D.8(b) answer.' : 'u_e is the equilibrium force the controller adds: 0 for Fig. 7-2 as drawn, k z_r if your controller adds it.' },
+        ...(explore(ctx) ? [compCard(ctx)] : []),
       ];
     },
 
@@ -415,50 +521,45 @@
             ];
           },
         },
-        {
-          id: 'a2', title: '(a) Verify the step response',
-          html: 'Checks the current Work-mode simulation: 10–90% rise time (of the final value, so it also works without spring compensation) within 2 ± 0.3 s, and overshoot below 10%.',
-          check: () => {
-            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode.' };
-            const res = ctx.app.result(), S = ctx.S, n = res.t.length;
-            const i0 = Math.round(S.sim.tStep / S.sim.Ts);
-            const m = M.stepMetrics(res.t, res.y, i0, n, res.y[i0], res.y[n - 1]);
-            const ok = Math.abs(m.tr - 2) <= 0.3 && m.os < 10;
-            return { ok, msg: `t_r = ${fmt(m.tr, 3)} s, overshoot ${fmt(m.os, 3)}% (of the final value ${fmt(res.y[n - 1], 3)} m).` };
+        WB.myCtrl.part(ctx, {
+          id: 'a2', title: '(a) Verify the step response', seed: 'D.7/d',
+          html: `Change your D.7 controller to the gains for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}. The check simulates a ${prob.step} m step with the nominal and with other parameters and compares z(t) with the design (within 2% of the step).`,
+          check: (code) => pdMatch(ctx, code, (p) => ans.spec(p, prob.tr, prob.zeta), prob.step, 12),
+          solution: () => [
+            { code: PD_SOL(`tr = ${prob.tr}`) },
+            { html: 'The 10–90% rise time comes out near 1.9 s (2.2/ω<sub>n</sub> is exact only for ζ ≈ 0.707), with about 4.6% overshoot of the final value. The saturation at F<sub>max</sub> is part (b); adding it here passes too.' },
+          ],
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'b', title: `(b) Add saturation; tune t<sub>r</sub> so a ${prob.step} m step just saturates`, seed: ['D.8/a2', 'D.7/d'],
+          html: `Keep ζ = ${prob.zeta}. The check gives your controller a large error (its output must stay within ±F<sub>max</sub>), then simulates a ${prob.step} m step from rest: your peak |F| must reach 95% of F<sub>max</sub>, and F may sit at the limit for at most 2 samples.`,
+          check: async (code) => {
+            const Fmax = ctx.sys.uLimit(ctx.pModel);
+            const pr = await WB.myCtrl.probe(ctx, code, [[10, [0, 0]]]);
+            if (pr.ok === false) return pr;
+            const u0 = pr.u[0][0];
+            if (Math.abs(u0) > Fmax * (1 + 1e-9)) return { ok: false, msg: `For z_r = 10 m from rest your controller returns F = ${fmt(u0, 4)} N. Saturate its output at ±F_max (P.Fmax).` };
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'step', amplitude: prob.step, tStep: 0 }, tEnd: 15, feed: 'state' });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            let peak = 0, nAt = 0;
+            for (const u of res.uDemand) { peak = Math.max(peak, Math.abs(u)); if (Math.abs(u) >= Fmax * (1 - 1e-6)) nAt++; }
+            const pct = (100 * peak / Fmax).toFixed(1);
+            if (nAt > 2) return { ok: false, msg: `F sits at the limit for ${nAt} samples, so the input saturates. Slow it down.` };
+            if (peak < 0.95 * Fmax) return { ok: false, msg: `Peak |F| is ${pct}% of Fmax. You can go faster.` };
+            return { ok: true, msg: `Peak |F| is ${pct}% of Fmax${nAt ? `, at the limit for ${nAt} sample${nAt > 1 ? 's' : ''}` : ''}.` };
           },
-        },
-        {
-          id: 'b', title: '(b) t<sub>r</sub> that just saturates on a 1 m step (F<sub>max</sub> = 6 N)',
-          inputs: { tr: 't<sub>r</sub> [s]' },
-          html: 'Checked by simulation: a 1 m step from rest with ζ = 0.7, ω<sub>n</sub> = 2.2/t<sub>r</sub>, D on the output, and the current spring-compensation setting. The peak demanded |F| must land between 95% and 100% of F<sub>max</sub>.',
-          check: (v) => {
-            const tr = lib.num(v.tr);
-            if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-            const comp = lib.comp(ctx);
-            const pk = peakForTr(ctx, tr, prob.zeta, prob.step, comp);
-            const pct = (100 * pk).toFixed(1);
-            if (pk > 1.0005) return { ok: false, msg: `Peak demand is ${pct}% of Fmax, so it saturates. Slow it down.` };
-            if (pk < 0.95) return { ok: false, msg: `Peak demand is ${pct}% of Fmax. You can go faster.` };
-            return { ok: true, msg: `Peak demand is ${pct}% of Fmax (spring compensation: ${comp === 'eq' ? 'F = F_e + F̃' : 'none'}).` };
-          },
-          actions: [{ label: 'Try it', run: (v) => {
-            const tr = lib.num(v.tr);
-            if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-            ctx.app.setMode('explore');
-            Object.assign(ctx.st, { tr, zeta: prob.zeta, arch: 'output' });
-            Object.assign(ctx.S.sim, { type: 'step', amplitude: prob.step, y0: 0 });
-            ctx.update(); return null;
-          } }],
           solution: () => {
             const none = satBound(ctx, prob.step, prob.zeta, 'none'), eq = satBound(ctx, prob.step, prob.zeta, 'eq');
             return [
               { html: 'The demand is largest right after the step, when z = 0 and ż = 0, so F(0<sup>+</sup>) = F<sub>e</sub> + k<sub>P</sub>·1 m ≤ F<sub>max</sub> (Eq. 8.8, p. 119). Then ω<sub>n</sub>² = (k + k<sub>P</sub>)/m and t<sub>r</sub> = 2.2/ω<sub>n</sub>.' },
-              { tex: `\\text{none } (F_e = 0):\\; k_P = ${tex(none.kP)},\\; \\omega_n = ${tex(none.wn)},\\; t_r = ${tex(none.tr)}\\,\\text{s},\\; k_D = ${tex(none.kD)}` },
-              { tex: `F = kz_r + \\tilde F \\;(F_e = ${tex(eq.Fe)}):\\; k_P = ${tex(eq.kP)},\\; \\omega_n = ${tex(eq.wn)},\\; t_r = ${tex(eq.tr)}\\,\\text{s},\\; k_D = ${tex(eq.kD)}` },
-              { html: 'Fig. 7-2 as drawn (no F<sub>e</sub>) is the default here, and the (a) design leaves room to speed up. With F<sub>e</sub> = kz<sub>r</sub> the (a) design (k<sub>P</sub> = 3.05) already asks for 6.05 N, so it must be slowed slightly. The problem does not say which architecture to use (ISSUES.md).' },
+              { tex: `F_e = 0 \\text{ (Fig. 7-2)}:\; k_P = ${tex(none.kP)},\; \\omega_n = ${tex(none.wn)},\; t_r = ${tex(none.tr)}\\,\\text{s},\; k_D = ${tex(none.kD)}` },
+              { tex: `F_e = kz_r = ${tex(eq.Fe)}:\; k_P = ${tex(eq.kP)},\; \\omega_n = ${tex(eq.wn)},\; t_r = ${tex(eq.tr)}\\,\\text{s},\; k_D = ${tex(eq.kD)}` },
+              { code: PD_SOL(`tr = ${fmt(none.tr * 1.005, 3)}   # just above t_r,min (F_e = 0)`) },
+              { html: 'With F<sub>e</sub> = kz<sub>r</sub> the (a) design (k<sub>P</sub> = 3.05) already asks for 6.05 N, so it must be slowed slightly to t<sub>r</sub> ≈ 2.01 s; that version passes too. The problem does not say which architecture to use (ISSUES.md).' },
             ];
           },
-        },
+        }),
       ]);
     },
   };
@@ -744,12 +845,14 @@
     controller: (ctx, o) => makePID(ctx, o),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePID),
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.tr } : {}; },
+    // Work mode simulates the student's D.10(c) controller, from the measured z only.
+    implement: { feed: 'y', linear: false },
 
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workControls(parent, ctx, 'D.10(c)', { keys: ['kP', 'kI', 'kD'] }); return; }
       const sec = section(parent, 'Digital PID', 'p. 155, p. 162 · Listing 10.2');
       compControl(sec, ctx);
-      if (ctx.S.mode === 'work') gainSliders(sec, ctx, ['kP', 'kI', 'kD']);
-      else { specSliders(sec, ctx, { kI: true }); readout(sec, ctx); }
+      specSliders(sec, ctx, { kI: true }); readout(sec, ctx);
       const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.3–10.4');
       segmented(imp, {
         label: 'ż for the D term',
@@ -776,6 +879,7 @@
     splane(ctx) { return { markers: markers(ctx) }; },
 
     extraPlot(ctx, res) {
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       if (ctx.st.extra === 'int') {
         return { opts: { title: 'integrator ∫e dt', yLabel: '∫e dt [m·s]', unit: 'm·s' }, data: { series: [{ label: '∫e dt', y: Array.from(res.extras.integrator || []), color: '--series-1' }] } };
       }
@@ -802,21 +906,20 @@
           theory: 'u_I[n] = u_I[n-1] + \\frac{T_s}{2}\\big(e[n] + e[n-1]\\big)' },
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat z}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat z}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(z[n] - z[n-1]\\big)',
-          numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad ${tex(beta)},\\quad ${tex(gamma)}`, answers: 'D.10/c2' },
+          numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad ${tex(beta)},\\quad ${tex(gamma)}`, answers: 'D.10/c' },
         { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
           theory: '\\text{(1) integrate only when } |\\dot z| < \\bar v,\\quad \\text{(2) } u_I^+ = u_I + \\frac{1}{k_I}\\big(u_{sat} - u_{unsat}\\big)' },
         { title: 'Gain-selection guidance', page: 'p. 160 · §10.1.3',
           theory: '\\text{pick } k_P, k_D \\text{ (Ch. 8)},\\; \\text{then raise } k_I \\text{ from 0 until the steady-state error is gone}' },
-        { title: 'Gains from t_r, ζ (D.8)', page: 'p. 113 · Eq. 8.5, p. 160 · §10.1.3', answers: ['D.8/a', 'D.10/c1', 'D.10/c3'],
+        { title: 'Gains from t_r, ζ (D.8)', page: 'p. 113 · Eq. 8.5, p. 160 · §10.1.3', answers: ['D.8/a', 'D.10/c'],
           theory: '\\omega_n = \\frac{2.2}{t_r},\\quad k_P = m\\omega_n^2 - k,\\quad k_D = 2m\\zeta\\omega_n - b',
           numbers: `\\omega_n = ${tex(d.wn)},\\quad k_P = ${tex(d.kP)},\\quad k_D = ${tex(d.kD)},\\quad k_I = ${tex(d.kI)}` },
-        compCard(ctx),
+        ...(explore(ctx) ? [compCard(ctx)] : []),
       ];
     },
 
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch10;
-      const ref = () => ans.spec(ctx.pModel, prob.tr, prob.zeta);
       lib.panel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Parameters vary by up to 20%',
@@ -828,37 +931,24 @@
         },
         {
           id: 'b', title: '(b) The controller gets only z and z<sub>r</sub>',
-          html: 'The PID here gets only the (noisy) measurement and the reference; ż comes from the dirty derivative in (c). In your PID controller, <code>update(z_r, y)</code> receives y, not the state.',
+          html: 'From here on your controller\'s <code>update(z_r, y)</code> receives the noisy measurement y = [[z]], not the state.',
         },
-        {
-          id: 'c1', title: `(c) PD part for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,
-          inputs: { kP: 'k<sub>P</sub>', kD: 'k<sub>D</sub>' },
-          check: (v) => lib.check(v, { kP: ref().kP, kD: ref().kD }, { kP: 'kP', kD: 'kD' }),
-          actions: [{ label: 'Use my gains', run: (v) => {
-            const kP = lib.num(v.kP), kD = lib.num(v.kD);
-            if (kP === null || kD === null) return { ok: false, msg: 'Enter kP and kD first.' };
-            ctx.app.setMode('work'); Object.assign(ctx.st, { kP, kD }); ctx.update(); return null;
-          } }],
-          solution: () => [{ tex: `k_P = ${tex(ref().kP)},\\quad k_D = ${tex(ref().kD)}\\quad(\\text{D.8(a)})` }],
-        },
-        {
-          id: 'c2', title: '(c) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
-          inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
-          check: (v) => lib.check(v, { a: 0.09 / 0.11, b: 2 / 0.11 }, {}),
-          solution: () => [{ tex: '\\frac{0.09}{0.11} = 0.8182,\\quad \\frac{2}{0.11} = 18.18' }],
-        },
-        {
-          id: 'c3', title: '(c) Tune k<sub>I</sub> for the uncertain plant',
-          html: `Checks the current simulation (plant mismatch in the left panel): |z<sub>r</sub> − z| just before the first reference switch must be under ${prob.tolPct}% of the step. The ${prob.tolPct}% threshold is a workbench choice; the book gives none.`,
-          check: () => {
-            const { e, amp } = lib.errorBeforeSwitch(ctx);
-            const lim = prob.tolPct / 100 * amp;
-            const msg = `Error before the switch: ${fmt(e * 1000, 3)} mm (limit ${fmt(1000 * lim, 3)} mm).`;
-            if (!(ctx.gains.kI > 0)) return { ok: false, msg: `kI = 0. ${msg}` };
-            return { ok: e < lim, msg };
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Implement the D.8 PID with σ = 0.05; tune the integrator', seed: ['D.8/b', 'D.8/a2', 'D.7/d'],
+          html: `Start from your D.8 controller. The check runs the ±${prob.sim.amplitude} m square wave (${prob.sim.frequency} Hz) on a plant that differs from the model by ${mis(prob.mismatch)}: |z<sub>r</sub> − z| just before the first switch (t = 25 s) must be under ${prob.tolPct}% of the step (${fmt(1000 * prob.tolPct / 100 * prob.sim.amplitude, 3)} mm). The ${prob.tolPct}% threshold is a workbench choice; the book gives none.`,
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'square', amplitude: prob.sim.amplitude, frequency: prob.sim.frequency, tStep: 0 }, tEnd: 25, mismatch: prob.mismatch });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const k = Math.round(24.95 / sc.Ts), lim = prob.tolPct / 100 * prob.sim.amplitude;
+            const e = Math.abs(res.r[k] - res.y[k]);
+            return { ok: e < lim, msg: `Error before the switch: ${fmt(1000 * e, 3)} mm (limit ${fmt(1000 * lim, 3)} mm).` };
           },
-          solution: () => [{ html: `With the D.8(a) PD gains, k<sub>I</sub> ≈ ${prob.kiRef} works well here (closed-loop poles about −0.70 ± 0.72j and −0.15; error before the switch ≈ 1.5 mm). Any k<sub>I</sub> from about 0.5 to 0.8, the D.P.6 range, passes the ${prob.tolPct}% check. Smaller k<sub>I</sub> leaves a slow tail (the integrator pole approaches 0); much larger k<sub>I</sub> erodes the damping (k<sub>I,crit</sub> ≈ 9.3, see D.P.6).` }],
-        },
+          solution: () => [
+            { code: D10_SOL },
+            { html: `Listing 10.2 (p. 162) on the D.8(a) design: dirty derivative of the measured z (σ = 0.05), trapezoidal integrator that integrates only while |ż| is small, saturation at F<sub>max</sub>, plus the spring's equilibrium force F<sub>e</sub> = kz<sub>r</sub> (D.4). With k<sub>I</sub> = ${prob.kiRef} the error before the switch is about 1.5 mm. Any k<sub>I</sub> from about 0.5 to 0.8, the D.P.6 range, passes. Without F<sub>e</sub> the integrator has to supply the spring force itself: k<sub>I</sub> = 0.75 then leaves about 6 mm, which still passes.` },
+          ],
+        }),
       ]);
     },
   };

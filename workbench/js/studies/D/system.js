@@ -132,6 +132,18 @@ WB.studies.D = WB.studies.D || { chapters: {} };
     h(x) { return x[0]; },
     uLimit(p) { return p.Fmax; },
 
+    // The plant for student controllers (WB.myCtrl), as Python: f(state, u) and the
+    // measured output h(state), the same arithmetic as f above. Python names for the
+    // controller template.
+    plantPy: 'def f(state, F):\n    z = state[0][0]\n    zdot = state[1][0]\n    return np.array([[zdot], [(F - P.b * zdot - P.k * z) / P.m]])\n\ndef h(state):\n    return [state[0][0]]\n',
+    py: { r: 'z_r', y: ['z'], x: ['z', 'zdot'], u: 'F' },
+    // A second parameter set for controller checks (gains must come from P, not
+    // numbers): the D.8(a) gains become kP = 1.09, kD = 5.41 (nominal 3.05, 7.2),
+    // still positive, and k z_r + kP stays under F_max for a 1 m step.
+    altParams(p) { return { ...p, m: p.m * 0.8, k: p.k * 1.25, b: p.b * 1.5 }; },
+    // Entries of P beyond the parameters (as in massParam.py): the initial state.
+    pyParams(x0) { return { z0: x0[0], zdot0: x0[1] }; },
+
     secondOrderModel(p) {
       const t = answers.tf(p);
       return { ...t, tex: { b0: '\\frac{1}{m}', a1: '\\frac{b}{m}', a0: '\\frac{k}{m}' } };
@@ -301,7 +313,7 @@ WB.studies.D = WB.studies.D || { chapters: {} };
           'Implement the PID controller using only measured outputs of the system.',
           '(a) Let m, k and b vary by up to 20% of their nominal values each run (α = 0.2).',
           '(b) The controller gets only the measured position z and the reference z<sub>r</sub>, not the state.',
-          '(c) Implement the PID controller designed in D.8 with dirty-derivative gain σ = 0.05. Tune the integrator to remove the steady-state error caused by the uncertain parameters. (This tab uses the D.8(a) specs t<sub>r</sub> = 2 s, ζ = 0.7.)',
+          '(c) Implement the PID controller designed in D.8 with dirty-derivative gain σ = 0.05. Tune the integrator to remove the steady-state error caused by the uncertain parameters.',
         ],
       },
       ch11: {
@@ -405,14 +417,6 @@ WB.studies.D = WB.studies.D || { chapters: {} };
       WB.ui.readout(parent, () => { const v = vals(); return keys.map((k) => [k, v[k]]); });
     },
     note(parent, text) { parent.append(el('p', { class: 'muted small', text })); },
-    // Error |r - y| just before the first square-wave switch (or at t_end).
-    errorBeforeSwitch(ctx) {
-      const res = ctx.app.result(), S = ctx.S;
-      const tSw = WB.sim.switchTime(S);
-      const i = WB.sim.indexBefore(S, res, tSw);
-      return { e: Math.abs(res.r[i] - res.y[i]), t: res.t[i], amp: Math.abs(S.sim.amplitude) };
-    },
-    polesOf(list) { return list.map((p) => M.fmtPole(p)).join(', '); },
 
     // ----------------------------------------------- Work-mode answer gating --
     // Anything that answers part `key` ('D.7/a') is shown in Explore mode, or in

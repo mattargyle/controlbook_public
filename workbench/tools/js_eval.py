@@ -24,7 +24,7 @@ def js_eval(body, chrome="google-chrome", budget=20000):
     scripts = [s for s in scripts if not s.endswith("app.js")]
     tags = "".join(f'<script src="{s}"></script>' for s in scripts)
     page = f"""<!doctype html><html><head><meta charset="utf-8"><base href="{WB.as_uri()}/">
-<script>window.__errs=[];addEventListener("error",e=>window.__errs.push(e.message+" @"+(e.filename||"").split("/").pop()+":"+e.lineno));</script>
+<script>window.__errs=[];addEventListener("error",e=>window.__errs.push(e.message+" @"+(e.filename||"").split("/").slice(-2).join("/")+":"+e.lineno));</script>
 </head><body>{tags}<pre id="out"></pre>
 <script>
 try {{ const r = (function () {{ {body} }})(); document.getElementById('out').textContent = JSON.stringify({{ ok: true, value: r, errors: window.__errs }}); }}

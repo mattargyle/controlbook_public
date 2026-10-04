@@ -429,18 +429,81 @@
     return d;
   }
 
+  // Solution for the implementation parts: the repo's transferFunction (controllable
+  // canonical form, one RK4 step per Ts), used for C(s) and for the prefilter.
+  const LS_SOL = `class TransferFunction:
+    def __init__(self, num, den):
+        num = np.array(num, dtype=float) / den[0]
+        den = np.array(den, dtype=float) / den[0]
+        n = len(den) - 1
+        num = np.concatenate([np.zeros(n + 1 - len(num)), num])   # pad to n + 1
+        self.A = np.zeros((n, n))
+        self.A[0, :] = -den[1:]
+        self.A[1:, :-1] = np.eye(n - 1)
+        self.B = np.zeros((n, 1))
+        self.B[0, 0] = 1.0
+        self.C = (num[1:] - num[0] * den[1:]).reshape(1, n)
+        self.D = num[0]
+        self.x = np.zeros((n, 1))
+
+    def update(self, u):
+        f = lambda x: self.A @ x + self.B * u
+        F1 = f(self.x); F2 = f(self.x + P.Ts / 2 * F1)
+        F3 = f(self.x + P.Ts / 2 * F2); F4 = f(self.x + P.Ts * F3)
+        self.x = self.x + P.Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        return (self.C @ self.x)[0, 0] + self.D * u
+
+
+class Controller:
+    def __init__(self):
+        self.C = TransferFunction(P.C_num, P.C_den)
+
+    def update(self, z_r, y):
+        z = y[0, 0]
+        e = z_r - z
+        F = self.C.update(e)
+        return max(-P.Fmax, min(P.Fmax, F))
+`;
+  const LS_PF_SOL = LS_SOL
+    .replace('        self.C = TransferFunction(P.C_num, P.C_den)\n', '        self.C = TransferFunction(P.C_num, P.C_den)\n        p = 1.0   # prefilter pole\n        self.prefilter = TransferFunction([p], [1, p])\n')
+    .replace('e = z_r - z', 'e = self.prefilter.update(z_r) - z');
+  // The reference design (presetRef) as coefficient lists, for the D.18 design part.
+  const DESIGN_SOL = `# one design that works (not unique): a PI zero at 0.5 rad/s, a lead centred
+# at 5 rad/s (M = 30), a low-pass filter at 50 rad/s, and the gain k that puts
+# the crossover at 5 rad/s
+z_I, M, w, p = 0.5, 30, 5, 50
+num = np.convolve(np.convolve([1, z_I], [M, M * w / np.sqrt(M)]), [p])
+den = np.convolve(np.convolve([1, 0], [1, w * np.sqrt(M)]), [1, p])
+s = 1j * w
+P_jw = (1 / P.m) / (s**2 + P.b / P.m * s + P.k / P.m)
+k = 1 / abs(P_jw * np.polyval(num, s) / np.polyval(den, s))   # |P C(j5)| = 1
+C_num = k * num
+C_den = den
+`;
+  const SQ18 = { type: 'square', amplitude: 0.5, frequency: 0.02, tStep: 0 };
+
   CH.ch18 = {
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping', pages: 'pp. 323–374, p. 383',
-    defaults() { return { ...presetStart(), showT: true }; },
+    // mine: the student's C(s) from the design part (Work mode), as {num, den}.
+    defaults() { return { ...presetStart(), showT: true, mine: null }; },
     simDefaults(sys) { return { ...sys.problems.ch18.sim, mismatch: sys.problems.ch18.mismatch }; },
     gains() { return {}; },
     linearLabel: 'linear loop (no saturation, d, noise)',
+    // Work mode simulates the student's controller, which gets the designed C(s) as
+    // P.C_num, P.C_den (coefficient lists, as loopshape_tools gives them).
+    implement: {
+      feed: 'y', linear: false,
+      params(ctx) { const C = CH.ch18.design(ctx).C; return { C_num: C.num.slice(), C_den: C.den.slice() }; },
+    },
 
+    // Work mode: C is the student's own (Python, design part), or 1 until they give one,
+    // and the prefilter is in their code; Explore: the block knobs.
     design(ctx, st = ctx.st) {
-      let C = T.gain(st.k);
-      for (const key of BLOCKS) if (st[key].on) C = T.mul(C, blocks[key].tf(st[key]));
+      const work = ctx.S.mode === 'work';
+      let C = T.gain(work ? 1 : st.k);
+      if (work) { if (st.mine) C = T.tf(st.mine.num, st.mine.den); } else for (const key of BLOCKS) if (st[key].on) C = T.mul(C, blocks[key].tf(st[key]));
       const P = plantTf(ctx), Lg = T.mul(P, C);
-      const F = st.pf.on ? T.lpf(st.pf.p) : T.gain(1);
+      const F = !work && st.pf.on ? T.lpf(st.pf.p) : T.gain(1);
       const pr = ctx.sys.problems.ch18;
       const { mag } = T.bode(Lg, W);
       let lowMin = Infinity, highMax = 0;
@@ -469,6 +532,12 @@
     linearSim(ctx, c) { return lib.linearSim(ctx, c, (cx) => this.controller(cx)); },
 
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') {
+        // C comes from the student's Python in the design part, so no block menu here.
+        WB.myCtrl.banner(section(parent, 'Your controller'), ctx, 'the implementation parts');
+        this.specSection(parent, ctx);
+        return;
+      }
       const pre = section(parent, 'Start from', 'p. 323–337');
       pre.append(el('div', { class: 'btn-row' },
         el('button', { type: 'button', class: 'btn', text: 'PI only', onclick: () => { Object.assign(ctx.st, presetStart()); ctx.update(); } })));
@@ -501,7 +570,10 @@
       onOff(pf, 'pf');
       slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'p', () => ctx.st.pf), disabled: off('pf') });
       segmented(pf, { label: 'Bode: closed loop F·T', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT') });
+      this.specSection(parent, ctx);
+    },
 
+    specSection(parent, ctx) {
       const sp = section(parent, 'D.18 specs', 'p. 383');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
@@ -509,7 +581,7 @@
         const d = this.design(ctx);
         const row = WB.ui.specRow;
         box.replaceChildren(
-          row('integrator in C (rejects constant d_in)', d.integOk, d.integOk ? 'yes' : 'no'),
+          row('constant input disturbance rejected', d.integOk, d.integOk ? 'yes' : 'no'),
           row('|PC| ≥ 1/0.03 for ω ≤ 0.1', d.lowOk, `min ${fmt(db(d.lowMin), 3)} dB (need ${fmt(db(1 / 0.03), 3)})`),
           row('|PC| ≤ 0.001 for ω ≥ 500', d.highOk, `max ${fmt(db(d.highMax), 3)} dB (need −60)`),
           row('PM ≈ 60° (±5°)', d.pmOk, `${fmt(d.mg.pm, 3)}° at ${fmt(d.mg.wc, 3)} rad/s${d.mg.gcs.length > 1 ? ` (${d.mg.gcs.length} crossovers)` : ''}`),
@@ -517,6 +589,24 @@
           WB.ui.metric('gain margin(s)', gmText(d.mg)),
         );
       });
+    },
+
+    // Evaluate the student's C_num, C_den and keep them in the chapter state.
+    async loadMine(ctx, code) {
+      const out = await WB.py.evaluate(code, [{ params: ctx.pModel, vars: ['C_num', 'C_den'] }]);
+      if (out.error) return WB.yours.pyError(out);
+      const v = out.rows[0].vars;
+      const num = L.trimLeading([v.C_num].flat(Infinity)), den = L.trimLeading([v.C_den].flat(Infinity));
+      if (![...num, ...den].every((x) => typeof x === 'number' && Number.isFinite(x))) return { ok: false, msg: 'C_num and C_den must be lists of real numbers.' };
+      if (!den.length || den[0] === 0) return { ok: false, msg: 'C_den must have a nonzero leading coefficient.' };
+      if (num.length > den.length) return { ok: false, msg: 'C(s) must be proper: the numerator degree can be at most the denominator degree.' };
+      ctx.st.mine = { num, den };
+      ctx.update();
+      return { ok: true };
+    },
+    // The implementation parts run on the designed C: in Work mode, the student's.
+    needMine(ctx) {
+      return ctx.S.mode === 'work' && !ctx.st.mine ? { ok: false, msg: 'Give your C(s) in the first part and press Use my C: it becomes P.C_num, P.C_den.' } : null;
     },
 
     bode(ctx) {
@@ -545,7 +635,8 @@
           theory: '20\\log|PC| = 20\\log|P| + \\textstyle\\sum 20\\log|C_i|,\\quad \\angle PC = \\angle P + \\sum \\angle C_i' },
         { title: 'Lag and lead', page: 'p. 325–328 · Eq. 18.1–18.2',
           theory: 'C_{lag} = \\frac{s + z}{s + z/M},\\quad C_{lead} = M\\frac{s + \\omega_L/\\sqrt M}{s + \\omega_L\\sqrt M},\\; \\phi_{max} = \\sin^{-1}\\frac{M-1}{M+1}' },
-        { title: 'Your C(s)', page: 'p. 323', theory: 'C(s) = ' + parts.join('\\cdot ') },
+        { title: 'Your C(s)', page: 'p. 323',
+          theory: ctx.S.mode !== 'work' ? 'C(s) = ' + parts.join('\\cdot ') : st.mine ? `C(s) = ${T.texTf(d.C, 4)}` : 'C(s) = 1\\quad\\text{(none yet: first part)}' },
         { title: 'Margins', page: 'p. 303–305',
           theory: `PM = ${tex(d.mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(d.mg.wc)},\\quad GM = ${d.mg.crossings.length ? d.mg.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB at } ' + tex(c.w)).join(';\\;') : '\\infty'}` },
         { title: 'Implementation', page: 'p. 334–335 · Eq. 18.3–18.4, p. 336 · Eq. 18.5–18.7',
@@ -554,38 +645,77 @@
     },
 
     buildProblem(parent, ctx) {
+      const run = async (code, sc) => this.needMine(ctx) || WB.myCtrl.run(ctx, code, sc);
       lib.panel(parent, ctx, ctx.sys.problems.ch18, [
         { id: 'a', title: 'Meet the loop-gain specs',
-          check: () => {
-            const d = this.design(ctx);
-            const ok = d.integOk && d.lowOk && d.highOk && d.pmOk && d.stable;
-            return { ok, msg: `integrator ${d.integOk ? '✓' : '✗'}, tracking ${d.lowOk ? '✓' : '✗'}, noise ${d.highOk ? '✓' : '✗'}, PM ${fmt(d.mg.pm, 3)}° ${d.pmOk ? '✓' : '✗'}, stable ${d.stable ? '✓' : '✗'}` };
+          html: 'Give C(s) as coefficient lists, highest power of s first (<code>np.convolve</code> multiplies two factors). <em>Use my C</em> draws P·C in the Bode plot, the s-plane and the spec readouts. The check also requires a stable closed loop.',
+          code: {
+            template: 'C_num = [1.0]\nC_den = [1.0]\n',
+            check: async (code) => {
+              const r = await this.loadMine(ctx, code);
+              if (r.ok === false) return r;
+              const d = this.design(ctx);
+              const ok = d.integOk && d.lowOk && d.highOk && d.pmOk && d.stable;
+              return { ok, msg: `constant d_in ${d.integOk ? '✓' : '✗'}, tracking ${d.lowOk ? '✓' : '✗'}, noise ${d.highOk ? '✓' : '✗'}, PM ${fmt(d.mg.pm, 3)}° ${d.pmOk ? '✓' : '✗'}, stable ${d.stable ? '✓' : '✗'}` };
+            },
+            actions: [
+              { label: 'Use my C', run: async (code) => { const r = await this.loadMine(ctx, code); return r.ok === false ? r : { info: true, msg: 'Your C(s) is in the Bode plot, the s-plane and the spec readouts.' }; } },
+              { label: 'Load the reference design', run: () => {
+                // Applying it answers this part: Work mode allows it once it is solved.
+                if (ctx.S.mode === 'explore') { Object.assign(ctx.st, presetRef(ctx)); ctx.update(); return null; }
+                if (!lib.shows(ctx, 'D.18/a')) return { ok: false, msg: 'Work mode loads the reference design once your own design passes. Explore mode has it now.' };
+                const C = this.design({ ...ctx, S: { ...ctx.S, mode: 'explore' } }, { ...ctx.st, ...presetRef(ctx) }).C;
+                ctx.st.mine = { num: C.num.slice(), den: C.den.slice() };
+                ctx.update();
+                return { info: true, msg: 'The reference C(s) is in the plots (and in P.C_num, P.C_den).' };
+              } },
+            ],
           },
-          actions: [{ label: 'Load the reference design', run: () => {
-            // Applying it answers (a): Work mode allows it once (a) is solved.
-            if (!lib.shows(ctx, 'D.18/a')) return { ok: false, msg: 'Work mode loads the reference design once your own design passes (a). Explore mode has it now.' };
-            Object.assign(ctx.st, presetRef(ctx)); ctx.update(); return null;
-          } }],
           solution: () => {
-            const r = presetRef(ctx), d = this.design(ctx, { ...ctx.st, ...r });
+            const r = presetRef(ctx), d = this.design({ ...ctx, S: { ...ctx.S, mode: 'explore' } }, { ...ctx.st, ...r });
             return [
               { html: 'One design that works (not unique). The plant is easy at high frequency (|P(j500)| ≈ −122 dB), so the binding specs are tracking (|PC| ≥ 30.5 dB up to 0.1 rad/s) and the phase margin:' },
-              { tex: `C(s) = ${tex(r.k)}\\cdot\\frac{s + 0.5}{s}\\cdot 30\\,\\frac{s + 5/\\sqrt{30}}{s + 5\\sqrt{30}}\\cdot\\frac{50}{s + 50},\\quad F(s) = \\frac{1}{s + 1}` },
+              { tex: `C(s) = ${tex(r.k)}\\cdot\\frac{s + 0.5}{s}\\cdot 30\\,\\frac{s + 5/\\sqrt{30}}{s + 5\\sqrt{30}}\\cdot\\frac{50}{s + 50}` },
               { tex: `PM = ${tex(d.mg.pm)}^\\circ \\text{ at } ${tex(d.mg.wc)}\\,\\text{rad/s},\\quad \\min_{\\omega\\le0.1}|PC| = ${tex(db(d.lowMin))}\\,\\text{dB},\\quad \\max_{\\omega\\ge500}|PC| = ${tex(db(d.highMax))}\\,\\text{dB}` },
-              { html: 'The PI puts the integrator in C (constant d<sub>in</sub> rejected); crossing over at 5 rad/s with a lead of M = 30 centred there buys the phase and lifts the low-frequency gain above 1/γ<sub>r</sub>; the LPF at 50 rad/s rolls off the lead. Python-control gives the same margins.' },
+              { code: DESIGN_SOL },
+              { html: 'The PI puts an integrator in C (constant d<sub>in</sub> rejected); crossing over at 5 rad/s with a lead of M = 30 centred there buys the phase and lifts the low-frequency gain above 1/γ<sub>r</sub>; the LPF at 50 rad/s rolls off the lead. Python-control gives the same margins.' },
             ];
           } },
-        { id: 'b', title: 'Prefilter reduces the peaking',
-          html: 'Checks the first step of the current simulation: overshoot under 5%.',
-          check: () => {
-            const res = ctx.app.result(), S = ctx.S;
-            const i0 = Math.round(S.sim.tStep / S.sim.Ts), i1 = S.sim.type === 'square' ? Math.round((S.sim.tStep + 0.5 / S.sim.frequency) / S.sim.Ts) : res.t.length;
-            const m = M.stepMetrics(res.t, res.y, i0, Math.min(i1, res.t.length), res.y[i0], res.r[Math.min(i0 + 1, res.t.length - 1)]);
-            return { ok: m.os < 5, msg: `overshoot ${fmt(m.os, 3)}%` };
+        WB.myCtrl.part(ctx, {
+          id: 'impl', title: 'Implement C(s) in simulation with its state-space equivalent',
+          html: 'Your design is in <code>P.C_num</code>, <code>P.C_den</code> (coefficient lists, highest power of s first). Realize C(s) as ż<sub>C</sub> = A<sub>C</sub>z<sub>C</sub> + B<sub>C</sub>e, F = C<sub>C</sub>z<sub>C</sub> + D<sub>C</sub>e (Eq. 18.3–18.4) and use it on e = z<sub>r</sub> − z. The check runs the ±0.5 m square wave with exact parameters and compares z(t) with the workbench running the same C(s) (within 3% of the step).',
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQ18, tEnd: 20 });
+            const mine = await run(code, sc);
+            if (mine.ok === false) return mine;
+            const Cd = this.design(ctx).C;
+            // The repo's transferFunction updates the state, then outputs; a filter that outputs first is fine too.
+            const refFor = (make) => {
+              const f = make(Cd, sc.Ts);
+              return WB.myCtrl.reference(ctx, sc, { update: (r, x, y) => (f.update ? f.update(r - y) : f.step(r - y)) });
+            };
+            const e = Math.min(WB.myCtrl.maxDiff(mine, refFor(T.repoFilter)).e, WB.myCtrl.maxDiff(mine, refFor(T.filter)).e);
+            return e <= 0.03 * 0.5 ? { ok: true, msg: `Your z(t) matches C(s) run by the workbench to within ${fmt(1000 * e, 3)} mm.` } : { ok: false, msg: `Your z(t) differs from C(s) run by the workbench by ${fmt(1000 * e, 3)} mm.` };
           },
-          solution: () => [{ html: 'A first-order F = p/(s + p) with p well below crossover (p = 1 in the reference design) shapes the reference so the steps never excite the lead\'s peaking: no overshoot, rise time about 2 s on the ±0.5 m square wave. It does not keep F inside F<sub>max</sub> = 6 N: the 1 m jumps demand about 20 N for a moment (the plant saturates; the PI has no anti-windup but recovers here). p ≈ 0.3 keeps the demand near 6 N at the cost of an 8 s rise time. D.18 itself says nothing about F<sub>max</sub>.' }] },
-        { id: 'c', title: 'Implement C(s) and F(s) with state-space or digital-filter equivalents',
-          html: 'In your own controller (Listing 18.3 pattern, Eq. 18.3–18.7). The simulation here runs C and F as state-space filters; the dashed trace is the same loop without saturation, disturbance and noise.' },
+          solution: () => [{ code: LS_SOL }, { html: 'The repo\'s loopshape_tools.py transferFunction: controllable canonical form, one RK4 step per T<sub>s</sub>, output after the update.' }],
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'pf', title: 'Add a prefilter F(s) that reduces the peaking', seed: 'D.18/impl',
+          html: 'Filter z<sub>r</sub> before the error: e = z<sub>f</sub><sup>r</sup> − z with z<sub>f</sub><sup>r</sup> = F(s)z<sub>r</sub>, F implemented like C. The check runs the ±0.5 m square wave with exact parameters: the first step may overshoot by at most 5%, and |z<sub>r</sub> − z| just before the first switch (t = 25 s) must be under 5 mm.',
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQ18, tEnd: 25 });
+            const res = await run(code, sc);
+            if (res.ok === false) return res;
+            const k = Math.round(24.95 / sc.Ts);
+            const m = M.stepMetrics(res.t, res.y, 0, res.t.length, res.y[0], res.r[1]);
+            const e = Math.abs(res.r[k] - res.y[k]);
+            return { ok: m.os < 5 && e < 0.005, msg: `Overshoot ${fmt(m.os, 3)}%; error before the switch ${fmt(1000 * e, 3)} mm.` };
+          },
+          solution: () => [
+            { code: LS_PF_SOL },
+            { html: 'A first-order F = p/(s + p) with p well below crossover (p = 1 with the reference C) shapes the reference so the steps never excite the lead\'s peaking: no overshoot (about 12% without it), rise time about 2 s on the ±0.5 m square wave. The 1 m jumps still ask for more than F<sub>max</sub> = 6 N for a moment (the plant saturates; the PI has no anti-windup but recovers here). D.18 itself says nothing about F<sub>max</sub>.' },
+          ],
+        }),
       ]);
     },
   };

@@ -227,7 +227,7 @@ WB.myCtrl = (function () {
   }
 
   // Run the student's code on each case and compare the output with a reference
-  // run. cases: [{ sc, ref: () -> WB.sim result, label }], the first with the
+  // run. cases: [{ sc, ref: () -> WB.sim result (or several), label }], the first with the
   // nominal parameters; tol in SI. Resolves to {ok, msg, detail?}.
   async function matchCheck(ctx, code, cases, { tol, t0 = 0, what = 'the design', output = chan(ctx.sys).refs[0].output }) {
     const out = chan(ctx.sys).outputs[output];
@@ -238,8 +238,11 @@ WB.myCtrl = (function () {
       const c = cases[i];
       const mine = await run(ctx, code, c.sc);
       if (mine.ok === false) return mine;
-      const ref = c.ref();
-      const d = maxDiff(mine, ref, { t0, output });
+      // ref() may return several runs (equally valid conventions): use the closest
+      const runs = [].concat(c.ref());
+      const ds = runs.map((rr) => maxDiff(mine, rr, { t0, output }));
+      const best = ds.indexOf(ds.reduce((a, b) => (b.e < a.e ? b : a)));
+      const ref = runs[best], d = ds[best];
       const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
       if (!(d.e <= tol)) {
         if (i > 0) {

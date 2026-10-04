@@ -57,7 +57,7 @@ window.addEventListener('load', () => setTimeout(() => {
 """
 
 ERR_HOOK = ('<script>window.__smokeErrs=[];window.addEventListener("error",e=>window.__smokeErrs.push('
-            '(e.message||"error")+" @"+((e.filename||"").split("/").pop())+":"+e.lineno));</script>')
+            '(e.message||"error")+" @"+((e.filename||"").split("/").slice(-2).join("/"))+":"+e.lineno));</script>')
 
 
 def chrome(args, url, budget):
