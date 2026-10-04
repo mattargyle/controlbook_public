@@ -56,8 +56,9 @@
     return { first: cross.length ? cross[0] : NaN, last: cross.length ? cross[cross.length - 1] : NaN, n: cross.length };
   }
 
-  function loop(ctx) {
-    const Lg = T.mul(plantTf(ctx), pidTf(ctx.st)), Tc = T.feedback(Lg);
+  // The PID loop with the slider gains, or with fixed gains st ({kP, kI, kD, sigma}).
+  function loop(ctx, st = ctx.st) {
+    const Lg = T.mul(plantTf(ctx), pidTf(st)), Tc = T.feedback(Lg);
     const { mag } = T.bode(Tc, W);
     const bw = bandwidth(Tc);
     return { Lg, Tc, mg: margins(Lg), bw: bw.first, bwLast: bw.last, bwN: bw.n, peak: db(Math.max(...mag)) };
@@ -76,11 +77,13 @@
         ctx.update();
       } }));
     if (ctx.S.mode === 'explore') {
-      row.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference D.10 design', title: 't_r = 2 s, ζ = 0.7, k_I = 1, σ = 0.05', onclick: () => { Object.assign(ctx.st, refPid(ctx)); ctx.update(); } }));
+      row.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Reference D.10 design', title: 't_r = 2 s, ζ = 0.7, k_I = 0.75, σ = 0.05', onclick: () => { Object.assign(ctx.st, refPid(ctx)); ctx.update(); } }));
     }
     sec.append(row);
     return sec;
   }
+  // The reference D.10 PID: the D.8(a) design (t_r = 2 s, ζ = 0.7) with the D.10
+  // solution's k_I and σ. D has no book listing; D.17's answers use these fixed gains.
   function refPid(ctx) {
     const pr = ctx.sys.problems.ch10;
     const d = ans.spec(ctx.pModel, pr.tr, pr.zeta);
@@ -363,19 +366,15 @@
     },
 
     buildProblem(parent, ctx) {
-      const l = () => loop(ctx);
+      // Answers are for a fixed loop (the reference D.10 gains), not the sliders, so they
+      // don't go stale when a slider moves.
+      const g = refPid(ctx);
+      const l = () => loop(ctx, g);
+      const fixed = `With the reference D.10 gains (${WB.freq.gainsText(g)}: the D.8(a) design plus the D.10 k<sub>I</sub>), not the sliders.`;
       lib.panel(parent, ctx, ctx.sys.problems.ch17, [
-        { id: 'a', title: 'Phase and gain margins under PID (D.10 gains)', inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub> [rad/s]', gm: 'GM [dB]' },
-          html: 'For the PID gains in the sliders (load your D.10 gains first). Type <code>inf</code> for an infinite gain margin.',
-          check: (v) => {
-            const x = l();
-            const r = lib.check({ pm: v.pm, wc: v.wc }, { pm: x.mg.pm, wc: x.mg.wc }, { pm: 'PM', wc: 'ωco' });
-            if (!r.ok) return r;
-            const inf = /^\s*(inf|∞|infinity)\s*$/i.test(String(v.gm));
-            if (!x.mg.crossings.length) return inf ? { ok: true, msg: 'Within 1%; the phase never reaches −180°.' } : { ok: false, msg: 'Check GM.' };
-            if (inf) return { ok: false, msg: 'Check GM.' };
-            return lib.check({ gm: v.gm }, { gm: db(x.mg.gm) }, { gm: 'GM' });
-          },
+        { id: 'a', title: 'Phase and gain margins under the D.10 PID control', inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub> [rad/s]', gm: 'GM [dB]' },
+          html: `${fixed} Enter GM in dB, or <code>inf</code> if the phase never reaches −180°.`,
+          check: (v) => { const x = l(); return WB.freq.marginCheck(v, { pm: x.mg.pm, wc: x.mg.wc }, { pm: 'PM', wc: 'ωco' }, x.mg); },
           solution: () => {
             const x = l();
             return [
@@ -387,19 +386,21 @@
         { id: 'b', title: 'Open-loop and closed-loop Bode plots on one graph',
           html: 'In your code, plot P(s)C(s) and T(s) = PC/(1 + PC) together. When you have, click the button: the Bode panel here then shows both for the gains in the sliders.',
           done: 'I\'ve plotted them' },
-        { id: 'c', title: 'Closed-loop bandwidth, and how it relates to the crossover frequency', inputs: { bw: 'ω<sub>bw</sub> [rad/s]' },
-          html: 'Either the first −3 dB crossing of |T| (what <code>bandwidth</code> returns) or its final roll-off is accepted. The solution discusses the relation to ω<sub>co</sub>.',
+        { id: 'c', title: 'Closed-loop bandwidth, and how it relates to the crossover frequency', inputs: { bw: 'ω<sub>bw</sub> [rad/s]', ratio: 'ω<sub>bw</sub> / ω<sub>co</sub>' },
+          html: `${fixed} ω<sub>bw</sub> is where |T| falls 3 dB below its DC value. Either the first −3 dB crossing of |T| (what <code>bandwidth</code> returns) or its final roll-off is accepted, with the matching ratio.`,
           check: (v) => {
-            const x = l(), g = lib.num(v.bw);
-            if (g === null) return { ok: false, msg: 'Enter ωbw.' };
-            if (M.close(g, x.bw) || M.close(g, x.bwLast)) return { ok: true, msg: 'Within 1%.' };
-            return { ok: false, msg: 'Check ωbw.' };
+            const x = l(), bw = lib.num(v.bw), ratio = lib.num(v.ratio);
+            if (bw === null || ratio === null) return { ok: false, msg: 'Enter ωbw and the ratio ωbw/ωco.' };
+            const cand = [x.bw, x.bwLast].filter((w) => isFinite(w));
+            const w = cand.find((c) => M.close(bw, c));
+            if (w === undefined) return { ok: false, msg: 'Check ωbw.' };
+            return M.close(ratio, w / x.mg.wc) ? { ok: true, msg: 'Within 1%.' } : { ok: false, msg: 'Check the ratio ωbw/ωco.' };
           },
           solution: () => {
             const x = l();
             return [
-              { tex: `\\omega_{bw} = ${tex(x.bw)}${x.bwN > 1 ? ' \\text{ (first)},\\; ' + tex(x.bwLast) + ' \\text{ (final roll-off)}' : ''}\\quad\\text{vs.}\\quad \\omega_{co} = ${tex(x.mg.wc)}` },
-              { html: x.bwN > 1 ? 'The −3 dB "bandwidth" is ambiguous for these gains: |T| dips below −3 dB around √(k<sub>I</sub>/k<sub>D</sub>), where the complex PID zeros make a notch in |C|, then recovers and finally rolls off a little above ω<sub>co</sub>. The final roll-off is the one that relates to crossover.' : 'The bandwidth sits a little above ω<sub>co</sub>, as expected when |PC| ≫ 1 below crossover and ≪ 1 above it (p. 306).' },
+              { tex: `\\omega_{bw} = ${tex(x.bw)}${x.bwN > 1 ? ' \\text{ (first)},\; ' + tex(x.bwLast) + ' \\text{ (final roll-off)}' : ''},\\quad \\omega_{co} = ${tex(x.mg.wc)},\\quad \\frac{\\omega_{bw}}{\\omega_{co}} = ${tex(x.bw / x.mg.wc)}${x.bwN > 1 ? '\;\\text{or}\;' + tex(x.bwLast / x.mg.wc) : ''}` },
+              { html: (x.bwN > 1 ? 'The −3 dB "bandwidth" is ambiguous for these gains: |T| dips below −3 dB around √(k<sub>I</sub>/k<sub>D</sub>), where the complex PID zeros make a notch in |C|, then recovers. ' : '') + 'The final roll-off sits a little above ω<sub>co</sub>: below crossover |PC| ≫ 1 so |T| ≈ 1, above it |PC| ≪ 1 so |T| ≈ |PC| falls off with the loop gain (p. 306). With PM ≈ ${fmt(x.mg.pm, 3)}° (well damped, Fig. 17-7) |T| does not peak, so the roll-off lands just above ω<sub>co</sub>: ratio ${fmt(x.bwLast / x.mg.wc, 3)}. The first crossing (ratio ${fmt(x.bw / x.mg.wc, 3)}) comes from the notch, not from crossover.' },
             ];
           } },
       ]);

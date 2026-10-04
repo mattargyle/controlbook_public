@@ -52,7 +52,7 @@
   // 'mine': your F.10 Work-mode gains (Ch 10 tab). 'ref': the reference F.10 design.
   // The reference design shows the F.8 gains and the F.10 integrator gains, so Work
   // mode offers it once F.8(a, b, d) and F.10(b) are solved.
-  const refOk = (ctx) => F.showsAnswer(ctx, ['F.8/a', 'F.8/b', 'F.8/d', 'F.10/b2']);
+  const refOk = (ctx) => F.showsAnswer(ctx, ['F.8/a', 'F.8/b', 'F.8/d', 'F.10/b']);
   function f10Gains(ctx) {
     if (ctx.S.mode === 'explore' || (ctx.st.src === 'ref' && refOk(ctx))) return F.refF10(ctx.pModel);
     const w = ctx.S.ch.ch10 ? ctx.S.ch.ch10.w : F.W0;
@@ -395,6 +395,27 @@
     return res;
   }
 
+  // F.17's answers are numbers for a fixed loop, so they don't go stale when the
+  // gain sliders move: the F.10 sample design (the F.10(b) solution: F.8 gains for
+  // the book's nominal parameters, k_I,h = 0.01, σ = 0.05), with the outer loop
+  // under PD (F.17(c)) and the inner loop replaced by its DC gain, as in F.8.
+  function fixed17Gains(sys) {
+    const p = { ...Object.fromEntries(sys.params.map((q) => [q.key, q.value])), ...sys.constants };
+    return { ...F.refF10(p), sigma: sys.problems.ch10.sigma };
+  }
+  function fixed17(ctx) {
+    const g = fixed17Gains(ctx.sys);
+    const lp = loopsOf({ ...ctx, st: { ...ctx.st, sigma: g.sigma, innerDyn: false } }, g, { pdOuter: true });
+    const res = { g };
+    for (const [k, Lg] of [['lon', lp.Ll], ['inner', lp.Li], ['outer', lp.Lo]]) {
+      const Tc = T.feedback(Lg);
+      res[k] = { mg: T.margins(Lg), bw: bandwidth(Tc) };
+    }
+    res.sep = res.inner.bw / res.outer.bw;
+    return res;
+  }
+  const SEP_MIN = 5;   // p. 118 rule of thumb (5–10×); p. 317: "about one decade justifying the successive loop closure"
+
   F.register({
     id: 'ch17', num: 17, tab: 'Ch 17', title: 'Stability margins', pages: 'pp. 303–322, F.17 pp. 402–403',
     controller: (ctx, o) => F.makePID(ctx, o),
@@ -448,9 +469,9 @@
       return [
         { title: 'Crossover and phase margin', page: 'p. 303–304',
           theory: '|PC(j\\omega_{co})| = 1,\\quad PM = 180^\\circ + \\angle PC(j\\omega_{co}),\\quad GM = \\frac{1}{|PC(j\\omega_{180})|}' },
-        { title: 'Margins of the three loops', page: 'F.17(a–c) p. 403', answers: ['F.17/a', 'F.17/b', 'F.17/c'],
+        { title: 'Margins of the three loops (slider gains)', page: 'F.17(a–c) p. 403', answers: ['F.17/a', 'F.17/b', 'F.17/c'],
           numbers: ['lon', 'inner', 'outer'].map((k) => `\\text{${LOOPS[k]}}: PM = ${tex(r[k].mg.pm)}^\\circ \\text{ at } ${tex(r[k].mg.wc)},\\; \\omega_{bw} = ${tex(r[k].bw)}`).join(',\\quad ') },
-        { title: 'Bandwidth vs. crossover', page: 'p. 306–307',
+        { title: 'Bandwidth vs. crossover', page: 'p. 306–307', answers: ['F.17/a', 'F.17/b', 'F.17/c'],
           theory: '\\omega_{bw}: |T(j\\omega_{bw})| = -3\\,\\text{dB},\\quad \\omega_{bw} \\approx \\omega_{co}\\;(\\text{p. 307})',
           note: 'Workbench observation (not in the book): with PM ≈ 50–60° the closed-loop bandwidth comes out about 1.3–1.6 ω_co.' },
         { title: 'Bandwidth separation', page: 'p. 118',
@@ -460,20 +481,42 @@
       ];
     },
     buildProblem(parent, ctx) {
-      const r = () => margins17(ctx);
+      const r = () => fixed17(ctx);
+      const g = fixed17Gains(ctx.sys);
+      const gt = (kP, kI, kD) => WB.freq.gainsText({ kP, kI, kD, sigma: g.sigma });
+      const GAINS = {
+        lon: `the F.10 altitude gains (${gt(g.kPh, g.kIh, g.kDh)})`,
+        inner: `the F.10 inner-loop gains (${gt(g.kPth, 0, g.kDth)})`,
+        outer: `the F.10 outer-loop PD gains (${gt(g.kPz, 0, g.kDz)}), with the inner loop as its DC gain`,
+      };
       const NAME = { lon: 'Altitude hold loop under PID', inner: 'Inner lateral loop under PD', outer: 'Outer lateral loop under PD' };
+      const gmTex = (mg) => (mg.crossings && mg.crossings.length ? mg.crossings.map((c) => `${tex(db(c.gm))}\\,\\text{dB at } ${tex(c.w)}`).join(',\\; ') : '\\infty');
       const part = (k, lab) => ({
-        id: lab[1], title: `${lab} ${NAME[k]}: margins, bandwidth vs. crossover`,
-        html: 'Plot the open-loop and closed-loop Bode plots (on the right; margins appear after Reveal). Enter the phase margin, crossover and closed-loop bandwidth; the solution lists the gain margins.',
-        inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub>', bw: 'ω<sub>bw</sub>' },
-        check: (v) => { const x = r()[k]; return PD().checkNumbers(v, { pm: x.mg.pm, wc: x.mg.wc, bw: x.bw }, { pm: 'PM', wc: 'ωco', bw: 'ωbw' }); },
-        solution: () => { const x = r()[k]; return [{ tex: `PM = ${tex(x.mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(x.mg.wc)},\\; GM = ${x.mg.crossings.length ? x.mg.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB}').join(', ') : '\\infty'},\\; \\omega_{bw} = ${tex(x.bw)} = ${tex(x.bw / x.mg.wc)}\\,\\omega_{co}` }]; },
+        id: lab[1], title: `${lab} ${NAME[k]}: margins, bandwidth, and its relation to crossover`,
+        html: `Use ${GAINS[k]}: the F.10 sample design (the F.10(b) solution), not the sliders. The sliders above still draw the Bode plots, so you can compare. Enter GM in dB, or <code>inf</code> if the phase never reaches −180°; ω<sub>bw</sub> is where |T| falls 3 dB below its DC value.`,
+        inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub> [rad/s]', gm: 'GM [dB]', bw: 'ω<sub>bw</sub> [rad/s]', ratio: 'ω<sub>bw</sub> / ω<sub>co</sub>' },
+        check: (v) => { const x = r()[k]; return WB.freq.marginCheck(v, { pm: x.mg.pm, wc: x.mg.wc, bw: x.bw, ratio: x.bw / x.mg.wc }, { pm: 'PM', wc: 'ωco', bw: 'ωbw', ratio: 'ωbw/ωco' }, x.mg); },
+        solution: () => { const x = r()[k]; return [
+          { tex: `PM = ${tex(x.mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(x.mg.wc)}\\,\\text{rad/s},\\quad GM = ${gmTex(x.mg)},\\quad \\omega_{bw} = ${tex(x.bw)} = ${tex(x.bw / x.mg.wc)}\\,\\omega_{co}` },
+          { html: `${!(x.mg.crossings && x.mg.crossings.length) ? 'The phase never reaches −180°, so GM = ∞.' : x.mg.crossings.some((c) => c.gm < 1) ? 'The phase crosses −180° below crossover (the integrator on a double-integrator plant), so the loop is conditionally stable: the negative-dB GM says how far the gain could be lowered before it goes unstable (python-control\'s margin reports this crossing).' : 'The phase crosses −180°, so GM is finite.'} The bandwidth is a little above crossover, as in the book's examples (p. 317–318): above ω<sub>co</sub>, |PC| ≪ 1 so |T| ≈ |PC| rolls off with the loop gain, and with PM ≈ ${fmt(x.mg.pm, 2)}° the closed loop has a small resonant rise near ω<sub>co</sub> that puts the −3 dB point above it (PM ≈ 60° behaves like ζ ≈ 0.6–0.7, Fig. 17-7).` },
+        ]; },
       });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch17, [
         part('lon', '(a)'), part('inner', '(b)'), part('outer', '(c)'),
-        { id: 'd', title: '(d) Bandwidth separation between the inner and outer loops', html: 'Is successive loop closure justified for this design? Enter ω<sub>bw,in</sub>/ω<sub>bw,out</sub>.', inputs: { v: 'ratio' },
-          check: (v) => PD().checkNumbers(v, { v: r().sep }, { v: 'ratio' }),
-          solution: () => [{ tex: `\\frac{${tex(r().inner.bw)}}{${tex(r().outer.bw)}} = ${tex(r().sep)}` }, { html: 'Above the 5–10 rule of thumb (p. 118), so treating the inner loop as its DC gain is justified for these gains.' }] },
+        { id: 'd', title: '(d) Bandwidth separation between the inner and outer loops',
+          html: 'With the same fixed gains as (b) and (c): enter ω<sub>bw,in</sub>/ω<sub>bw,out</sub>, and say whether successive loop closure is justified for this design (<code>yes</code> or <code>no</code>).',
+          inputs: { v: 'ω<sub>bw,in</sub> / ω<sub>bw,out</sub>', ok: 'justified? (yes / no)' },
+          check: (v) => {
+            const x = r(), n = PD().checkNumbers({ v: v.v }, { v: x.sep }, { v: 'ratio' });
+            if (!n.ok) return n;
+            const t = String(v.ok || '').trim().toLowerCase();
+            if (!['yes', 'no', 'y', 'n'].includes(t)) return { ok: false, msg: 'Answer the second box with yes or no.' };
+            return (t[0] === 'y') === (x.sep >= SEP_MIN) ? { ok: true, msg: '' } : { ok: false, msg: 'Compare the ratio with the separation the book asks for (§8.1.4 and Ch 17).' };
+          },
+          solution: () => { const x = r(); return [
+            { tex: `\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} = \\frac{${tex(x.inner.bw)}}{${tex(x.outer.bw)}} = ${tex(x.sep)}` },
+            { html: `${x.sep >= SEP_MIN ? 'Yes.' : 'No.'} Successive loop closure treats the inner loop as its DC gain, which holds when the inner closed loop is about 1 at every frequency the outer loop responds to: the book asks for roughly 5–10× (p. 118) and calls about one decade enough (p. 317: "the bandwidth separation between the inner and outer loop is about one decade justifying the successive loop closure design approach"). Here the inner loop is ${fmt(x.sep, 3)}× faster, ${x.sep >= 10 ? 'more than a decade' : x.sep >= SEP_MIN ? 'inside the 5–10× range' : 'short of the 5× rule'}, matching the t<sub>r,z</sub> = 10 t<sub>r,θ</sub> design of F.8.` },
+          ]; } },
       ]);
     },
   });

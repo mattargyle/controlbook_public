@@ -358,6 +358,14 @@
   };
 
   // ------------------------------------------------------------- C.17 --
+  // C.17(c): successive loop closure is justified when the inner loop is at least 5×
+  // faster than the outer one (the low end of the book's 5–10×, p. 118; p. 317).
+  const SLC_RULE = 5;
+  const c10Text = (g) => `k<sub>Pθ</sub> = ${fmt(g.kPth, 4)}, k<sub>Dθ</sub> = ${fmt(g.kDth, 4)}, k<sub>Pφ</sub> = ${fmt(g.kPphi, 4)}, k<sub>Iφ</sub> = ${fmt(g.kIphi, 4)}, k<sub>Dφ</sub> = ${fmt(g.kDphi, 4)}, σ = ${fmt(g.sigma, 3)}`;
+  // The margin readouts and markers answer C.17: Work mode shows them once all of it
+  // is solved (or revealed).
+  const c17Shown = (ctx) => WB.ui.shown(ctx, 'C:ch17:m') || lib().shows(ctx, 'C.17/a', 'C.17/a2', 'C.17/b', 'C.17/b2', 'C.17/c');
+
   CH.ch17 = {
     id: 'ch17', num: 17, tab: 'Ch 17', title: 'Stability margins', pages: 'pp. 318–322',
     linear: false,
@@ -372,7 +380,7 @@
       sec.append(box);
       WB.ui.addRefresher(() => {
         const l = loops(ctx);
-        const show = WB.ui.shown(ctx, 'C:ch17:m');
+        const show = c17Shown(ctx);
         const row = WB.ui.metric;
         box.replaceChildren(...(show ? [
           row('inner PM', `${fmt(l.mgIn.pm, 3)}° at ω_co = ${fmt(l.mgIn.wc, 3)} rad/s`),
@@ -388,7 +396,7 @@
 
     bode(ctx) {
       const l = loops(ctx), inner = ctx.st.view === 'inner';
-      const show = WB.ui.shown(ctx, 'C:ch17:m');
+      const show = c17Shown(ctx);
       const Lg = inner ? l.Lin : l.Lout, Tc = inner ? l.Tin : l.Tout, mg = inner ? l.mgIn : l.mgOut, bw = inner ? l.bwIn : l.bwOut;
       const marks = show ? marginMarks(mg) : [];
       if (show && isFinite(bw)) marks.push({ w: bw, label: `bandwidth ${fmt(bw, 3)}`, color: '--series-2' });
@@ -405,10 +413,10 @@
       return [
         { title: 'Crossover and phase margin', page: 'p. 303–304',
           theory: '|PC(j\\omega_{co})| = 1,\\quad PM = \\angle PC(j\\omega_{co}) + 180^\\circ,\\quad GM = \\frac{1}{|PC(j\\omega_{180})|}',
-          numbers: `\\text{inner: } PM = ${tex(l.mgIn.pm)}^\\circ \\text{ at } ${tex(l.mgIn.wc)},\\quad \\text{outer: } PM = ${tex(l.mgOut.pm)}^\\circ \\text{ at } ${tex(l.mgOut.wc)}`, spoiler: true },
+          numbers: `\\text{inner: } PM = ${tex(l.mgIn.pm)}^\\circ \\text{ at } ${tex(l.mgIn.wc)},\\quad \\text{outer: } PM = ${tex(l.mgOut.pm)}^\\circ \\text{ at } ${tex(l.mgOut.wc)}`, spoiler: true, answers: ['C.17/a', 'C.17/b'] },
         { title: 'Open vs. closed loop', page: 'p. 306–307',
           theory: 'T = \\frac{PC}{1+PC}:\\; |PC| \\gg 1 \\Rightarrow |T| \\approx 1,\\; |PC| \\ll 1 \\Rightarrow |T| \\approx |PC|',
-          numbers: `\\omega_{bw,in} = ${tex(l.bwIn)},\\; \\omega_{bw,out} = ${tex(l.bwOut)},\\quad \\frac{\\omega_{bw,in}}{\\omega_{bw,out}} = ${tex(l.bwIn / l.bwOut)}`, spoiler: true,
+          numbers: `\\omega_{bw,in} = ${tex(l.bwIn)},\\; \\omega_{bw,out} = ${tex(l.bwOut)},\\quad \\frac{\\omega_{bw,in}}{\\omega_{bw,out}} = ${tex(l.bwIn / l.bwOut)}`, spoiler: true, answers: ['C.17/a2', 'C.17/b2', 'C.17/c'],
           note: 'Bandwidth here is the highest frequency where |T| is still above −3 dB. The outer |T| dips below −3 dB near 0.08 rad/s (below the panel resonance at √(k/J_p) ≈ 0.32 rad/s) and comes back, so the first crossing (what control.bandwidth reports) would be misleading.' },
         { title: 'Successive loop closure, in frequency terms', page: 'p. 321',
           theory: '\\text{justified when } |T_{in}(j\\omega)| \\approx 1 \\text{ well past the outer crossover: } \\omega_{bw,in} \\gtrsim 5\\text{–}10\\,\\omega_{co,out}' },
@@ -416,20 +424,48 @@
     },
 
     buildProblem(parent, ctx) {
-      const l = () => loops(ctx, pick(c10(ctx.sys, ctx.pModel)));
+      // C.17's answers are for a fixed loop, the book's C.10 gains (the listing, as in
+      // Ch 16), so they don't go stale when the gain sliders move.
+      const g = pick(c10(ctx.sys, ctx.pModel));
+      const l = () => loops(ctx, g);
+      const fixed = `With the book's C.10 gains (${c10Text(g)}) and the nominal parameters, not the sliders.`;
+      const gmTex = (mg) => (gmText(mg) === '∞' ? '\\infty' : gmText(mg).replace(/ dB at /g, '\\,\\text{dB at } '));
+      const marginPart = (id, which, title, book) => ({
+        id, title, html: `${fixed} Enter GM in dB, or <code>inf</code> if the phase never reaches −180°.`,
+        inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub> [rad/s]', gm: 'GM [dB]' },
+        check: (v) => { const x = l(), mg = x[`mg${which}`]; return WB.freq.marginCheck(v, { pm: mg.pm, wc: mg.wc }, { pm: 'PM', wc: 'ωco' }, mg); },
+        solution: () => { const mg = l()[`mg${which}`]; return [{ tex: `PM = ${tex(mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(mg.wc)}\\,\\text{rad/s},\\quad GM = ${gmTex(mg)}` }, { html: book }]; },
+      });
+      const bwPart = (id, which, title, extra, why) => ({
+        id, title, html: `${fixed} Plot the open- and closed-loop Bode plots together (drawn above with the slider gains). ${extra}`,
+        inputs: { bw: 'ω<sub>bw</sub> [rad/s]', ratio: 'ω<sub>bw</sub> / ω<sub>co</sub>' },
+        check: (v) => { const x = l(), bw = x[`bw${which}`]; return PD().checkNumbers(v, { bw, ratio: bw / x[`mg${which}`].wc }, { bw: 'ωbw', ratio: 'ωbw/ωco' }); },
+        solution: () => { const x = l(), bw = x[`bw${which}`]; return [{ tex: `\\omega_{bw} = ${tex(bw)}\\,\\text{rad/s} = ${tex(bw / x[`mg${which}`].wc)}\\,\\omega_{co}` }, { html: why }]; },
+      });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch17, [
-        { id: 'a', title: '(a) Inner loop', inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub>', bw: 'ω<sub>bw</sub>' },
-          html: 'Answers use the C.10 gains (nominal parameters), whatever the sliders are set to. ω<sub>bw</sub>: where |T| falls 3 dB below its DC value.',
-          check: (v) => { const x = l(); return PD().checkNumbers(v, { pm: x.mgIn.pm, wc: x.mgIn.wc, bw: x.bwIn }, { pm: 'PM', wc: 'ωco', bw: 'ωbw' }); },
-          solution: () => { const x = l(); return [{ tex: `PM = ${tex(x.mgIn.pm)}^\\circ \\text{ at } ${tex(x.mgIn.wc)},\\; GM = \\infty,\\; \\omega_{bw} = ${tex(x.bwIn)}` }, { html: 'Book: PM = 56.16°, crossover ≈ 7, bandwidth ≈ 11 rad/s (p. 321; made with the C.8 loops). The bandwidth is above crossover because the PM is below 90°.' }]; } },
-        { id: 'b', title: '(b) Outer loop', inputs: { pm: 'PM [°]', wc: 'ω<sub>co</sub>', bw: 'ω<sub>bw</sub>' },
-          html: 'ω<sub>bw</sub>: the highest frequency where |T| is still above −3 dB (|T| dips near 0.08 rad/s and recovers).',
-          check: (v) => { const x = l(); return PD().checkNumbers(v, { pm: x.mgOut.pm, wc: x.mgOut.wc, bw: x.bwOut }, { pm: 'PM', wc: 'ωco', bw: 'ωbw' }); },
-          solution: () => { const x = l(); return [{ tex: `PM = ${tex(x.mgOut.pm)}^\\circ \\text{ at } ${tex(x.mgOut.wc)},\\; \\omega_{bw} = ${tex(x.bwOut)}` }, { html: 'Book: PM = 110.92°, bandwidth ≈ crossover ≈ 1 rad/s (Fig. 17-15).' }]; } },
-        { id: 'c', title: '(c) Bandwidth separation', inputs: { r: 'ω<sub>bw,in</sub> / ω<sub>bw,out</sub>' },
-          html: 'For the outer loop, use the highest frequency where |T| is still above −3 dB (|T| dips near 0.08 rad/s and recovers).',
-          check: (v) => { const x = l(); return PD().checkNumbers(v, { r: x.bwIn / x.bwOut }, { r: 'ratio' }); },
-          solution: () => { const x = l(); return [{ tex: `\\frac{${tex(x.bwIn)}}{${tex(x.bwOut)}} = ${tex(x.bwIn / x.bwOut)}` }, { html: 'Book: "close to a decade", so successive loop closure is justified.' }]; } },
+        marginPart('a', 'In', '(a) Inner loop: phase and gain margins under PD control',
+          'Book: PM = 56.16° at 6.97 rad/s, GM ∞ (p. 321), made with the C.8 loops (k<sub>Pθ</sub> = 77.9); see ISSUES.md. The derivative and the dirty-derivative pole keep the phase above −180°, so GM = ∞.'),
+        bwPart('a2', 'In', '(a) Inner loop: closed-loop bandwidth and how it relates to crossover', 'ω<sub>bw</sub> is where |T| falls 3 dB below its DC value.',
+          'The bandwidth is tied to crossover: above ω<sub>co</sub>, |PC| ≪ 1 and |T| ≈ |PC| falls off with it. The PM is small (about 48°), so |T| peaks near crossover and the −3 dB point lands well above ω<sub>co</sub>, about 1.7× (Fig. 17-7). The book reports ≈ 11 rad/s vs. 7 rad/s for the C.8 loops (p. 321).'),
+        marginPart('b', 'Out', '(b) Outer loop: phase and gain margins under PID control',
+          'Book: PM = 110.92° at about 1 rad/s (Fig. 17-15).'),
+        bwPart('b2', 'Out', '(b) Outer loop: closed-loop bandwidth and how it relates to crossover', 'Use the highest frequency where |T| is still above −3 dB (|T| dips near 0.08 rad/s, below the panel resonance, and recovers).',
+          'With PM ≈ 111° there is no peaking: |T| ≈ 1 while |PC| ≫ 1 and starts rolling off a little before crossover (|1 + PC| > |PC| there), so ω<sub>bw</sub> is somewhat below ω<sub>co</sub>, about 0.8×. Book: "approximately the crossover frequency of 1 rad/sec" (p. 321).'),
+        { id: 'c', title: '(c) Bandwidth separation; is successive loop closure justified?',
+          html: `${fixed} Use the bandwidths from (a) and (b). Answer <code>yes</code> or <code>no</code>, by the book's rule: the inner loop should be 5–10 times faster than the outer loop (p. 118), i.e. its bandwidth at least about 5× higher (p. 317).`,
+          inputs: { r: 'ω<sub>bw,in</sub> / ω<sub>bw,out</sub>', ok: 'justified? (yes/no)' },
+          check: (v) => {
+            const x = l(), r = x.bwIn / x.bwOut;
+            const n = PD().checkNumbers({ r: v.r }, { r }, { r: 'ratio' });
+            if (!n.ok) return n;
+            const a = String(v.ok || '').trim().toLowerCase();
+            if (!/^(y|yes|n|no)$/.test(a)) return { ok: false, msg: 'Answer yes or no.' };
+            return (a[0] === 'y') === (r >= SLC_RULE) ? { ok: true, msg: 'Correct.' } : { ok: false, msg: `Compare the separation with the book's 5–10× rule.` };
+          },
+          solution: () => { const x = l(), r = x.bwIn / x.bwOut; return [
+            { tex: `\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} = \\frac{${tex(x.bwIn)}}{${tex(x.bwOut)}} = ${tex(r)}` },
+            { html: `${r >= SLC_RULE ? 'Yes' : 'No'}: the inner loop is ${fmt(r, 3)}× faster than the outer loop, ${r >= 10 ? 'more than' : r >= SLC_RULE ? 'within' : 'below'} the book's 5–10× (p. 118; p. 317: "a decade higher"). The inner closed loop |T<sub>in</sub>| ≈ 1 well past the outer crossover, so replacing it by its DC gain is a good model there. Book (C.8 loops): "close to a decade", justified (p. 321).` },
+          ]; } },
       ]);
     },
   };
