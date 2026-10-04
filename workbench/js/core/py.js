@@ -293,10 +293,10 @@ def wb_probe(payload):
     return _run(_probe, payload)
 
 # A small stand-in for python-control (python-control itself needs scipy):
-# ctrb, obsv, and place (Ackermann, Eq. 11.32). With several inputs, place
-# returns K = v k for a combination v that keeps (A, B v) controllable: a valid
-# gain, though not the one python-control's place picks. For an observer,
-# place(A.T, C.T, poles).T as in the book.
+# ctrb, obsv, and place. place is scipy.signal.place_poles (method 'YT'), which is
+# what python-control's place calls, so multi-input and observer gains match the
+# repo's ctrl*.py; one input reduces to the unique (Ackermann) gain. For an
+# observer, place(A.T, C.T, poles).T as in the book.
 def _install_control():
     def _m(A):
         return np.atleast_2d(np.asarray(A, dtype=float))
@@ -310,32 +310,157 @@ def _install_control():
         return np.hstack(cols)
     def obsv(A, C):
         return ctrb(_m(A).T, _m(C).T).T
+    def qr_full(M):
+        return np.linalg.qr(M, mode='complete')
+    def order(poles):
+        real = sorted(p.real for p in poles if p.imag == 0)
+        neg = sorted((p for p in poles if p.imag < 0), key=lambda p: (p.real, p.imag))
+        out = [complex(r, 0) for r in real]
+        for p in neg:
+            out += [p, p.conjugate()]
+        if len(out) != len(poles):
+            raise ValueError('place: complex poles must come in conjugate pairs')
+        return np.array(out)
+    def knv0(ker, X, j):
+        Q, _ = qr_full(np.delete(X, j, axis=1))
+        yj = ker[j] @ ker[j].T @ Q[:, -1]
+        if not np.allclose(yj, 0):
+            X[:, j] = yj / np.linalg.norm(yj)
+    def yt_real(ker, Q, X, i, j):
+        u, v = Q[:, -2, None], Q[:, -1, None]
+        m = ker[i].T @ (u @ v.T - v @ u.T) @ ker[j]
+        um, sm, vm = np.linalg.svd(m)
+        mu1, mu2 = um.T[:2, :, None]
+        nu1, nu2 = vm[:2, :, None]
+        t = np.vstack((X[:, i, None], X[:, j, None]))
+        if not np.allclose(sm[0], sm[1]):
+            kmn = np.vstack((ker[i] @ mu1, ker[j] @ nu1))
+        else:
+            kij = np.vstack((np.hstack((ker[i], np.zeros(ker[i].shape))), np.hstack((np.zeros(ker[j].shape), ker[j]))))
+            kmn = kij @ np.vstack((np.hstack((mu1, mu2)), np.hstack((nu1, nu2))))
+        tij = kmn @ kmn.T @ t
+        n = X.shape[0]
+        if not np.allclose(tij, 0):
+            tij = np.sqrt(2) * tij / np.linalg.norm(tij)
+            X[:, i], X[:, j] = tij[:n, 0], tij[n:, 0]
+        else:
+            X[:, i], X[:, j] = kmn[:n, 0], kmn[n:, 0]
+    def yt_complex(ker, Q, X, i, j):
+        u = np.sqrt(2) * Q[:, -2, None] + 1j * np.sqrt(2) * Q[:, -1, None]
+        K = ker[i]
+        m = np.conj(K.T) @ (u @ np.conj(u).T - np.conj(u) @ u.T) @ K
+        ev, evec = np.linalg.eig(m)
+        idx = np.argsort(np.abs(ev))
+        mu1, mu2 = evec[:, idx[-1], None], evec[:, idx[-2], None]
+        t = X[:, i, None] + 1j * X[:, j, None]
+        km = K @ mu1 if not np.allclose(np.abs(ev[idx[-1]]), np.abs(ev[idx[-2]])) else K @ np.hstack((mu1, mu2))
+        tij = km @ np.conj(km.T) @ t
+        if not np.allclose(tij, 0):
+            tij = tij / np.linalg.norm(tij)
+            X[:, i], X[:, j] = np.real(tij[:, 0]), np.imag(tij[:, 0])
+        else:
+            X[:, i], X[:, j] = np.real(km[:, 0]), np.imag(km[:, 0])
+    def update_order(poles):
+        nb_real = int(np.sum(np.isreal(poles))); hnb = nb_real // 2
+        o0, o1 = [], []
+        r_comp = list(range(nb_real + 1, len(poles) + 1, 2))
+        def comp():
+            o0.extend(r_comp); o1.extend([x + 1 for x in r_comp])
+        def knv():
+            if hnb == 0 and np.isreal(poles[0]):
+                o0.append(1); o1.append(1)
+        if nb_real > 0:
+            o0.append(nb_real); o1.append(1)
+        r_p = range(1, hnb + nb_real % 2)
+        o0.extend(2 * x for x in r_p); o1.extend(2 * x + 1 for x in r_p)
+        comp()
+        r_p = range(1, hnb + 1)
+        o0.extend(2 * x - 1 for x in r_p); o1.extend(2 * x for x in r_p)
+        knv(); comp()
+        for j in range(2, hnb + nb_real % 2):
+            for i in range(1, hnb + 1):
+                o0.append(i); o1.append(i + j)
+        knv(); comp()
+        for j in range(2, hnb + nb_real % 2):
+            for i in range(hnb + 1, nb_real + 1):
+                idx = i + j
+                if idx > nb_real:
+                    idx = i + j - nb_real
+                o0.append(i); o1.append(idx)
+        knv(); comp()
+        for i in range(1, hnb + 1):
+            o0.append(i); o1.append(i + hnb)
+        knv(); comp()
+        return [(a - 1, b - 1) for a, b in zip(o0, o1)]
+    def yt_loop(ker, X, poles, maxiter=30, rtol=1e-3):
+        eps = np.sqrt(np.spacing(1))
+        for _ in range(maxiter):
+            det_b = abs(np.linalg.det(X))
+            for i, j in update_order(poles):
+                if i == j:
+                    knv0(ker, X, i)
+                else:
+                    Q, _ = qr_full(np.delete(X, (i, j), axis=1))
+                    (yt_real if np.isreal(poles[i]) else yt_complex)(ker, Q, X, i, j)
+            det = max(eps, abs(np.linalg.det(X)))
+            if abs((det - det_b) / det) < rtol and det > eps:
+                break
     def place(A, B, p):
         A, B = _m(A), _m(B)
         n = A.shape[0]
         if B.shape[0] != n:
             B = B.T
-        p = np.atleast_1d(np.asarray(p, dtype=complex))
+        p = np.atleast_1d(np.asarray(p, dtype=complex)).flatten()
         if p.size != n:
             raise ValueError(f'place needs {n} poles, got {p.size}')
-        def acker(b):
-            a = np.real(np.poly(p))
-            phi = sum(a[i] * np.linalg.matrix_power(A, n - i) for i in range(n + 1))
-            e = np.zeros((1, n)); e[0, -1] = 1.0
-            return e @ np.linalg.solve(ctrb(A, b), phi)
         if np.linalg.matrix_rank(ctrb(A, B)) < n:
             raise ValueError('place: (A, B) is not controllable')
-        if B.shape[1] == 1:
-            return acker(B)
-        rng = np.random.default_rng(0)
-        for trial in range(50):
-            v = np.ones((B.shape[1], 1)) if trial == 0 else rng.standard_normal((B.shape[1], 1))
-            Cv = ctrb(A, B @ v)
-            if np.linalg.matrix_rank(Cv) == n and np.linalg.cond(Cv) < 1e12:
-                return v @ acker(B @ v)
-        raise ValueError('place: no single combination of the inputs controls (A, B)')
+        rank_b = np.linalg.matrix_rank(B)
+        if rank_b < B.shape[1]:
+            raise ValueError('place: B must have full column rank')
+        poles = order(p)
+        if rank_b == n:
+            D = np.zeros((n, n)); i = 0
+            while i < n:
+                D[i, i] = poles[i].real
+                if poles[i].imag != 0:
+                    D[i, i + 1], D[i + 1, i + 1], D[i + 1, i] = -poles[i].imag, poles[i].real, poles[i].imag
+                    i += 1
+                i += 1
+            return np.linalg.solve(B, A - D)
+        U, Z = qr_full(B)
+        u0, u1, z = U[:, :rank_b], U[:, rank_b:], Z[:rank_b, :]
+        ker, cols, skip = [], [], False
+        for j in range(n):
+            if skip:
+                skip = False
+                continue
+            ps = (u1.T @ (A - poles[j] * np.eye(n))).T
+            Q, _ = qr_full(ps)
+            kj = Q[:, ps.shape[1]:]
+            tj = np.sum(kj, axis=1)[:, None]
+            tj = tj / np.linalg.norm(tj)
+            if poles[j].imag != 0:
+                cols += [np.real(tj), np.imag(tj)]
+                ker += [kj, kj]
+                skip = True
+            else:
+                cols.append(np.real(tj))
+                ker.append(np.real(kj))
+        X = np.hstack(cols)
+        if rank_b > 1:
+            yt_loop(ker, X, poles)
+        Xc = X.astype(complex); i = 0
+        while i < n - 1:
+            if poles[i].imag != 0:
+                rel, img = X[:, i].copy(), X[:, i + 1].copy()
+                Xc[:, i], Xc[:, i + 1] = rel - 1j * img, rel + 1j * img
+                i += 1
+            i += 1
+        mm = np.linalg.solve(Xc.T, np.diag(poles) @ Xc.T).T
+        return -np.real(np.linalg.solve(z, u0.T @ (mm - A)))
     mod = types.ModuleType('control')
-    mod.ctrb, mod.obsv, mod.place, mod.acker = ctrb, obsv, place, place
+    mod.ctrb, mod.obsv, mod.place = ctrb, obsv, place
     sys.modules['control'] = mod
 
 _install_control()

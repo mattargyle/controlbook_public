@@ -4,7 +4,9 @@
 // a low-pass filter that cancels the left-half-plane zero of Z̃/Θ̃ (B.8, p. 126).
 //
 // Modes:
-//   work    - you set the four (five) gains; the designed values stay hidden.
+//   work    - B.8(e) and B.10(c) are the student's own Python controllers, which
+//             drive the time plots; the gain sliders only place the s-plane poles
+//             (Ch 9 still simulates them, for the system-type analysis).
 //   explore - gains come from t_r,θ, ζ_θ, the bandwidth separation M and ζ_z;
 //             drag the inner (blue) or outer (green) poles.
 (function () {
@@ -31,6 +33,104 @@
     kDC: { label: 'k_DC', lo: 1.05, hi: 3 },
   };
   const pyCheck = (ctx, spec) => (code) => WB.py.check(ctx, { args: ARGS, ...spec }, code);
+
+  // Solution controllers: ctrlPD.py with the B.8 spec and Eqs. 8.12-8.13 (B.8(e)),
+  // and ctrlPID.py (B.10(c)).
+  const SOL = {
+    ch8: String.raw`class Controller:
+    def __init__(self):
+        tr_th = 0.5          # B.8(b)
+        zeta_th = 0.707
+        M = 10.0             # t_r,z = M t_r,theta (this page's B.8(d) spec)
+        zeta_z = 0.707
+        J = P.m1 * P.ell / 6 + P.m2 * 2 * P.ell / 3
+        # inner loop
+        wn_th = 2.2 / tr_th
+        self.kp_th = -(P.m1 + P.m2) * P.g - J * wn_th**2
+        self.kd_th = -2 * zeta_th * wn_th * J
+        k_DC = self.kp_th / ((P.m1 + P.m2) * P.g + self.kp_th)
+        # outer loop (Eqs. 8.12-8.13)
+        wn_z = 2.2 / (M * tr_th)
+        a = -wn_z**2 * np.sqrt(2 * P.ell / (3 * P.g))
+        b = (a - 2 * zeta_z * wn_z) * np.sqrt(2 * P.ell / (3 * P.g))
+        self.kd_z = b / (1 - b)
+        self.kp_z = a * (1 + self.kd_z)
+        # zero-canceling filter (Fig. 8-16)
+        self.f_a = -3 / (2 * P.ell * k_DC)
+        self.f_b = np.sqrt(3 * P.g / (2 * P.ell))
+        self.f_state = 0.0
+
+    def update(self, z_r, x):
+        z = x[0, 0]
+        theta = x[1, 0]
+        zdot = x[2, 0]
+        thetadot = x[3, 0]
+        # outer loop PD, then the filter (one Euler step per sample)
+        tmp = self.kp_z * (z_r - z) - self.kd_z * zdot
+        self.f_state = self.f_state + P.Ts * (-self.f_b * self.f_state + self.f_a * tmp)
+        theta_r = self.f_state
+        # inner loop PD
+        F = self.kp_th * (theta_r - theta) - self.kd_th * thetadot
+        return max(-P.F_max, min(P.F_max, F))
+`,
+    ch10: String.raw`class Controller:
+    def __init__(self):
+        tr_th = 0.2          # the B.10 listing's tuning
+        zeta_th = 0.707
+        M = 10.0
+        zeta_z = 0.707
+        self.ki_z = -0.05
+        self.sigma = 0.05
+        self.theta_max = 30.0 * np.pi / 180.0
+        J = P.m1 * P.ell / 6 + P.m2 * 2 * P.ell / 3
+        wn_th = 2.2 / tr_th
+        self.kp_th = -(P.m1 + P.m2) * P.g - J * wn_th**2
+        self.kd_th = -2 * zeta_th * wn_th * J
+        k_DC = self.kp_th / ((P.m1 + P.m2) * P.g + self.kp_th)
+        wn_z = 2.2 / (M * tr_th)
+        a = -wn_z**2 * np.sqrt(2 * P.ell / (3 * P.g))
+        b = (a - 2 * zeta_z * wn_z) * np.sqrt(2 * P.ell / (3 * P.g))
+        self.kd_z = b / (1 - b)
+        self.kp_z = a * (1 + self.kd_z)
+        self.f_a = -3 / (2 * P.ell * k_DC)
+        self.f_b = np.sqrt(3 * P.g / (2 * P.ell))
+        self.f_state = 0.0
+        # dirty derivatives (Eq. 10.4)
+        self.beta = (2 * self.sigma - P.Ts) / (2 * self.sigma + P.Ts)
+        self.gamma = 2 / (2 * self.sigma + P.Ts)
+        self.z_dot = P.zdot0
+        self.z_prev = P.z0
+        self.theta_dot = P.thetadot0
+        self.theta_prev = P.theta0
+        self.integrator = 0.0
+        self.error_prev = 0.0
+
+    def update(self, z_r, y):
+        z = y[0, 0]
+        theta = y[1, 0]
+        # outer loop: PID on z
+        error = z_r - z
+        self.z_dot = self.beta * self.z_dot + self.gamma * (z - self.z_prev)
+        if abs(self.z_dot) < 0.07:          # anti-windup
+            self.integrator += P.Ts / 2 * (error + self.error_prev)
+        theta_r = self.kp_z * error + self.ki_z * self.integrator - self.kd_z * self.z_dot
+        theta_r = max(-self.theta_max, min(self.theta_max, theta_r))
+        self.f_state = self.f_state + P.Ts * (-self.f_b * self.f_state + self.f_a * theta_r)
+        theta_r = self.f_state
+        # inner loop: PD on theta
+        self.theta_dot = self.beta * self.theta_dot + self.gamma * (theta - self.theta_prev)
+        F = self.kp_th * (theta_r - theta) - self.kd_th * self.theta_dot
+        self.error_prev = error
+        self.z_prev = z
+        self.theta_prev = theta
+        return max(-P.F_max, min(P.F_max, F))
+`,
+  };
+  const SQUARE = (amplitude, frequency = 0.04) => ({ type: 'square', amplitude, frequency, tStep: 0 });
+  const misText = (m) => Object.entries(m).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}%`).join(', ');
+  // Work mode: the zero-canceling filter is part of the design (B.8(d)), so the
+  // s-plane always uses it there; Explore has the toggle.
+  const filterOn = (ctx) => ctx.S.mode === 'work' || ctx.st.filter;
 
   function innerPoles(ctx, g) {
     const pin = ctx.sys.inner(ctx.pModel);
@@ -95,7 +195,7 @@
     return { kPth: w.kPth, kDth: w.kDth, kPz: w.kPz, kDz: w.kDz, kIz: w.kIz ?? 0, kDC: lib().dcGain(ctx.pModel, w.kPth) };
   }
 
-  function markers(ctx, { withI = false, filter = ctx.st.filter, targets = null } = {}) {
+  function markers(ctx, { withI = false, filter = filterOn(ctx), targets = null } = {}) {
     const p = ctx.pModel, g = ctx.gains, pin = ctx.sys.inner(p), q = qOf(p);
     const explore = ctx.S.mode === 'explore';
     // Work mode: the plant poles and zeros answer B.5(b) and B.5(c).
@@ -137,6 +237,24 @@
     const names = { kPth: 'kPθ', kDth: 'kDθ', kDC: 'kDC', kPz: 'kPz', kDz: 'kDz', kIz: 'kIz' };
     WB.ui.readout(parent, () => keys.map((k) => [names[k], ctx.gains[k]]));
   }
+  // Work mode: the gain sliders only place the inner and outer × in the s-plane
+  // (the problem names the gains); the time plots show the student's own
+  // controller (WB.myCtrl), written in `part`.
+  function workControls(parent, ctx, keys, part, note, page = 'p. 124–127') {
+    const sec = section(parent, keys.includes('kIz') ? 'PID gains (s-plane)' : 'PD gains (s-plane)', page);
+    workSliders(sec, ctx, keys);
+    sec.append(el('p', { class: 'muted small', text: `These place the inner and outer × in the s-plane. They do not drive the simulation.${note ? ' ' + note : ''}` }));
+    WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
+  }
+  // Ch 8: the separation readout, and (Explore) the extra-plot choice. The
+  // student's controller reports no θ_r, so Work mode's extra plot is ż.
+  function sec8Extra(parent, ctx) {
+    separationPanel(parent, ctx);
+    if (ctx.S.mode === 'work') return;
+    const ex = section(parent, 'Extra plot');
+    segmented(ex, { options: [{ value: 'thetaR', label: 'inner loop: θ_r vs θ' }, { value: 'zdot', label: 'ż' }], ...bind(ctx, 'extra') });
+  }
+
   // Inner/outer poles and the separation between them.
   function separationPanel(parent, ctx, { withI = false } = {}) {
     const sec = section(parent, 'Bandwidth separation', 'p. 118 · Fig. 8-11');
@@ -144,7 +262,7 @@
     sec.append(box);
     WB.ui.addRefresher(() => {
       const g = ctx.gains;
-      const pi = pairInfo(innerPoles(ctx, g)), po = pairInfo(outerPoles(ctx, g, ctx.st.filter, withI));
+      const pi = pairInfo(innerPoles(ctx, g)), po = pairInfo(outerPoles(ctx, g, filterOn(ctx), withI));
       const show = WB.ui.shown(ctx, `B:${ctx.S.chapter}:sep`);
       const row = WB.ui.metric;
       box.replaceChildren(...(show ? [
@@ -185,7 +303,7 @@
   }
   function outerCards(ctx, g, { withI = false } = {}) {
     const p = ctx.pModel, q = qOf(p), zf = lib().zcFilter(p, g.kDC, ctx.S.sim.Ts);
-    const op = outerPoles(ctx, g, ctx.st.filter, withI);
+    const op = outerPoles(ctx, g, filterOn(ctx), withI);
     return [
       { title: 'Outer-loop plant (B.5)', page: 'p. 125–126 · Fig. 8-15', answers: 'B.5/c',
         theory: '\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{-\\frac{2\\ell}{3}s^2 + g}{s^2} = -\\frac{2\\ell}{3}\\frac{(s + \\sqrt{3g/2\\ell})(s - \\sqrt{3g/2\\ell})}{s^2}',
@@ -198,7 +316,7 @@
       { title: 'Zero-canceling filter of the pendulum', page: 'p. 126 · Fig. 8-16', answers: 'B.8/d1',
         theory: 'F(s) = \\frac{-\\frac{1}{k_{DC\\theta}}\\frac{3}{2\\ell}}{s + \\sqrt{3g/2\\ell}} \\;\\Rightarrow\\; k_{DC}\\,F(s)\\,\\frac{\\tilde Z}{\\tilde\\Theta} = \\frac{s - \\sqrt{3g/2\\ell}}{s^2}',
         numbers: `F(s) = \\frac{${tex(zf.a)}}{s + ${tex(zf.b)}}`,
-        note: ctx.st.filter ? 'Implemented with one Euler step per sample (zeroCancelingFilter, Listing 8.3).' : 'The filter is off: θ_r is the PD output itself, and the outer loop is third order.' },
+        note: filterOn(ctx) ? 'Implemented with one Euler step per sample (zeroCancelingFilter, Listing 8.3).' : 'The filter is off: θ_r is the PD output itself, and the outer loop is third order.' },
       { title: 'Outer gains of the pendulum', page: 'p. 127 · Eq. 8.12–8.13', answers: 'B.8/d2',
         theory: 'a = \\frac{k_{Pz}}{1 + k_{Dz}} = -\\sqrt{\\tfrac{2\\ell}{3g}}\\,\\omega_{nz}^2,\\quad b = \\frac{k_{Dz}}{1 + k_{Dz}} = \\sqrt{\\tfrac{2\\ell}{3g}}\\big(a - 2\\zeta_z\\omega_{nz}\\big),\\quad k_{Dz} = \\frac{b}{1 - b},\\; k_{Pz} = \\frac{a}{1 - b}',
         numbers: `k_{Pz} = ${tex(g.kPz)},\\quad k_{Dz} = ${tex(g.kDz)}${withI ? `,\\quad k_{Iz} = ${tex(g.kIz)}` : ''},\\quad p_{out} = ${op.map((x) => texPole(x)).join(',\\;')}`,
@@ -206,10 +324,10 @@
     ];
   }
   function fullCard(ctx, g, withI) {
-    const fp = fullPoles(ctx, g, ctx.st.filter, withI);
+    const fp = fullPoles(ctx, g, filterOn(ctx), withI);
     return {
       title: 'Check: full linearized closed loop', page: 'Eq. 6.17 + both loops (not in the book)',
-      theory: '\\text{eig of the 4-state plant with both loops closed}' + (ctx.st.filter ? '\\text{, plus the filter state}' : '') + (withI ? '\\text{ and } x_I' : ''),
+      theory: '\\text{eig of the 4-state plant with both loops closed}' + (filterOn(ctx) ? '\\text{, plus the filter state}' : '') + (withI ? '\\text{ and } x_I' : ''),
       numbers: fp.map((x) => texPole(x)).join(',\\;'), spoiler: true,
       note: 'With good separation these sit close to the inner and outer design poles. Stable here means the linearized loop is stable; saturation and large angles are not modeled.',
     };
@@ -226,6 +344,8 @@
     },
     simDefaults(sys) { return sys.problems.ch8.sim; },
     gains: gainsFor,
+    // Work mode simulates the student's B.8(e) controller, fed the state as in Listing 8.3.
+    implement: { feed: 'state', linear: false },
     controller(ctx, { linear = false } = {}) {
       return lib().slcPD({ g: ctx.gains, p: ctx.pModel, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(ctx.pModel), filter: ctx.st.filter, linear });
     },
@@ -238,16 +358,18 @@
     },
 
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') {
+        workControls(parent, ctx, ['kPth', 'kDth', 'kPz', 'kDz'], 'B.8(e)', 'Dashed rings mark the problem\'s target poles (inner t_r = 0.5 s; outer M = 10).');
+        sec8Extra(parent, ctx);
+        return;
+      }
       const sec = section(parent, 'PD inner loop, PD outer loop', 'p. 124 · Fig. 8-16');
       segmented(sec, {
         label: 'Zero-canceling filter',
         options: [{ value: true, label: 'on (B.8d)' }, { value: false, label: 'off' }],
         ...bind(ctx, 'filter'),
       });
-      if (ctx.S.mode === 'work') {
-        workSliders(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz']);
-        sec.append(el('p', { class: 'muted small', text: 'Dashed rings in the s-plane mark the problem\'s target poles (inner t_r = 0.5 s; outer M = 10).' }));
-      } else {
+      {
         knobSliders(sec, ctx);
         segmented(sec, {
           label: 'Outer gains from',
@@ -260,14 +382,13 @@
         sec.append(el('p', { class: 'muted small', text: 'Drag an inner (blue) pole to set t_r,θ and ζ_θ, or an outer (green) pole to set M and ζ_z.' }));
         readout(sec, ctx, ['kPth', 'kDth', 'kDC', 'kPz', 'kDz']);
       }
-      separationPanel(parent, ctx);
-      const ex = section(parent, 'Extra plot');
-      segmented(ex, { options: [{ value: 'thetaR', label: 'inner loop: θ_r vs θ' }, { value: 'zdot', label: 'ż' }], ...bind(ctx, 'extra') });
+      sec8Extra(parent, ctx);
     },
 
     extraPlot(ctx, res) {
       const k = 180 / Math.PI;
-      if (ctx.st.extra === 'zdot') return { opts: { title: 'ż(t)', yLabel: 'ż [m/s]', unit: 'm/s' }, data: { series: [{ label: 'ż', y: res.x.map((x) => x[2]), color: '--series-1' }] } };
+      // the student's controller reports no θ_r: Work mode plots ż
+      if (ctx.st.extra === 'zdot' || ctx.S.mode === 'work') return { opts: { title: 'ż(t)', yLabel: 'ż [m/s]', unit: 'm/s' }, data: { series: [{ label: 'ż', y: res.x.map((x) => x[2]), color: '--series-1' }] } };
       return {
         opts: { title: 'inner loop: commanded θ_r and θ', yLabel: 'θ [°]', unit: '°' },
         data: { series: [
@@ -340,7 +461,7 @@
         },
         {
           id: 'd1', title: '(d) Low-pass filter and outer closed loop',
-          html: 'Replace the inner loop by its DC gain. Return the low-pass filter F(s) (with gain) that cancels the left-half-plane zero of the B.5 outer plant and the inner DC gain, then the outer closed loop Z̃/R̃<sub>z</sub> and its characteristic polynomial with k<sub>Pz</sub> on the error and k<sub>Dz</sub>s on z. Any nonzero multiple of Δ<sub>cl</sub> is accepted.',
+          html: 'Replace the inner loop by its DC gain and consider the outer loop. Return the low-pass filter F(s) that cancels the left-half-plane zero, then the outer closed loop Z̃/R̃<sub>z</sub> and its characteristic polynomial with k<sub>Pz</sub> on the error and k<sub>Dz</sub>s on z. Any nonzero multiple of Δ<sub>cl</sub> is accepted.',
           code: {
             template: 'def filt(s, k_DC):\n    # zero-canceling filter F(s)\n    return ...\n\ndef z_cl(s, kP, kD):\n    # Z(s)/R_z(s) with the filter\n    return ...\n\ndef char_out(s, kP, kD):\n    # its Delta_cl(s)\n    return ...\n',
             check: pyCheck(ctx, {
@@ -373,20 +494,22 @@
             ];
           },
         },
-        {
-          id: 'e', title: '(e) Implement with |F| ≤ 5 N and balance from θ(0) = 10°',
-          html: 'Uses the current simulation (Work mode gains). Requires θ(0) = 10° (left panel; the chapter default). Passes if the pendulum never passes 45° and both |θ| < 1° and |z − r| < 5 cm at t = 10 s.',
-          check: () => {
-            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
-            if (Math.abs((ctx.S.sim.init.theta0 ?? 0) - 10) > 0.25) return { ok: false, msg: `Set θ(0) = 10° in the left panel (now ${fmt(ctx.S.sim.init.theta0 ?? 0, 3)}°).` };
-            const res = ctx.app.result(), Ts = ctx.S.sim.Ts;
-            const i10 = Math.min(res.t.length - 1, Math.round(10 / Ts));
-            let maxTh = 0; for (const x of res.x) maxTh = Math.max(maxTh, Math.abs(x[1]));
-            const th10 = Math.abs(res.x[i10][1]) / DEG, ez = Math.abs(res.rAll[0][i10] - res.x[i10][0]);
-            const ok = maxTh < 45 * DEG && th10 < 1 && ez < 0.05;
-            return { ok, msg: `max |θ| = ${fmt(maxTh / DEG, 3)}°, at 10 s |θ| = ${fmt(th10, 3)}°, |z − r| = ${fmt(ez, 3)} m (θ(0) = ${fmt(ctx.S.sim.init.theta0, 3)}°).` };
+        WB.myCtrl.part(ctx, {
+          id: 'e', title: '(e) Implement the design with |F| ≤ 5 N; start at θ = 10° and simulate 10 s',
+          html: `Write the controller with the gains from (b) and (d). <code>update</code> gets z<sub>r</sub> and the state x, as in the Ch 8 code; the plant limits the force to F<sub>max</sub> = 5 N. <em>Run my controller</em> drives the time plots; the check starts the rod at θ = 10°, runs the ±0.5 m square wave for 10 s with the nominal and with other parameters, and compares z(t) with the design (within 1 cm).`,
+          check: (code) => {
+            const g = (p) => lib().slcGains(p, { trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaZ: pr.zetaZ, formula: 'book' });
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(0.5), init: { z0: 0, theta0: 10 }, tEnd: 10, feed: 'state' });
+              return { sc, label: pc.label, ref: () => WB.myCtrl.reference(ctx, sc, lib().slcPD({ g: g(sc.params), p: sc.params, Ts: sc.Ts, filter: true })) };
+            });
+            return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.01, what: 'the design' });
           },
-        },
+          solution: () => [
+            { code: SOL.ch8 },
+            { html: 'Listing 8.3 (p. 128–129, the repo\'s ctrlPD.py) with t<sub>r,θ</sub> = 0.5 s and M = 10, and the outer gains from Eqs. 8.12–8.13 (the listing\'s own k<sub>Dz</sub> formula differs: ISSUES.md). θ<sub>r</sub> passes through the zero-canceling filter, integrated with one Euler step per sample.' },
+          ],
+        }),
       ]);
     },
   };
@@ -551,6 +674,8 @@
     },
     simDefaults(sys) { return { ...sys.problems.ch10.sim, mismatch: sys.problems.ch10.mismatch }; },
     gains: gainsFor,
+    // Work mode simulates the student's B.10(c) controller, from the measured z, θ only.
+    implement: { feed: 'y', linear: false },
     controller(ctx, { linear = false } = {}) {
       const st = ctx.st;
       return lib().slcPID({ g: ctx.gains, p: ctx.pModel, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(ctx.pModel), sigma: st.sigma, vbar: st.vbar, gate: st.gate, thetaMax: st.thetaMax * DEG, filter: st.filter, deriv: st.deriv, linear });
@@ -559,9 +684,13 @@
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: ctx.st.trTh * ctx.st.M } : {}; },
 
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') {
+        workControls(parent, ctx, ['kPth', 'kDth', 'kPz', 'kDz', 'kIz'], 'B.10(c)', '', 'p. 163');
+        separationPanel(parent, ctx, { withI: true });
+        return;
+      }
       const sec = section(parent, 'Outer PID, inner PD', 'p. 163 · Listing 10.3');
-      if (ctx.S.mode === 'work') workSliders(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz', 'kIz']);
-      else { knobSliders(sec, ctx, { kI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kDC', 'kPz', 'kDz', 'kIz']); }
+      knobSliders(sec, ctx, { kI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kDC', 'kPz', 'kDz', 'kIz']);
       separationPanel(parent, ctx, { withI: true });
       const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.4, p. 165');
       segmented(imp, { label: 'ż, θ̇ for the D terms', options: [{ value: 'dirty', label: 'dirty derivatives of z, θ' }, { value: 'state', label: 'true ż, θ̇ (cheating)' }], ...bind(ctx, 'deriv') });
@@ -575,6 +704,7 @@
 
     extraPlot(ctx, res) {
       const k = 180 / Math.PI;
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       if (ctx.st.extra === 'int') return { opts: { title: 'integrator ∫(z_r − z) dt', yLabel: '∫e dt [m·s]', unit: 'm·s' }, data: { series: [{ label: 'integrator', y: Array.from(res.extras.integrator || []), color: '--series-1' }] } };
       if (ctx.st.extra === 'zdot') {
         return {
@@ -601,13 +731,13 @@
       const st = ctx.st, Ts = ctx.S.sim.Ts, g = ctx.gains;
       const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       return [
-        { title: 'Outer PID → saturation → filter → inner PD', page: 'p. 164–165 · Listing 10.3',
+        { title: 'Outer PID → saturation → filter → inner PD', page: 'p. 164–165 · Listing 10.3', answers: 'B.10/c',
           theory: '\\theta_r = \\text{sat}_{\\theta_{max}}\\big(k_{Pz}e_z + k_{Iz}\\textstyle\\int e_z - k_{Dz}\\dot{\\hat z}\\big) \\xrightarrow{F(s)} \\theta_r,\\quad F = k_{P\\theta}(\\theta_r - \\theta) - k_{D\\theta}\\dot{\\hat\\theta}' },
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)',
-          numbers: `\\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}`, spoiler: true },
-        { title: 'Anti-windup', page: 'p. 157 · §10.1.1, p. 165',
-          theory: '\\text{integrate only while } |\\dot{\\hat z}| < \\bar v = 0.07\\ \\text{m/s}' },
+          numbers: `\\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}`, spoiler: true, answers: 'B.10/c' },
+        { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
+          theory: '\\text{(1) integrate only when } |\\dot y| < \\bar v,\\quad \\text{(2) } u_I^+ = u_I + \\frac{1}{k_I}\\big(u_{sat} - u_{unsat}\\big)' },
         ...innerCards(ctx, g).slice(3), outerCards(ctx, g, { withI: true })[4],
         { title: 'Stability and the coefficients', page: 'p. 164',
           theory: '\\text{a stable polynomial has all its coefficients of one sign}' },
@@ -633,7 +763,7 @@
         },
         {
           id: 'b', title: '(b) The controller knows only z, θ and r<sub>z</sub>',
-          html: 'The PID here gets only the (noisy) measurements z, θ and the reference; ż and θ̇ come from dirty derivatives (c). In your PID controller, <code>update(r, y)</code> receives y, not the state.',
+          html: 'From here on your controller\'s <code>update(z_r, y)</code> receives the noisy measurements y = [[z], [θ]] and the reference, not the state.',
         },
         {
           id: 'c1', title: `(c) Gains for the listing's t<sub>r,θ</sub> = ${pr.trTh} s, ζ<sub>θ</sub> = ${pr.zetaTh}, M = ${pr.M}, ζ<sub>z</sub> = ${pr.zetaZ}`,
@@ -642,26 +772,28 @@
           actions: [WB.design.useGains(ctx, ['kPth', 'kDth', 'kPz', 'kDz'])],
           solution: () => { const r = ref(); return [{ tex: `k_{P\\theta} = ${tex(r.kPth)},\\; k_{D\\theta} = ${tex(r.kDth)},\\; k_{DC} = ${tex(r.kDC)},\\; k_{Pz} = ${tex(r.kPz)},\\; k_{Dz} = ${tex(r.kDz)}` }, { html: 'Listing 10.3 (p. 163–164). B.10 says "use B.8", but the listing changes t<sub>r,θ</sub> from 0.5 to 0.2 s and fixes M = 10.' }]; },
         },
-        {
-          id: 'c2', title: '(c) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
-          inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
-          check: (v) => PD().checkNumbers(v, { a: 0.09 / 0.11, b: 2 / 0.11 }, {}),
-          solution: () => [{ tex: '\\frac{0.09}{0.11} = 0.8182,\\quad \\frac{2}{0.11} = 18.18' }],
-        },
-        {
-          id: 'c3', title: '(c) Tune k<sub>Iz</sub> to remove the steady-state error',
-          html: 'Checks the current simulation with the plant mismatch in the left panel: |z − r| just before the second reference switch must be under 1 cm.',
-          check: () => {
-            const res = ctx.app.result(), S = ctx.S;
-            const tSw = WB.sim.switchTime(S, 2);
-            const i = WB.sim.indexBefore(S, res, tSw);
-            const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]);
-            const msg = `|z − r| = ${fmt(e * 100, 3)} cm at t = ${fmt(res.t[i], 4)} s (kIz = ${fmt(ctx.gains.kIz, 3)}).`;
-            if (!(Math.abs(ctx.gains.kIz) > 0)) return { ok: false, msg: 'kIz = 0. ' + msg };
-            return { ok: e < 0.01, msg };
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Implement the nested PID loops with σ = 0.05; tune the integrator', seed: 'B.8/e',
+          html: `Start from your B.8 controller. <code>update(z_r, y)</code> now gets the noisy measurements y = [[z], [θ]], not the state. The check (1) holds the error constant (z<sub>r</sub> = 0.1 m, y = 0) for 6 s, where an integrator must keep changing F, then (2) runs the ±0.5 m square wave on a plant that differs from the model by ${misText(pr.mismatch)}: |z − z<sub>r</sub>| just before the second switch (t = 25 s) must be under 1 cm.`,
+          check: async (code) => {
+            const pb = await WB.myCtrl.probe(ctx, code, Array.from({ length: 601 }, () => [0.1, [0, 0]]));
+            if (pb.ok === false) return pb;
+            const dF = Math.abs(pb.u[600][0] - pb.u[300][0]);
+            if (!(dF > 1e-3)) return { ok: false, msg: `With a constant 0.1 m error your F changes by only ${fmt(dF, 3)} N between t = 3 s and 6 s, so nothing integrates the error. B.10(c) asks you to add and tune an integrator.` };
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(0.5), tEnd: 25, mismatch: pr.mismatch });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const k = Math.round(24.95 / sc.Ts);
+            const e = Math.abs(res.rAll[0][k] - res.yAll[0][k]);
+            let maxTh = 0; for (const x of res.x) maxTh = Math.max(maxTh, Math.abs(x[1]));
+            if (!(maxTh < 45 * DEG)) return { ok: false, msg: `The rod reaches |θ| = ${fmt(maxTh / DEG, 3)}°: the loops don't hold it up.` };
+            return { ok: e < 0.01, msg: `|z − z_r| = ${fmt(e * 100, 3)} cm just before the second switch; max |θ| = ${fmt(maxTh / DEG, 3)}°.` };
           },
-          solution: () => [{ html: `The listing uses k<sub>Iz</sub> = ${pr.ki} (p. 163). It must be negative, like k<sub>Pz</sub> and k<sub>Dz</sub>: see the last math card, and App. P.6 for the locus.` }],
-        },
+          solution: () => [
+            { code: SOL.ch10 },
+            { html: `Listing 10.3 (p. 163–165, the repo's ctrlPID.py): t<sub>r,θ</sub> = ${pr.trTh} s, M = ${pr.M}, k<sub>Iz</sub> = ${pr.ki} (negative, like k<sub>Pz</sub> and k<sub>Dz</sub>; see App. P.6), dirty derivatives with σ = ${pr.sigma}, the integrator gated on |ż| < ${pr.vbar} m/s, and θ<sub>r</sub> saturated at ${pr.thetaMax}° before the filter. With the filter the PD loops alone already settle on a step (ISSUES.md); the integrator removes the error a constant force would leave.` },
+          ],
+        }),
       ]);
     },
   };

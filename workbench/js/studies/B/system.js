@@ -192,6 +192,23 @@ WB.studies.B = WB.studies.B || { chapters: {} };
 
     inner, outerTf, linearize, linearEOM, stateSpace, kinetic, potential, draw,
 
+    // The plant for student controllers (WB.myCtrl), as Python: f(state, F) written
+    // exactly as f above (same LU inverse, so the two agree to rounding) and the
+    // measured outputs h(state) = [z, θ]. Python names for the controller template.
+    plantPy: 'def f(state, F):\n    theta = state[1][0]\n    zdot = state[2][0]\n    thetadot = state[3][0]\n    c = np.cos(theta)\n    s = np.sin(theta)\n'
+      + '    M00 = P.m1 + P.m2\n    M01 = P.m1 * (P.ell / 2.0) * c\n    M11 = P.m1 * (P.ell**2 / 3.0)\n'
+      + '    C0 = P.m1 * (P.ell / 2.0) * thetadot**2 * s + F - P.b * zdot\n    C1 = P.m1 * P.g * (P.ell / 2.0) * s\n'
+      + '    l = M01 * (1 / M00)\n    u11 = M11 - l * M01\n    i11 = 1 / u11\n    i10 = -l / u11\n    i01 = (0 - M01 * i11) / M00\n    i00 = (1 - M01 * i10) / M00\n'
+      + '    return np.array([[zdot], [thetadot], [i00 * C0 + i01 * C1], [i10 * C0 + i11 * C1]])\n\n'
+      + 'def h(state):\n    return [state[0][0], state[1][0]]\n',
+    py: { r: 'z_r', y: ['z', 'theta'], x: ['z', 'theta', 'zdot', 'thetadot'], u: 'F' },
+    // A second parameter set for controller checks (gains must come from P, not
+    // numbers): every uncertain parameter moves by 25-60%, and the B.8-B.12 designs
+    // still balance the rod within F_max.
+    altParams(p) { return { ...p, m1: p.m1 * 1.4, m2: p.m2 * 0.75, ell: p.ell * 0.7, b: p.b * 1.6 }; },
+    // Entries of P beyond the parameters (as in pendulumParam.py): the initial state.
+    pyParams(x0) { return { z0: x0[0], theta0: x0[1], zdot0: x0[2], thetadot0: x0[3] }; },
+
     // Problem data for the chapter modules. Statements are paraphrased; page
     // numbers are controlbook.pdf pages (book page + 8).
     problems: {

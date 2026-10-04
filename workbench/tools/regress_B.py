@@ -45,6 +45,7 @@ function run(name, controller, {dist = 0, ptrue = p, x0 = [0, 0, 0, 0]} = {}) {
   out.runs[name] = KS.map((k) => [res.yAll[0][k], res.yAll[1][k], res.u[k], (res.extras.zhat || [])[k] || 0, (res.extras.thhat || [])[k] || 0, (res.extras.dhat || [])[k] || 0]);
 }
 out.f = %(XS)s.map((x) => sys.f(x, 1.7, p));
+out.plantPy = sys.plantPy;   // the plant student controllers run against (WB.myCtrl)
 // Ch 8: ctrlPD as written (Listing 8.3), and with the book's outer gains (Eqs. 8.12-8.13)
 const x0pd = [0, %(TH0)s * Math.PI / 180, 0, 0];
 for (const formula of ['listing', 'book']) {
@@ -199,6 +200,13 @@ def main():
     worst = 0.0
     print("dynamics f(x, u)       max |py - js| = %.3e" % maxdiff(py["f"], js["f"]))
     worst = max(worst, maxdiff(py["f"], js["f"]))
+    # sys.plantPy (Python source of the same f) against the repo's pendulumDynamics.f
+    import types
+    pns = {"np": np, "P": types.SimpleNamespace(m1=0.25, m2=1.0, ell=1.0, b=0.05, F_max=5.0, g=9.8)}
+    exec(js["plantPy"], pns)
+    fpy = [np.asarray(pns["f"](np.array(x, dtype=float).reshape(4, 1), 1.7), dtype=float).ravel().tolist() for x in XS]
+    print("plantPy f(x, u)        max |py - js| = %.3e" % maxdiff(py["f"], fpy))
+    worst = max(worst, maxdiff(py["f"], fpy))
     print("gains (relative error)")
     for k in ["pd_listing", "pd_book", "pid", "sf", "sfi", "obs", "dobs", "L", "L2"]:
         pv = np.asarray([v for v in np.ravel(py["gains"][k]) if v is not None], dtype=float)
