@@ -377,7 +377,8 @@ class Controller:
     // Work mode has no gains: the plots run the student's own controller.
     if (explore) closedLoopPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `controller pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 0 : 2) : undefined }));
     if (explore) observerPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 10 : 12) : undefined }));
-    if (!explore && ctx.app.isSolved(targetsKey(ctx))) {
+    // Ch 12-14's poles are the student's tuning (the book gives no values): no targets there.
+    if (!explore && ctx.level === 'sf' && ctx.app.isSolved(targetsKey(ctx))) {
       const d = design(ctx);
       for (const p of d.poles) mk.push({ ...p, kind: 'target', label: 'target pole (problem)' });
     }
@@ -421,13 +422,15 @@ class Controller:
       numbers: nums.join(',\\quad '), spoiler: true,
     };
   }
+  // Ch 12-14's poles are the student's tuning, so Work mode shows only the book's rule there.
   function polesCard(ctx, d) {
     const st = ctx.st;
     const wn = wnOf(st);
+    const mine = ctx.S.mode === 'work' && ctx.level !== 'sf';
     return {
       title: 'Desired closed-loop poles', page: 'p. 113 · Eq. 8.5, p. 184', answers: targetsKey(ctx),
-      theory: (st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}') + ',\\quad \\Delta^d_{cl} = (s^2 + 2\\zeta\\omega_n s + \\omega_n^2)' + (ctx.level === 'sf' ? '' : '(s - p_I)'),
-      numbers: `\\omega_n = ${tex(wn)},\\quad \\Delta^d_{cl} = ${WB.tf.polyTex(L.polyFromRoots(d.poles))},\\quad p = ${d.poles.map((p) => texPole(p)).join(',\\;')}`,
+      theory: (st.rule === 'tp' && !mine ? '\\omega_n = \\frac{\\pi}{2t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}') + ',\\quad \\Delta^d_{cl} = (s^2 + 2\\zeta\\omega_n s + \\omega_n^2)' + (ctx.level === 'sf' ? '' : '(s - p_I)'),
+      numbers: mine ? null : `\\omega_n = ${tex(wn)},\\quad \\Delta^d_{cl} = ${WB.tf.polyTex(L.polyFromRoots(d.poles))},\\quad p = ${d.poles.map((p) => texPole(p)).join(',\\;')}`,
       spoiler: true,
     };
   }
@@ -441,10 +444,14 @@ class Controller:
       // Work mode simulates the student's controller (WB.myCtrl), from y only.
       implement: { feed: 'y', linear: false },
       gains(ctx) { ctx.level = level; return gainsFor(ctx); },
-      splane(ctx) { return { markers: markers(ctx), zetaRay: ctx.st.zeta < 1 ? ctx.st.zeta : null }; },
+      // Work mode shows a ζ ray and rise-time target only where the book gives them (Ch 11).
+      splane(ctx) { return { markers: markers(ctx), zetaRay: ctx.st.zeta < 1 && (level === 'sf' || ctx.S.mode !== 'work') ? ctx.st.zeta : null }; },
       onPoleDrag: onDrag,
       // The 2nd-order overshoot formula only applies without integrator/observer poles.
-      targets(ctx) { return level === 'sf' ? { tr: ctx.st.tr, zeta: ctx.st.zeta } : { tr: ctx.st.tr }; },
+      targets(ctx) {
+        if (level === 'sf') return { tr: ctx.st.tr, zeta: ctx.st.zeta };
+        return ctx.S.mode === 'work' ? {} : { tr: ctx.st.tr };
+      },
     }, extra);
   }
 
@@ -468,6 +475,31 @@ class Controller:
 
   // A.12(a) windup test: τ_max lowered so a large step saturates for seconds.
   const WINDUP = { tauMax: 0.76, step: 60, os: 5 };
+  // A.12(a) integrator test: a constant input disturbance [N·m] the integrator must remove.
+  const INTEG = { d: 0.25 };
+  const SOL_A12A = String.raw`import control as cnt
+
+def gains(p_I):
+    tr, zeta = 0.489, 0.707          # A.11
+    J = P.m * P.ell**2
+    A = np.array([[0.0, 1.0], [0.0, -3 * P.b / J]])
+    B = np.array([[0.0], [3 / J]])
+    C = np.array([[1.0, 0.0]])
+    A1 = np.block([[A, np.zeros((2, 1))], [-C, np.zeros((1, 1))]])
+    B1 = np.vstack([B, [[0.0]]])
+    wn = 2.2 / tr
+    K1 = cnt.place(A1, B1, np.roots(np.convolve([1, 2 * zeta * wn, wn**2], [1, -p_I])))
+    return K1[0, 0], K1[0, 1], K1[0, 2]
+`;
+  const SOL_A13C = String.raw`import control as cnt
+
+def L_obs(wn_obs, zeta_obs):
+    J = P.m * P.ell**2
+    A = np.array([[0.0, 1.0], [0.0, -3 * P.b / J]])
+    C = np.array([[1.0, 0.0]])
+    L = cnt.place(A.T, C.T, np.roots([1, 2 * zeta_obs * wn_obs, wn_obs**2])).T
+    return L[0, 0], L[1, 0]
+`;
   const SQUARE = (amplitude) => ({ type: 'square', amplitude, frequency: 0.05, tStep: 0 });
   const errAt = (res, t) => { const k = Math.round(t / (res.t[1] - res.t[0])); return Math.abs(res.r[k] - res.y[k]) / M.DEG; };
   // The student's estimate must come back from update as (u, x_hat).
@@ -617,41 +649,47 @@ class Controller:
         polesCard(ctx, d),
         { title: 'Gains', page: 'p. 199–201', answers: PD().partKey(ctx, 'ch12', 'a'),
           theory: 'K_1 = \\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I\\int_0^t (r - y)\\,d\\tau',
-          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
+          numbers: ctx.S.mode === 'work' ? null : `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
       ];
     },
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch12;
-      const ref = () => design(ctx, { ...ctx.st, tr: prob.tr, zeta: prob.zeta, pI: prob.pI, rule: '2.2' }, 'sfi');
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: `(a) Gains with t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}, p<sub>I</sub> = ${prob.pI}`,
-          inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', ki: 'k<sub>I</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], ki: r.ki }, {}); },
-          solution: () => {
-            const r = ref();
-            return [
-              { tex: `K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` },
-              { html: 'The book\'s printed numbers (p. 204–205: K = (1.0370, 0.1817), k<sub>I</sub> = −2.2687) correspond to t<sub>r</sub> = 0.4, not the 0.489 in its own listing and the repo, and use a<sub>A1</sub> = 0.6174 where A gives 0.667.' },
-            ];
+          id: 'a', title: '(a) Gains for the A.11 poles plus an integrator pole p<sub>I</sub>',
+          html: `Keep the A.11 poles (t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}) and add an integrator pole p<sub>I</sub> &lt; 0 of your choice. Write K<sub>1</sub>, K<sub>2</sub> and k<sub>I</sub> as a function of p<sub>I</sub>; the check calls it at random p<sub>I</sub>.`,
+          code: {
+            template: 'def gains(p_I):\n    # returns K1, K2, kI\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { pI: { label: 'p_I', lo: -15, hi: -1 } },
+              items: [{ fn: 'gains', args: ['pI'], label: 'gains(p_I)', truth: (p, a) => {
+                const sub = { ...ctx, ss: ctx.sys.stateSpace(p) };
+                const r = design(sub, { ...ctx.st, tr: prob.tr, zeta: prob.zeta, pI: a.pI, rule: '2.2' }, 'sfi');
+                return [r.K[0], r.K[1], r.ki];
+              } }],
+            }, code),
           },
+          solution: () => [
+            { code: SOL_A12A },
+            { html: 'The book\'s printed numbers (p. 204–205: K = (1.0370, 0.1817), k<sub>I</sub> = −2.2687) correspond to t<sub>r</sub> = 0.4, not the 0.489 in its own listing and the repo, and use a<sub>A1</sub> = 0.6174 where A gives 0.667. The repo uses p<sub>I</sub> = −5.' },
+          ],
         },
         WB.myCtrl.part(ctx, {
           id: 'a2', title: '(a) Add the integrator with anti-windup to your A.11 controller', seed: `${ctx.sys.problems.ch11.id}/e`,
-          html: `Use the gains from above. The check (1) runs a ±10° square wave with the nominal and with other parameters and compares θ(t) with the design (within 3%), then (2) lowers τ<sub>max</sub> to ${WINDUP.tauMax} N·m and steps θ<sub>r</sub> to ${WINDUP.step}°, so τ saturates for seconds: θ may overshoot by at most ${WINDUP.os}°.`,
+          html: `Use your gains from above. The check (1) adds d = ${INTEG.d} N·m with the nominal and with other parameters: on the ±10° square wave the error just before the first switch must be under 0.1°, so the integrator removes the disturbance. Then (2) it lowers τ<sub>max</sub> to ${WINDUP.tauMax} N·m and steps θ<sub>r</sub> to ${WINDUP.step}°, so τ saturates for seconds: θ may overshoot by at most ${WINDUP.os}°.`,
           check: async (code) => {
-            const tune = { tr: prob.tr, zeta: prob.zeta, pI: prob.pI, rule: '2.2' };
-            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
-              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(10), tEnd: 20 });
-              return { sc, label: pc.label, ref: () => refRun(ctx, sc, 'sfi', tune) };
-            });
-            const m = await WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * 10 * M.DEG });
-            if (!m.ok) return m;
+            for (const pc of WB.myCtrl.paramCases(ctx)) {
+              const r = await WB.myCtrl.run(ctx, code, WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(10), tEnd: 10, dist: INTEG.d }));
+              if (r.ok === false) return r;
+              const e = errAt(r, 9.95);
+              if (!(e < 0.1)) return { ok: false, msg: `With d = ${INTEG.d} N·m (${pc.label}) the error before the switch is ${fmt(e, 3)}°: the integrator should remove a constant disturbance${pc.params === ctx.pModel ? '' : ' (compute the gains from P.m, P.ell, P.b)'}.` };
+            }
+            const m = { msg: `The integrator removes d = ${INTEG.d} N·m (nominal and other parameters).` };
             const sc = WB.myCtrl.scenario(ctx, { params: { ...ctx.pModel, tau_max: WINDUP.tauMax }, ref: { type: 'step', amplitude: WINDUP.step, tStep: 0 }, tEnd: 15 });
             const res = await WB.myCtrl.run(ctx, code, sc);
             if (res.ok === false) return res;
             const os = Math.max(...res.y) / M.DEG - WINDUP.step;
-            if (!(os <= WINDUP.os)) return { ok: false, msg: `Tracking matches, but with τ_max = ${WINDUP.tauMax} N·m the ${WINDUP.step}° step overshoots by ${fmt(os, 3)}°: the integrator winds up while τ is saturated.` };
+            if (!(os <= WINDUP.os)) return { ok: false, msg: `The integrator works, but with τ_max = ${WINDUP.tauMax} N·m the ${WINDUP.step}° step overshoots by ${fmt(os, 3)}°: the integrator winds up while τ is saturated.` };
             return { ok: true, msg: `${m.msg} Saturated ${WINDUP.step}° step: overshoot ${fmt(Math.max(0, os), 3)}°.` };
           },
           solution: () => [{ code: SOL.ch12 }, { html: 'Anti-windup here holds the integrator while τ is saturated. Integrating only while |θ̇| is small (Listing 10.2) or unwinding by (τ<sub>sat</sub> − τ<sub>unsat</sub>)/k<sub>I</sub> pass too. The repo\'s ctrlStateFeedbackIntegrator.py has none.' }],
@@ -720,7 +758,7 @@ class Controller:
           numbers: `\\mathcal{O} = ${texMat(O)},\\quad \\operatorname{rank} = ${L.rank(O)}`, spoiler: true },
         { title: 'Observer gain', page: 'p. 221 · Eq. 13.16, p. 222', answers: PD().partKey(ctx, 'ch13', 'c'),
           theory: 'L = \\mathcal{O}_{A,C}^{-1}\\mathcal{A}_A^{-T}(\\beta - a_A)^\\top = \\text{place}(A^\\top, C^\\top, q)^\\top',
-          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, spoiler: true },
+          numbers: ctx.S.mode === 'work' ? null : `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)}`, spoiler: true },
         { title: 'Separation principle', page: 'p. 223–224',
           theory: '\\begin{bmatrix}\\dot x\\\\ \\dot e\\end{bmatrix} = \\begin{bmatrix}A - BK & BK\\\\ 0 & A - LC\\end{bmatrix}\\begin{bmatrix}x\\\\ e\\end{bmatrix} \\Rightarrow \\text{eig} = \\text{eig}(A - BK) \\cup \\text{eig}(A - LC)',
           note: 'Holds for the linear model only. Saturation, mismatch and the nonlinear τ_fl break it (p. 224).' },
@@ -729,7 +767,6 @@ class Controller:
     },
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch13;
-      const ref = () => design(ctx, { ...ctx.st, tr: prob.tr, zeta: prob.zeta, pI: prob.pI, rule: '2.2', wnObs: 2.2 / (prob.tr / prob.trObsFactor), zetaObs: prob.zetaObs }, 'obs');
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Exact parameters, no disturbance',
@@ -742,11 +779,19 @@ class Controller:
           solution: () => [{ tex: `\\mathcal{O}_{A,C} = ${texMat(L.obsv(ctx.ss.A, ctx.ss.C))} \\Rightarrow \\text{rank } 2` }],
         },
         {
-          id: 'c', title: `(c) Observer gain for ω<sub>n,obs</sub> = 2.2/(t<sub>r</sub>/${prob.trObsFactor}), ζ<sub>obs</sub> = ${prob.zetaObs} (t<sub>r</sub> = ${prob.tr})`,
-          html: 'The repo\'s tuning: observer 10× faster than the controller.',
-          inputs: { L1: 'L<sub>1</sub>', L2: 'L<sub>2</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { L1: r.L[0], L2: r.L[1] }, {}); },
-          solution: () => { const r = ref(); return [{ tex: `L = ${texMat(r.L)},\\quad K = ${texMat([r.K])},\\; k_I = ${tex(r.ki)}` }]; },
+          id: 'c', title: '(c) Observer gain L for observer poles set by ω<sub>n,obs</sub>, ζ<sub>obs</sub>',
+          html: 'You choose the observer poles (Δ<sub>obs</sub> = s² + 2ζ<sub>obs</sub>ω<sub>n,obs</sub>s + ω<sub>n,obs</sub>²). Write L<sub>1</sub>, L<sub>2</sub> as a function of ω<sub>n,obs</sub> and ζ<sub>obs</sub>; the check calls it at random values.',
+          code: {
+            template: 'def L_obs(wn_obs, zeta_obs):\n    # returns L1, L2\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { wn: { label: 'wn_obs', lo: 5, hi: 100 }, zeta: { label: 'zeta_obs', lo: 0.4, hi: 0.95 } },
+              items: [{ fn: 'L_obs', args: ['wn', 'zeta'], label: 'L_obs', truth: (p, a) => {
+                const { A, C } = ctx.sys.stateSpace(p);
+                return WB.design.observerGain(A, C, PD().polesFromWnZeta(a.wn, a.zeta)).map((r) => r[0]);
+              } }],
+            }, code),
+          },
+          solution: () => [{ code: SOL_A13C }, { html: `The repo's ctrlObserver.py makes the observer 10× faster than its controller: ω<sub>n,obs</sub> = 2.2/(t<sub>r</sub>/${prob.trObsFactor}), ζ<sub>obs</sub> = ${prob.zetaObs} with t<sub>r</sub> = ${prob.tr}.` }],
         },
         WB.myCtrl.part(ctx, {
           id: 'c2', title: '(c) Add the observer and use x̂ in your A.12 controller; tune', seed: [`${ctx.sys.problems.ch12.id}/c`, `${ctx.sys.problems.ch12.id}/a2`],
@@ -833,7 +878,7 @@ class Controller:
           theory: '\\dot{\\hat x} = A\\hat x + B(u + \\hat d) + L(y - C\\hat x),\\quad \\dot{\\hat d} = L_d(y - C\\hat x),\\quad u = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
         { title: 'Observer gains', page: 'p. 241', answers: PD().partKey(ctx, 'ch14', 'b'),
           theory: '\\begin{bmatrix}L\\\\ L_d\\end{bmatrix} = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
-          numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, spoiler: true,
+          numbers: ctx.S.mode === 'work' ? null : `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, spoiler: true,
           note: 'The A.14 solution\'s observer (|q| ≈ 5.5–10) is slower than its controller (ω_n ≈ 12.6), the opposite of the usual "observer 5–10× faster" rule.' },
         polesCard(ctx, d),
       ];
