@@ -176,17 +176,22 @@ def f(state, u):
       const hr = s.rAll && s.rAll.length > 0 ? s.rAll[0] : NaN;
       const zr = s.rAll && s.rAll.length > 1 && isFinite(s.rAll[1]) ? s.rAll[1] : 0;
       const ghost = isFinite(hr);
-      // world window: 8 m wide (wider if the VTOL and z_r are far apart), centered
-      // between the vehicle and the target so the vehicle stays large and in view
-      const xs = [z, zr], ys = ghost ? [alt, hr] : [alt];
-      const maxX = Math.max(...xs), minX = Math.min(...xs);
-      const span = Math.max(8, maxX - minX + 3);
-      const sc = w / span;
-      const visH = h / sc;
+      // world window: fit the vehicle (drawn 2.5x, with its force arrows), the target
+      // and the ghost in BOTH directions, at least 6 m x 3 m, so the vehicle is always
+      // in view whatever the panel's aspect ratio; extra height goes above the ground
+      const fin = (v, d) => (isFinite(v) ? v : d);
+      const zv = fin(z, 0), av = fin(alt, 0);
+      const R = 1.3;                                         // vehicle half-extent incl. arrows
+      const xs = [zv - R, zv + R, zr - 0.5, zr + 0.5];
+      const ys = [av - R, av + R];
+      if (ghost) { xs.push(zr + 1.2); ys.push(hr + 0.4); }   // room for the "(z_r, h_r)" label
+      if (Math.abs(av) < 20) ys.push(-0.4);                  // ground in view unless far off
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const sc = Math.min(w / Math.max(6, maxX - minX), h / Math.max(3, maxY - minY));
+      const span = w / sc, visH = h / sc;
       const x0 = (maxX + minX) / 2 - span / 2;
-      const maxY = Math.max(...ys), minY = Math.min(...ys);
-      let y0 = Math.min(0, minY) - 1.1;                       // ground in view when possible
-      if (maxY > y0 + visH - 0.8) y0 = maxY - visH + 0.8;
+      const y0 = minY - 0.15 * (visH - (maxY - minY));        // a little of the slack below
       const P = (wx, wy) => [(wx - x0) * sc, h - (wy - y0) * sc];
 
       // ground and 1 m ticks
