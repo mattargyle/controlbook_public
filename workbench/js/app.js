@@ -605,6 +605,7 @@ window.WB = window.WB || {};
     }
   }
 
+  let modeCtl = null;
   function buildHeader() {
     const study = document.getElementById('study');
     study.replaceChildren(...['A', 'B', 'C', 'D', 'E', 'F'].map((id) => {
@@ -616,8 +617,8 @@ window.WB = window.WB || {};
     study.value = S.sysId;
     study.addEventListener('change', () => { S = freshState(study.value, S.chapter); rebuild(); });
 
-    const mode = document.getElementById('mode');
-    segmented(mode, {
+    // Built once, so it is refreshed in buildHeaderState (rebuild() clears refreshers).
+    modeCtl = segmented(document.getElementById('mode'), {
       options: [
         { value: 'work', label: 'Work it', title: 'Set the gains yourself; derivations stay hidden until revealed' },
         { value: 'explore', label: 'Explore', title: 'Design from poles or specs; all math shown' },
@@ -653,6 +654,7 @@ window.WB = window.WB || {};
     document.getElementById('chapter-title').textContent = `${ch.tab} · ${ch.title}`;
     document.getElementById('chapter-pages').replaceChildren(document.createTextNode('controlbook.pdf '), ...WB.ui.linkPages(ch.pages || ''));
     document.body.dataset.mode = S.mode;
+    if (modeCtl) modeCtl.refresh();
   }
 
   const app = {
