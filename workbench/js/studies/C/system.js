@@ -128,7 +128,7 @@ WB.studies.C = WB.studies.C || { chapters: {} };
         sim: { tEnd: 20, tStep: 0, amplitude: 0 },
         statement: [
           '(a) Using the configuration variables θ and φ, write an expression for the kinetic energy of the system.',
-          '(b) Write a class that animates the satellite and display sinusoidal variations of q = (θ, φ)ᵀ.',
+          '(b) Referring to Appendices P.1–P.3, write a Python or Matlab class (or a Matlab function) that creates an animation of the satellite. Simulate the animation to display sinusoidal variations on the configuration variables q = (θ, φ)ᵀ.',
         ],
       },
       ch3: {
@@ -140,30 +140,30 @@ WB.studies.C = WB.studies.C || { chapters: {} };
           '(b) Define the generalized coordinates.',
           '(c) Find the generalized forces and damping forces.',
           '(d) Derive the equations of motion with the Euler-Lagrange equations.',
-          '(e) Implement the equations of motion and simulate with a variable torque on the body as the input.',
+          '(e) Referring to Appendices P.1–P.3, write a class or s-function that implements the equations of motion. Simulate the system using a variable torque on the body as an input. The output should connect to the animation function developed in homework C.2.',
         ],
       },
       ch4: {
         id: 'C.4', page: 67,
         sim: { tEnd: 60, tStep: 0, amplitude: 0, y0: 20, init: { phi0: -10 } },
-        statement: ['(a) Find the equilibria of the system.'],
+        statement: ['For the satellite system:', '(a) Find the equilibria of the system.'],
       },
       ch5: {
         id: 'C.5', page: 77,
         sim: { tEnd: 40, tStep: 0, amplitude: 0 },
         statement: [
-          '(a) Take the Laplace transform of the linearized equations of motion.',
-          '(b) Find the full transfer matrix from τ(s) to Θ(s) and Φ(s).',
+          '(a) Start with the linearized equations for the satellite attitude problem and use the Laplace transform to convert the equations of motion to the s-domain.',
+          '(b) Find the full transfer matrix from the input τ(s) to the outputs Φ(s) and Θ(s).',
           '(c) From the transfer matrix, find the second-order transfer function from Θ(s) to Φ(s).',
-          '(d) Assuming (J<sub>s</sub> + J<sub>p</sub>)/J<sub>s</sub> ≈ 1, find a second-order approximation of the transfer function from τ(s) to Θ(s).',
-          '(e) Form the approximate cascade of the two transfer functions and justify why it makes sense physically.',
+          '(d) Under the assumption that the panel moment of inertia J<sub>p</sub> is significantly smaller than the spacecraft moment of inertia J<sub>s</sub> (specifically, (J<sub>s</sub> + J<sub>p</sub>)/J<sub>s</sub> ≈ 1), find the second-order approximation for the transfer function from τ(s) to Θ(s).',
+          '(e) From your results on parts (c) and (d), form the approximate transfer function cascade for the satellite/panel system and justify why it makes sense physically.',
         ],
       },
       ch6: {
         id: 'C.6', page: 91,
         sim: { tEnd: 40, tStep: 0, amplitude: 0 },
         statement: [
-          'A star tracker measures θ and a strain gauge approximates φ − θ. With x = (θ, φ, θ̇, φ̇)ᵀ, u = τ and measured output y = (θ, φ − θ)ᵀ, find A, B, C, D of the linear state-space model.',
+          'Suppose that a star tracker is used to measure θ and a strain gauge is used to approximate φ − θ. Defining the states as x = (θ, φ, θ̇, φ̇)ᵀ, the input as u = τ, and the measured output as y = (θ, φ − θ)ᵀ, find the linear state space equations in the form ẋ = Ax + Bu, y = Cx + Du.',
         ],
       },
       ch8: {
@@ -185,8 +185,8 @@ WB.studies.C = WB.studies.C || { chapters: {} };
         id: 'C.9', page: 150,
         sim: { type: 'step', amplitude: 10, tStep: 0, tEnd: 120, dist: 0, tDist: 60 },
         statement: [
-          '(a) With PD control on the inner loop, what is its system type with respect to the reference and to an input disturbance? Characterize the steady-state error for steps, ramps and parabolas in each.',
-          '(b) With PD control on the outer loop, answer the same questions. How does this change if you add an integrator?',
+          '(a) When the inner loop controller is PD control, what is the system type of the inner loop with respect to the reference input and with respect to the disturbance input? Characterize the steady-state error when the reference input is a step, a ramp, and a parabola, and when the input disturbance is a step, a ramp, and a parabola.',
+          '(b) With PD control for the outer loop, what is the system type of the outer loop with respect to the reference input and with respect to the disturbance input? Characterize the steady-state error when the reference input and disturbance input is a step, a ramp, and a parabola. How does this change if you add an integrator?',
         ],
       },
       p6: {
@@ -212,8 +212,8 @@ WB.studies.C = WB.studies.C || { chapters: {} };
         trTh: 2.0, zetaTh: 0.9, M: 3, zetaPhi: 0.9, rule: 'tp',
         sim: { type: 'square', amplitude: 15, frequency: 0.04, tStep: 0, tEnd: 30 },
         statement: [
-          '(a) From ω<sub>n<sub>φ</sub></sub>, ζ<sub>φ</sub>, ω<sub>n<sub>θ</sub></sub>, ζ<sub>θ</sub> (C.8), find the desired closed-loop poles.',
-          '(b) Add A, B, C, D from C.6.',
+          '(a) Using the values for ω<sub>n<sub>φ</sub></sub>, ζ<sub>φ</sub>, ω<sub>n<sub>θ</sub></sub> and ζ<sub>θ</sub> selected in Homework C.8, find the desired closed-loop poles.',
+          '(b) Add the state space matrices A, B, C, D derived in Homework C.6 to your param file.',
           '(c) Check controllability: rank(𝒞<sub>A,B</sub>) = n.',
           '(d) Find K so eig(A − BK) are the desired poles, and k<sub>r</sub> so the DC gain from φ<sub>r</sub> to φ is one.',
           '(e) Implement the state feedback and tune the poles. You should get a much faster response than with successive loop closure.',
@@ -238,7 +238,7 @@ WB.studies.C = WB.studies.C || { chapters: {} };
           '(a) Use exact parameters (α = 0) and no input disturbance.',
           '(b) Check observability: rank(𝒪<sub>A,C</sub>) = n.',
           '(c) Add an observer and use x̂ in the C.12 controller. Tune the controller and observer poles.',
-          '(d) Plot the states and their estimates together.',
+          '(d) Modify the simulation files so that the controller outputs both u and x̂. Add a plotting routine to plot both the state and the estimated state of the system on the same graph.',
           '(e) Add an input disturbance of 1.0 and observe the steady-state error, even with the integrator.',
         ],
       },
@@ -278,7 +278,7 @@ WB.studies.C = WB.studies.C || { chapters: {} };
         statement: [
           'Use the C.10 gains.',
           '(a) Find the phase and gain margins of the inner loop under PD control. Plot the open- and closed-loop Bode plots together. What is the closed-loop bandwidth, and how does it relate to the crossover frequency?',
-          '(b) Answer the same for the outer loop under PID control.',
+          '(b) Find the phase and gain margins of the outer loop under PID control. Plot the open- and closed-loop Bode plots of the outer loop on the same plot as those of the inner loop. What is the closed-loop bandwidth, and how does it relate to the crossover frequency?',
           '(c) What is the bandwidth separation between the inner and outer loops? Is successive loop closure justified?',
         ],
       },
