@@ -216,7 +216,7 @@
   // --------------------------------------------------------- chapter base --
   function base(level, id, num, title, pages, extra) {
     return Object.assign({
-      id, num, tab: `D.${num}`, title, pages, level,
+      id, num, tab: `Ch ${num}`, title, pages, level,
       controller(ctx, o) { return makeSS(ctx, o); },
       linearSim(ctx, c) { return lib.linearSim(ctx, c, makeSS); },
       gains(ctx) { ctx.level = level; return gainsFor(ctx); },

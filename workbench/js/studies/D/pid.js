@@ -159,7 +159,7 @@
 
   // -------------------------------------------------------------- D.7 --
   CH.ch7 = {
-    id: 'ch7', num: 7, tab: 'D.7', title: 'Pole placement (PD)', pages: 'pp. 99–106, p. 379',
+    id: 'ch7', num: 7, tab: 'Ch 7', title: 'Pole placement (PD)', pages: 'pp. 99–106, p. 379',
     controller: (ctx) => makePD(ctx),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePD),
     defaults(sys) {
@@ -329,7 +329,7 @@
   }
 
   CH.ch8 = {
-    id: 'ch8', num: 8, tab: 'D.8', title: 'Second-order design', pages: 'pp. 107–136, p. 379',
+    id: 'ch8', num: 8, tab: 'Ch 8', title: 'Second-order design', pages: 'pp. 107–136, p. 379',
     controller: (ctx) => makePD(ctx),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePD),
     targets: (ctx) => ({ tr: ctx.st.tr, zeta: ctx.st.zeta }),
@@ -457,7 +457,7 @@
 
   // -------------------------------------------------------------- D.9 --
   CH.ch9 = {
-    id: 'ch9', num: 9, tab: 'D.9', title: 'System type & integrators', pages: 'pp. 137–154, p. 380',
+    id: 'ch9', num: 9, tab: 'Ch 9', title: 'System type & integrators', pages: 'pp. 137–154, p. 380',
     defaults() { return { comp: 'none', deriv: 'state', antiwindup: 'none', kP: 1, kD: 1, kI: 0, tr: 2, zeta: 0.7, kIx: 0.5, input: 'step' }; },
     simDefaults(sys) { return sys.problems.ch9.sim; },
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD } : designed(ctx); },
@@ -584,7 +584,7 @@
 
   // ------------------------------------------------------------- D.P.6 --
   CH.p6 = {
-    id: 'p6', num: 10.5, tab: 'D.P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474, p. 380',
+    id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474, p. 380',
     defaults(sys) { const pr = sys.problems.p6; return { comp: 'none', deriv: 'state', antiwindup: 'none', kP: 1, kD: 1, tr: pr.tr, zeta: pr.zeta, kIx: 0.1, kMaxFactor: 1 }; },
     simDefaults(sys) { return sys.problems.p6.sim; },
     // Work mode: your own PD gains (placeholders until you enter your D.8 gains); Explore: from t_r, ζ.
@@ -697,7 +697,7 @@
 
   // -------------------------------------------------------------- D.10 --
   CH.ch10 = {
-    id: 'ch10', num: 10, tab: 'D.10', title: 'Digital PID', pages: 'pp. 155–169, p. 380',
+    id: 'ch10', num: 10, tab: 'Ch 10', title: 'Digital PID', pages: 'pp. 155–169, p. 380',
     defaults(sys) {
       const pr = sys.problems.ch10;
       return { comp: 'eq', deriv: 'dirty', antiwindup: 'gate', vbar: 0.05, sigma: pr.sigma, kP: 1, kD: 1, kI: 0, tr: pr.tr, zeta: pr.zeta, kIx: pr.kiRef, extra: 'deriv' };

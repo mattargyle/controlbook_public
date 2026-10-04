@@ -101,7 +101,7 @@
 
   // ---------------------------------------------------------------- D.15 --
   CH.ch15 = {
-    id: 'ch15', num: 15, tab: 'D.15', title: 'Frequency response', pages: 'pp. 261–282, p. 382',
+    id: 'ch15', num: 15, tab: 'Ch 15', title: 'Frequency response', pages: 'pp. 261–282, p. 382',
     openLoop: true, metrics: false,
     defaults() { return { comp: 'none', w0: 0.5, A: 1, asym: true, inp: { shape: 'sine', amp: 1, freq: 0.5 / (2 * Math.PI) } }; },
     simDefaults(sys) { return sys.problems.ch15.sim; },
@@ -187,7 +187,7 @@
 
   // ---------------------------------------------------------------- D.16 --
   CH.ch16 = {
-    id: 'ch16', num: 16, tab: 'D.16', title: 'Frequency-domain specs', pages: 'pp. 283–301, pp. 382–383',
+    id: 'ch16', num: 16, tab: 'Ch 16', title: 'Frequency-domain specs', pages: 'pp. 283–301, pp. 382–383',
     defaults(sys) { const p = sys.problems.ch16; return { ...pidDefaults(), wdin: p.wdin, wno: p.wno }; },
     simDefaults(sys) { return sys.problems.ch16.sim; },
     gains: pidGains,
@@ -274,7 +274,7 @@
 
   // ---------------------------------------------------------------- D.17 --
   CH.ch17 = {
-    id: 'ch17', num: 17, tab: 'D.17', title: 'Stability margins', pages: 'pp. 303–322, p. 383',
+    id: 'ch17', num: 17, tab: 'Ch 17', title: 'Stability margins', pages: 'pp. 303–322, p. 383',
     defaults() { return pidDefaults(); },
     simDefaults(sys) { return sys.problems.ch17.sim; },
     gains: pidGains,
@@ -399,7 +399,7 @@
   }
 
   CH.ch18 = {
-    id: 'ch18', num: 18, tab: 'D.18', title: 'Loopshaping', pages: 'pp. 323–374, p. 383',
+    id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping', pages: 'pp. 323–374, p. 383',
     defaults() { return { ...presetStart(), showT: true }; },
     simDefaults(sys) { return { ...sys.problems.ch18.sim, mismatch: sys.problems.ch18.mismatch }; },
     gains() { return {}; },

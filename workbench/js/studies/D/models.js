@@ -79,7 +79,7 @@
   // ------------------------------------------------------------------ D.2 --
   // Prescribed motion z(t) = A sin(2πft), as in hw02; nothing is simulated.
   CH.ch2 = Object.assign({}, common, {
-    id: 'ch2', num: 2, tab: 'D.2', title: 'Kinetic energy', pages: 'pp. 19–40, p. 378',
+    id: 'ch2', num: 2, tab: 'Ch 2', title: 'Kinetic energy', pages: 'pp. 19–40, p. 378',
     linear: false,
     defaults() { return { A: 0.5, f: 0.2, inp: { shape: 'zero', amp: 0, freq: 0.1, width: 1 } }; },
     simDefaults(sys) { return sys.problems.ch2.sim; },
@@ -162,7 +162,7 @@
   }
 
   CH.ch3 = Object.assign({}, common, {
-    id: 'ch3', num: 3, tab: 'D.3', title: 'Euler-Lagrange equations', pages: 'pp. 41–56, p. 378',
+    id: 'ch3', num: 3, tab: 'Ch 3', title: 'Euler-Lagrange equations', pages: 'pp. 41–56, p. 378',
     linear: false,
     defaults() { return { comp: 'none', inp: { shape: 'square', amp: 1, freq: 0.05, width: 1 } }; },
     simDefaults(sys) { return sys.problems.ch3.sim; },
@@ -348,7 +348,7 @@
   }
 
   CH.ch4 = Object.assign({}, common, {
-    id: 'ch4', num: 4, tab: 'D.4', title: 'Equilibria & linearization', pages: 'pp. 59–68, p. 378',
+    id: 'ch4', num: 4, tab: 'Ch 4', title: 'Equilibria & linearization', pages: 'pp. 59–68, p. 378',
     defaults() { return { zE: 0.5, dz0: 0.3, method: 'jacobian', comp: 'eq', FeW: 0, inp: { shape: 'zero', amp: 0.5, freq: 0.05, width: 2 } }; },
     simDefaults(sys) { return sys.problems.ch4.sim; },
     controller(ctx, o) { ctx.st.comp = ctx.st.method === 'fl' ? 'fl' : 'eq'; return openLoop(ctx, o); },
@@ -481,7 +481,7 @@
   const olLinear = (ctx, c) => lib.linearSim(ctx, c, openLoop);
 
   CH.ch5 = Object.assign({}, common, {
-    id: 'ch5', num: 5, tab: 'D.5', title: 'Transfer function', pages: 'pp. 69–80, p. 378',
+    id: 'ch5', num: 5, tab: 'Ch 5', title: 'Transfer function', pages: 'pp. 69–80, p. 378',
     defaults() { return { comp: 'none', inp: { shape: 'pulse', amp: 1, freq: 0.05, width: 2 } }; },
     simDefaults(sys) { return sys.problems.ch5.sim; },
     linearSim: olLinear,
@@ -546,7 +546,7 @@
   });
 
   CH.ch6 = Object.assign({}, common, {
-    id: 'ch6', num: 6, tab: 'D.6', title: 'State-space model', pages: 'pp. 81–93, p. 379',
+    id: 'ch6', num: 6, tab: 'Ch 6', title: 'State-space model', pages: 'pp. 81–93, p. 379',
     defaults() { return { comp: 'none', inp: { shape: 'pulse', amp: 1, freq: 0.05, width: 2 } }; },
     simDefaults(sys) { return sys.problems.ch6.sim; },
     linearSim: olLinear,

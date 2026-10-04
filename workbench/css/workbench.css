@@ -75,7 +75,7 @@ body {
 h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 code { font-size: 12px; background: var(--grid); padding: 1px 4px; border-radius: 4px; }
 .muted { color: var(--text-muted); }
-.small { font-size: 12px; }
+.small { font-size: 13px; }
 p { margin: 6px 0; }
 
 /* ---------------------------------------------------------------- top bar */
@@ -101,7 +101,7 @@ select {
 .tab-num { font-weight: 600; }
 .tab-group { display: flex; align-items: center; gap: 2px; padding: 2px 6px 2px 2px; border-right: 1px solid var(--border); }
 .tab-group:last-child { border-right: 0; }
-.tab-part { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; padding: 0 4px 0 6px; }
+.tab-part { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; padding: 0 4px 0 6px; }
 .tab { min-width: 30px; justify-content: center; padding: 4px 8px; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 
@@ -178,7 +178,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .pdf-link:hover { color: var(--accent); text-decoration: underline; }
 .page-ref:has(.pdf-link:hover) { border-color: var(--accent); }
 .page-ref {
-  font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px;
+  font-size: 12px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px;
   padding: 0 7px; white-space: nowrap;
 }
 
@@ -187,14 +187,14 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .slider-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .slider-row.is-disabled { opacity: .45; }
 .ctl-label { color: var(--text-secondary); font-size: 13px; }
-.ctl-hint { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted); }
+.ctl-hint { grid-column: 1 / -1; font-size: 13px; color: var(--text-muted); }
 input[type="range"] { width: 100%; accent-color: var(--accent); min-width: 0; }
 .num-wrap { display: flex; align-items: center; gap: 4px; }
 .num, .part-field input {
   font: inherit; font-size: 13px; width: 74px; padding: 3px 6px; color: var(--text-primary);
   background: var(--raised); border: 1px solid var(--border); border-radius: 6px; font-variant-numeric: tabular-nums;
 }
-.unit { font-size: 12px; color: var(--text-muted); min-width: 28px; }
+.unit { font-size: 13px; color: var(--text-muted); min-width: 28px; }
 .seg-row { display: grid; gap: 4px; }
 .segmented { display: inline-flex; flex-wrap: wrap; background: var(--grid); border-radius: 8px; padding: 2px; gap: 2px; }
 .segmented button {
@@ -222,7 +222,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-width: 0; }
 .readout { display: flex; gap: 16px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .readout > div { display: flex; gap: 6px; align-items: baseline; }
 .readout.wrap { flex-wrap: wrap; gap: 6px 16px; }
-.ro-label { color: var(--text-muted); font-size: 12px; }
+.ro-label { color: var(--text-muted); font-size: 13px; }
 .readout strong { font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------------------ plots */
