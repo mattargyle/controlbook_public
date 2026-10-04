@@ -25,7 +25,7 @@ INDEX = WB / "index.html"
 HELPERS = r"""
 window.__t = {
   parts: () => [...document.querySelectorAll('#problem .part')],
-  title: (p) => p.querySelector('.part-title').textContent,
+  title: (p) => (p.querySelector('.part-title .collapse-label') || p.querySelector('.part-title')).textContent,
   setCode: (p, code) => { const ta = p.querySelector('textarea.code-editor'); ta.value = code; ta.dispatchEvent(new Event('input')); },
   button: (p, text) => [...p.querySelectorAll('.part-buttons button')].find((b) => b.textContent === text),
   async press(p, text) {

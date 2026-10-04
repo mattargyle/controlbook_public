@@ -19,11 +19,37 @@ WB.ui = (function () {
   }
 
   function section(parent, title, pageRef) {
-    const head = el('div', { class: 'section-head' }, el('h3', { text: title }));
+    const h3 = el('h3');
+    const head = el('div', { class: 'section-head' }, h3);
     if (pageRef) head.append(pageChip(pageRef));
     const body = el('div', { class: 'section-body' });
-    parent.append(el('section', { class: 'panel-section' }, head, body));
+    const box = el('section', { class: 'panel-section' }, head, body);
+    collapsible(h3, title, box, body, `wb.collapsed.section.${title.replace(/<[^>]+>/g, '')}`);
+    parent.append(box);
     return body;
+  }
+
+  // Turn `host` into a toggle button (chevron + label html) that collapses `body`.
+  // `box` gets the class "collapsed". The state is remembered under `key`.
+  function collapsible(host, labelHtml, box, body, key) {
+    const label = el('span', { class: 'collapse-label' });
+    label.innerHTML = labelHtml; // authored text (may contain <sub>)
+    const btn = el('button', { type: 'button', class: 'collapse-toggle', 'aria-expanded': 'true' },
+      el('span', { class: 'chev', 'aria-hidden': 'true', text: '▾' }), label);
+    host.append(btn);
+    const set = (collapsed) => {
+      box.classList.toggle('collapsed', collapsed);
+      body.hidden = collapsed;
+      btn.setAttribute('aria-expanded', String(!collapsed));
+      btn.classList.toggle('is-collapsed', collapsed);
+    };
+    set(!!store.get(key, false));
+    btn.addEventListener('click', () => {
+      const collapsed = !box.classList.contains('collapsed');
+      set(collapsed);
+      store.set(key, collapsed);
+    });
+    return { set: (c) => { set(c); store.set(key, c); }, collapsed: () => box.classList.contains('collapsed') };
   }
 
   // Page references are controlbook.pdf page numbers (not book page numbers).
@@ -235,7 +261,7 @@ WB.ui = (function () {
   };
 
   return {
-    el, section, pageChip, linkPages, linkifyNode, slider, segmented, refreshAll, clearRefreshers, addRefresher, renderTex, store,
+    el, section, collapsible, pageChip, linkPages, linkifyNode, slider, segmented, refreshAll, clearRefreshers, addRefresher, renderTex, store,
     bind, gainSliders, onOff, metric, specRow, readout, shown, revealButton,
   };
 })();

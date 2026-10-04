@@ -191,14 +191,21 @@ WB.chapters = WB.chapters || {};
   function problemPanel(parent, ctx, prob, parts) {
     const key = `wb.${ctx.sys.id}.${prob.id}.answers`;
     const saved = WB.ui.store.get(key, {});
-    const head = el('div', { class: 'problem-head' },
-      el('strong', { text: `Problem ${prob.id}` }), WB.ui.pageChip(`p. ${prob.page}`));
+    const title = el('strong');
+    const head = el('div', { class: 'problem-head' }, title, WB.ui.pageChip(`p. ${prob.page}`));
     const stmt = el('div', { class: 'problem-stmt' });
     stmt.innerHTML = prob.statement.map((s) => `<p>${s}</p>`).join(''); // authored text
     WB.ui.linkifyNode(stmt);
-    parent.append(head, stmt);
+    // Everything below the heading collapses with the problem; each part also collapses on its own.
+    const outer = parent;
+    parent = el('div', { class: 'problem-body' });
+    const tools = el('div', { class: 'part-tools' });
+    outer.append(head, parent);
+    WB.ui.collapsible(title, `Problem ${prob.id}`, outer, parent, `wb.collapsed.problem.${ctx.sys.id}.${prob.id}`);
+    parent.append(stmt);
     const note = el('p', { class: 'muted small', text: 'Answers are checked against the current nominal parameters (left panel).' });
     parent.append(note);
+    const partToggles = [];
     if (parts.some((p) => p.code)) {
       const pn = el('p', { class: 'muted small' });
       pn.innerHTML = 'Python answers run in your browser (Python 3.14 + numpy, loaded on the first Check). <code>np</code> is imported, and <code>P</code> holds the parameters like <code>armParam.py</code>: '
@@ -206,10 +213,12 @@ WB.chapters = WB.chapters || {};
       parent.append(pn);
     }
 
+    if (parts.length > 1) parent.append(tools);
     for (const part of parts) {
       const box = el('div', { class: 'part' });
       const title = el('div', { class: 'part-title' });
-      title.innerHTML = part.title;
+      const partBody = el('div', { class: 'part-body' });
+      partToggles.push(WB.ui.collapsible(title, part.title, box, partBody, `wb.collapsed.part.${ctx.sys.id}.${prob.id}.${part.id}`));
       box.append(title);
       const inputs = {};
       const grid = el('div', { class: 'part-inputs' });
@@ -304,7 +313,14 @@ WB.chapters = WB.chapters || {};
       }
       if (btns.children.length) box.append(btns);
       box.append(result, sol);
+      partBody.append(...[...box.childNodes].slice(1));
+      box.append(partBody);
       parent.append(box);
+    }
+    if (parts.length > 1) {
+      tools.append(
+        el('button', { type: 'button', class: 'btn btn-quiet btn-small', text: 'Collapse all parts', onclick: () => partToggles.forEach((t) => t.set(true)) }),
+        el('button', { type: 'button', class: 'btn btn-quiet btn-small', text: 'Expand all parts', onclick: () => partToggles.forEach((t) => t.set(false)) }));
     }
   }
 

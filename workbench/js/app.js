@@ -727,6 +727,43 @@ window.WB = window.WB || {};
     setCollapsed(store.get('wb.leftCollapsed', false));
     toggle.addEventListener('click', () => setCollapsed(!layout.classList.contains('left-collapsed')));
 
+    // Draggable split between the problem column (.right-col, shown second) and
+    // the plot column (.center, shown last). frac is the problem column's share
+    // of the two; remembered per browser.
+    const splitter = document.getElementById('splitter');
+    const setSplit = (frac) => {
+      frac = Math.min(0.75, Math.max(0.2, frac));
+      layout.style.setProperty('--problem-fr', `${frac}fr`);
+      layout.style.setProperty('--plots-fr', `${1 - frac}fr`);
+      splitter.setAttribute('aria-valuenow', String(Math.round(frac * 100)));
+      store.set('wb.problemFrac', frac);
+      return frac;
+    };
+    let split = setSplit(store.get('wb.problemFrac', 0.5));
+    splitter.setAttribute('aria-valuemin', '20');
+    splitter.setAttribute('aria-valuemax', '75');
+    splitter.addEventListener('pointerdown', (e) => {
+      const problem = document.querySelector('.right-col').getBoundingClientRect();
+      const plots = document.querySelector('.center').getBoundingClientRect();
+      splitter.setPointerCapture(e.pointerId);
+      splitter.classList.add('dragging');
+      document.body.classList.add('col-resizing');
+      const move = (ev) => { split = setSplit((ev.clientX - problem.left) / (plots.right - problem.left)); };
+      const up = () => {
+        splitter.removeEventListener('pointermove', move);
+        splitter.classList.remove('dragging');
+        document.body.classList.remove('col-resizing');
+      };
+      splitter.addEventListener('pointermove', move);
+      splitter.addEventListener('pointerup', up, { once: true });
+      splitter.addEventListener('pointercancel', up, { once: true });
+    });
+    splitter.addEventListener('dblclick', () => { split = setSplit(0.5); });
+    splitter.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') { split = setSplit(split - 0.02); e.preventDefault(); }
+      if (e.key === 'ArrowRight') { split = setSplit(split + 0.02); e.preventDefault(); }
+    });
+
     document.getElementById('reset-all').addEventListener('click', () => {
       S = freshState(S.sysId, S.chapter);
       rebuild();

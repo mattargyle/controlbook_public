@@ -111,9 +111,26 @@ select {
 /* ----------------------------------------------------------------- layout */
 .layout {
   display: grid; gap: 12px; padding: 8px 16px 16px;
-  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr) minmax(280px, 340px);
+  /* settings | problem (+ controls) | splitter | plots (+ live math). --problem-fr and
+     --plots-fr are set by dragging the splitter (app.js). */
+  grid-template-columns: minmax(250px, 300px) minmax(300px, var(--problem-fr, 1fr)) 8px minmax(320px, var(--plots-fr, 1fr));
   align-items: start;
 }
+.layout > .left-col { grid-column: 1; grid-row: 1; }
+.layout > .right-col { grid-column: 2; grid-row: 1; }
+.layout > .splitter { grid-column: 3; grid-row: 1; }
+.layout > .center { grid-column: 4; grid-row: 1; }
+.splitter {
+  align-self: stretch; cursor: col-resize; touch-action: none; margin: 0 -4px; position: relative;
+  border-radius: 4px;
+}
+.splitter::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%);
+  background: var(--border); border-radius: 1px;
+}
+.splitter:hover::after, .splitter:focus-visible::after, .splitter.dragging::after { background: var(--series-1); width: 3px; }
+.splitter:focus-visible { outline: none; }
+body.col-resizing { cursor: col-resize; user-select: none; }
 .center { display: grid; gap: 12px; min-width: 0; }
 .plot-stack { display: grid; gap: 12px; min-width: 0; }
 .row-2 { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
@@ -126,14 +143,18 @@ select {
 }
 .collapse-btn:hover { border-color: var(--axis); color: var(--text-primary); }
 .collapse-icon { font-size: 15px; line-height: 1; }
-.layout.left-collapsed { grid-template-columns: 34px minmax(0, 1fr) minmax(280px, 340px); }
+.layout.left-collapsed { grid-template-columns: 34px minmax(300px, var(--problem-fr, 1fr)) 8px minmax(320px, var(--plots-fr, 1fr)); }
 .left-collapsed #left { display: none; }
 .left-collapsed .collapse-btn { flex-direction: column; padding: 8px 0; width: 34px; justify-self: stretch; }
 .left-collapsed .collapse-text { writing-mode: vertical-rl; }
 @media (max-width: 1200px) {
   .layout { grid-template-columns: minmax(240px, 280px) minmax(0, 1fr); }
   .layout.left-collapsed { grid-template-columns: 34px minmax(0, 1fr); }
-  .right-col { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  /* plots beside the settings, the problem column full width below them */
+  .layout > .left-col, .layout > .center { grid-column: auto; grid-row: auto; }
+  .layout > .center { order: 1; }
+  .layout > .right-col { order: 2; grid-column: 1 / -1; grid-row: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  .splitter { display: none; }
 }
 @media (max-width: 760px) {
   .layout, .layout.left-collapsed { grid-template-columns: 1fr; padding: 8px 16px 16px; }
@@ -141,7 +162,7 @@ select {
   .left-collapsed .collapse-text { writing-mode: horizontal-tb; }
   .row-2 { grid-template-columns: 1fr; }
   .right-col { grid-template-columns: 1fr; }
-  .center { order: -1; }
+  .layout > .center { order: -1; }
 }
 
 .card, .panel-section {
@@ -302,3 +323,19 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-width: 0; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; overflow-x: auto;
 }
 .math-card.locked .locked-text { margin: 6px 0 0; }
+
+/* ---------------------------------------------------- collapsible panels */
+.collapse-toggle {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
+  display: inline-flex; align-items: baseline; gap: 6px; text-align: left;
+}
+.collapse-toggle:hover .collapse-label { color: var(--text-primary); }
+.collapse-toggle:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 3px; }
+.chev { display: inline-block; width: 10px; font-size: 11px; color: var(--text-muted); transition: transform .12s; }
+.collapse-toggle.is-collapsed .chev { transform: rotate(-90deg); }
+.panel-section.collapsed .section-head { margin-bottom: 0; }
+.part.collapsed { padding-bottom: 4px; }
+.part.collapsed .part-title { margin-bottom: 0; }
+.problem.collapsed .problem-head { margin-bottom: 0; }
+.part-tools { display: flex; gap: 6px; justify-content: flex-end; margin: 2px 0 -2px; }
+.btn-small { font-size: 12px; padding: 2px 8px; }
