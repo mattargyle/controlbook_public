@@ -62,6 +62,13 @@ WB.studies.B = WB.studies.B || { chapters: {} };
     };
   }
 
+  // Coefficients of the linearized equations about θ_e = kπ (Eq. 4.12 for k even):
+  //   M q̈̃ = (−b ż̃ + F̃, kTh θ̃),  c = cos θ_e.
+  function linearEOM(p, thetaE = 0) {
+    const c = Math.cos(thetaE);
+    return { M: [[p.m1 + p.m2, p.m1 * p.ell / 2 * c], [p.m1 * p.ell / 2 * c, p.m1 * p.ell ** 2 / 3]], b: p.b, kTh: p.m1 * p.g * p.ell / 2 * c };
+  }
+
   // Energies (B.2 Eq. 2.4, B.3 p. 47 with P₀ = 0)
   function kinetic(x, p) {
     const [, th, zd, thd] = x;
@@ -183,7 +190,7 @@ WB.studies.B = WB.studies.B || { chapters: {} };
     simBase: { amplitude: 0.5, frequency: 0.04, Ts: 0.01 },
     stateLabels: ['z', 'θ', 'ż', 'θ̇'],
 
-    inner, outerTf, linearize, stateSpace, kinetic, potential, draw,
+    inner, outerTf, linearize, linearEOM, stateSpace, kinetic, potential, draw,
 
     // Problem data for the chapter modules. Statements are paraphrased; page
     // numbers are controlbook.pdf pages (book page + 8).

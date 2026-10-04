@@ -3,7 +3,7 @@
 As of 2026-10-03. This covers Design Study B (the pendulum on a cart): problems B.2–B.6, B.8–B.18 and B.P.6.
 
 I found these while building the workbench:
-- 21 problems in the book's worked solutions;
+- 22 problems in the book's worked solutions;
 - 6 places where the book and `_B_pendulum/python` disagree;
 - 4 bugs in the repo code.
 
@@ -20,6 +20,7 @@ Page numbers are PDF pages (book page + 8).
 
 | Problem | PDF page | Issue | Correct value / effect |
 | --- | --- | --- | --- |
+| B.4(b) | 65–66 | The problem asks to linearize "about the equilibria" (θ_e = kπ), but the solution only linearizes about even k (cos θ_e = 1, Eq. 4.12). | For odd k (hanging), cos θ_e = −1 flips the sign of the coupling terms m₁(ℓ/2)z̃̈, m₁(ℓ/2)θ̃̈ and of the gravity term: m₁g(ℓ/2)θ̃ becomes −m₁g(ℓ/2)θ̃, and the eigenvalues ±4.2 become ±4.2j. The workbench's B.4(b) Python check uses θ_e = 0, ±π and 2π. |
 | B.6 | 90 | In the nonlinear derivation, the right-hand vector's second entry is printed m₁gℓ sin θ. | It is m₁g(ℓ/2) sin θ. The expanded line below it uses ℓ/2, so only the intermediate step is wrong. |
 | B.8 (Listing 8.3) | 128–129 | The listing computes the outer gains as a = ω²√(2ℓ/3g) − 2ζω, k_Dz = a/(a + √(3g/2ℓ)). That is not Eq. 8.12–8.13 (p. 127). | The outer loop gets the right ωₙ but ζ = 1.29 for the listing's tuning (ζ_z = 0.707 asked). With Eq. 8.13 it is exactly 0.707. For t_r,θ = 0.15, M = 15: the listing gives k_Pz = −0.1447, k_Dz = −0.4196; Eq. 8.12–8.13 give −0.1749, −0.2986. `ctrlPID.py` (B.10) uses the correct formula. |
 | B.8 | 124–129 | Part (b) asks for t_r,θ = 0.5 s, and the solution's numbers use it (k_Pθ = −26.0, k_Dθ = −4.41, k_DC = 1.89). The listing uses t_r,θ = 0.15 s. Part (d) never gives outer-loop specs, and the listing picks M = 15, ζ_z = 0.707. | The workbench checks (b)–(c) against t_r,θ = 0.5 s and uses M = 10, ζ_z = 0.707 for (d), stated on the page. |
@@ -80,3 +81,6 @@ Smaller notation issues:
 | B.17 outer loop | A toggle between hw17's P_out·C_out and the loop the code closes. The default is the latter, since the former has no crossover with the B.10 gains. |
 | B.P.6 model | A toggle between Fig. 6-9 (k_DC only) and the filtered loop. Checks use the filtered loop; the locus is drawn for k_Iz = −κ, since k_Pz and k_Dz are negative. |
 | B.18 designs | Presets for the repo design and the text design, plus a stable first try. Implementation toggle: state space (RK4) or Tustin. |
+| Work mode (no give-aways) | Every derivation in B.2–B.6, the B.8 closed loops, filter and DC gain, the B.9 error formulas, the B.P.6 Evans form, and the B.12/B.14 augmented models is a Python answer, checked against `system.js` (f, linearize, stateSpace, inner) at random arguments and parameter sets. Cards stating the pendulum's results stay locked until the part that derives them is solved. |
+| B.P.6 Evans form | The Python check uses the filtered outer loop (the one B.8(d) designs and the code closes), not Fig. 6-9's k_DC-only loop, which is unstable with the B.10 gains. |
+| B.4(a) equilibria | Asked as θ_e(k) = kπ and F_e(z_e, θ_e) = 0; the check calls F_e only at θ_e = kπ. |

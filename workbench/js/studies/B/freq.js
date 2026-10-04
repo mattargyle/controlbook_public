@@ -105,9 +105,13 @@
       const sec = section(parent, 'Plant transfer functions', 'p. 277–278 · Eq. 15.16, 15.18');
       loopToggle(sec, ctx, [{ value: 'inner', label: 'P_in: F → θ' }, { value: 'outer', label: 'P_out: θ → z' }]);
       segmented(sec, { label: 'Straight-line approximation', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'asym') });
-      sec.append(el('p', { class: 'muted small', text: 'The time plots below run the B.10 controller, since the open-loop pendulum just falls over.' }));
+      sec.append(el('p', { class: 'muted small', text: 'The time plots below run the B.10 controller, since the open-loop pendulum just falls over. In Work mode each Bode plot appears once you have drawn it by hand (problem panel).' }));
     },
+    // B.15 is drawn by hand: in Work mode each loop's Bode plot (and its poles and
+    // zeros) appears once that part is marked done.
+    drawn(ctx) { return ctx.S.mode === 'explore' || ctx.app.isSolved(ctx.st.loop === 'inner' ? 'B.15/a' : 'B.15/b'); },
     bode(ctx) {
+      if (!this.drawn(ctx)) return null;
       const p = ctx.pModel, inner = ctx.st.loop === 'inner';
       const G = inner ? Pin(p) : Pout(p), b = bodeB(G, W15);
       const lines = [{ label: inner ? 'P_in(jω)' : 'P_out(jω)', ...b, color: '--series-1' }];
@@ -120,6 +124,7 @@
       return { title: inner ? 'Bode plot of P_in(s)' : 'Bode plot of P_out(s)', w: W15, lines };
     },
     splane(ctx) {
+      if (!this.drawn(ctx)) return { markers: [] };
       const p = ctx.pModel, inner = ctx.st.loop === 'inner', G = inner ? Pin(p) : Pout(p);
       const mk = L.roots(G.den).map((x, i) => ({ ...x, kind: 'ol', label: `pole ${i + 1}` }));
       T.zeros(G).forEach((x, i) => mk.push({ ...x, kind: 'olzero', label: `zero ${i + 1}` }));
@@ -129,21 +134,25 @@
       const p = ctx.pModel, mg = (p.m1 + p.m2) * p.g, J = p.m1 * p.ell / 6 + p.m2 * 2 * p.ell / 3;
       const wp = Math.sqrt(mg / J), q = Math.sqrt(3 * p.g / (2 * p.ell));
       return [
-        { title: 'Inner loop', page: 'p. 277 · Eq. 15.16–15.17',
-          theory: 'P_{in}(s) = \\frac{-1/J}{s^2 - (m_1+m_2)g/J},\\quad J = m_1\\tfrac{\\ell}{6} + m_2\\tfrac{2\\ell}{3}',
-          symbolic: 'P_{in}(s) = \\frac{-1/J}{(s + \\omega_p)(s - \\omega_p)} \\;\\Rightarrow\\; P_{in}(j\\omega) = \\frac{\\frac{1}{(m_1+m_2)g}}{(1 + j\\frac{\\omega}{\\omega_p})(1 - j\\frac{\\omega}{\\omega_p})},\\quad \\omega_p = \\sqrt{(m_1+m_2)g/J}',
-          numbers: `\\frac{1}{(m_1+m_2)g} = ${tex(1 / mg)}\\;(${tex(db(1 / mg))}\\,\\text{dB}),\\quad \\omega_p = ${tex(wp)}`, spoiler: true,
-          note: 'The book’s constant in Eq. 15.17 disagrees with the one in its phase expression (ISSUES.md).' },
-        { title: 'Phase of P_in', page: 'p. 277–278 · Fig. 15-13',
-          theory: '\\angle P_{in}(j\\omega) = \\angle K - \\angle(1 + j\\tfrac{\\omega}{\\omega_p}) - \\angle(1 - j\\tfrac{\\omega}{\\omega_p})',
-          symbolic: '(1 + j\\tfrac{\\omega}{\\omega_p})(1 - j\\tfrac{\\omega}{\\omega_p}) = 1 + \\tfrac{\\omega^2}{\\omega_p^2} > 0 \\;\\Rightarrow\\; \\angle P_{in} = 0^\\circ \\text{ for all } \\omega', spoiler: true },
-        { title: 'Outer loop', page: 'p. 277–278 · Eq. 15.18–15.19',
-          theory: 'P_{out}(s) = \\frac{-\\frac{2\\ell}{3}s^2 + g}{s^2}',
-          symbolic: 'P_{out}(s) = -\\frac{2\\ell}{3}\\frac{(s - q)(s + q)}{s^2},\\; q = \\sqrt{\\tfrac{3g}{2\\ell}} \\;\\Rightarrow\\; P_{out}(j\\omega) = \\frac{g\\,(1 + j\\frac{\\omega}{q})(1 - j\\frac{\\omega}{q})}{(j\\omega)^2}',
-          numbers: `g = ${tex(p.g)}\\;(${tex(db(p.g))}\\,\\text{dB}),\\quad q = ${tex(q)},\\quad |P_{out}| \\to \\tfrac{2\\ell}{3} = ${tex(2 * p.ell / 3)} \\text{ above } q`, spoiler: true,
-          note: 'The book’s Bode constant for P_out (0.174) is not the low-frequency gain (ISSUES.md).' },
+        { title: 'Frequency response', page: 'p. 264 · Eq. 15.4',
+          theory: 'u = A\\sin\\omega_0 t \\;\\Rightarrow\\; y_{ss} = A|P(j\\omega_0)|\\sin\\big(\\omega_0 t + \\angle P(j\\omega_0)\\big)' },
+        { title: 'Bode canonical form', page: 'p. 266 · Eq. 15.5–15.7',
+          theory: 'P(j\\omega) = K\\,\\frac{\\prod (1 + j\\omega/z_i)}{(j\\omega)^q \\prod (1 + j\\omega/p_i)}:\\quad 20\\log|P| = 20\\log K + \\textstyle\\sum 20\\log|1 + j\\omega/z_i| - 20q\\log\\omega - \\sum 20\\log|1 + j\\omega/p_i|' },
         { title: 'Building blocks', page: 'p. 266–270',
           theory: '\\frac{1}{(j\\omega)^2}: -40\\,\\text{dB/dec},\\; -180^\\circ;\\quad (1 \\pm j\\tfrac{\\omega}{a}): +20\\,\\text{dB/dec above } a,\\; \\pm\\tan^{-1}\\tfrac{\\omega}{a}' },
+        { title: 'Bode form of P_in', page: 'p. 277 · Eq. 15.16–15.17', answers: 'B.15/a',
+          theory: 'P_{in}(s) = \\frac{-1/J}{s^2 - (m_1+m_2)g/J},\\quad J = m_1\\tfrac{\\ell}{6} + m_2\\tfrac{2\\ell}{3}',
+          symbolic: 'P_{in}(s) = \\frac{-1/J}{(s + \\omega_p)(s - \\omega_p)} \\;\\Rightarrow\\; P_{in}(j\\omega) = \\frac{\\frac{1}{(m_1+m_2)g}}{(1 + j\\frac{\\omega}{\\omega_p})(1 - j\\frac{\\omega}{\\omega_p})},\\quad \\omega_p = \\sqrt{(m_1+m_2)g/J}',
+          numbers: `\\frac{1}{(m_1+m_2)g} = ${tex(1 / mg)}\\;(${tex(db(1 / mg))}\\,\\text{dB}),\\quad \\omega_p = ${tex(wp)}`,
+          note: 'The book’s constant in Eq. 15.17 disagrees with the one in its phase expression (ISSUES.md).' },
+        { title: 'Phase of P_in', page: 'p. 277–278 · Fig. 15-13', answers: 'B.15/a',
+          theory: '\\angle P_{in}(j\\omega) = \\angle K - \\angle(1 + j\\tfrac{\\omega}{\\omega_p}) - \\angle(1 - j\\tfrac{\\omega}{\\omega_p})',
+          symbolic: '(1 + j\\tfrac{\\omega}{\\omega_p})(1 - j\\tfrac{\\omega}{\\omega_p}) = 1 + \\tfrac{\\omega^2}{\\omega_p^2} > 0 \\;\\Rightarrow\\; \\angle P_{in} = 0^\\circ \\text{ for all } \\omega' },
+        { title: 'Bode form of P_out', page: 'p. 277–278 · Eq. 15.18–15.19', answers: 'B.15/b',
+          theory: 'P_{out}(s) = \\frac{-\\frac{2\\ell}{3}s^2 + g}{s^2}',
+          symbolic: 'P_{out}(s) = -\\frac{2\\ell}{3}\\frac{(s - q)(s + q)}{s^2},\\; q = \\sqrt{\\tfrac{3g}{2\\ell}} \\;\\Rightarrow\\; P_{out}(j\\omega) = \\frac{g\\,(1 + j\\frac{\\omega}{q})(1 - j\\frac{\\omega}{q})}{(j\\omega)^2}',
+          numbers: `g = ${tex(p.g)}\\;(${tex(db(p.g))}\\,\\text{dB}),\\quad q = ${tex(q)},\\quad |P_{out}| \\to \\tfrac{2\\ell}{3} = ${tex(2 * p.ell / 3)} \\text{ above } q`,
+          note: 'The book’s Bode constant for P_out (0.174) is not the low-frequency gain (ISSUES.md).' },
       ];
     },
     buildProblem(parent, ctx) {
@@ -151,13 +160,25 @@
       const mg = () => (p().m1 + p().m2) * p().g, J = () => p().m1 * p().ell / 6 + p().m2 * 2 * p().ell / 3;
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch15, [
         {
-          id: 'a', title: '(a) P<sub>in</sub>: low-frequency gain, corner, slope above, phase',
+          id: 'a', title: '(a) Draw by hand the Bode plot of the inner loop, F to θ',
+          html: 'On paper: put your B.5 transfer function from F̃ to Θ̃ (b = 0) in Bode canonical form and sketch the straight-line magnitude and phase. When you are done, click the button to see the comparison part and the workbench\'s Bode plot (Loop: P_in).',
+          done: 'I\'ve drawn it: next',
+          solution: () => [{ tex: 'P_{in}(j\\omega) = \\frac{\\frac{1}{(m_1+m_2)g}}{(1 + j\\frac{\\omega}{\\omega_p})(1 - j\\frac{\\omega}{\\omega_p})},\\quad \\omega_p = \\sqrt{\\frac{(m_1+m_2)g}{m_1\\frac{\\ell}{6} + m_2\\frac{2\\ell}{3}}}' }, { html: 'Flat, then −40 dB/dec above ω<sub>p</sub>; the phases of the RHP and LHP poles cancel, so the phase is 0° (Fig. 15-13, p. 278).' }],
+        },
+        {
+          id: 'a2', title: '(a) Compare with the bode command: P<sub>in</sub>', after: 'a',
           inputs: { K: '|P<sub>in</sub>(0)|', wp: 'corner [rad/s]', s: 'slope above [dB/dec]', ph: 'phase [°]' },
           check: (v) => PD().checkNumbers(v, { K: 1 / mg(), wp: Math.sqrt(mg() / J()), s: -40, ph: 0 }, { K: '|Pin(0)|', wp: 'corner', s: 'slope', ph: 'phase' }),
           solution: () => [{ tex: `|P_{in}(0)| = \\frac{1}{(m_1+m_2)g} = ${tex(1 / mg())}\\;(${tex(db(1 / mg()))}\\,\\text{dB}),\\; \\omega_p = ${tex(Math.sqrt(mg() / J()))},\\; -40\\text{ dB/dec},\\; 0^\\circ` }, { html: 'An RHP pole and an LHP pole at ±ω<sub>p</sub>: their magnitudes add like two LHP poles, and their phases cancel (Fig. 15-13).' }],
         },
         {
-          id: 'b', title: '(b) P<sub>out</sub>: Bode gain, corner, high-frequency magnitude',
+          id: 'b', title: '(b) Draw by hand the Bode plot of the outer loop, θ to z',
+          html: 'On paper: put your B.5 transfer function from Θ̃ to Z̃ in Bode canonical form and sketch it. Then click the button to see the comparison part and the Bode plot (Loop: P_out).',
+          done: 'I\'ve drawn it: next',
+          solution: () => [{ tex: 'P_{out}(j\\omega) = \\frac{g\\,(1 + j\\frac{\\omega}{q})(1 - j\\frac{\\omega}{q})}{(j\\omega)^2},\\quad q = \\sqrt{\\frac{3g}{2\\ell}}' }, { html: '−40 dB/dec below q, flat at 2ℓ/3 above it; the phase is −180° everywhere (Fig. 15-14, p. 279).' }],
+        },
+        {
+          id: 'b2', title: '(b) Compare with the bode command: P<sub>out</sub>', after: 'b',
           inputs: { K: 'K (P ≈ K/(jω)²)', q: 'corner [rad/s]', hi: '|P<sub>out</sub>(j∞)|' },
           check: (v) => PD().checkNumbers(v, { K: p().g, q: Math.sqrt(3 * p().g / (2 * p().ell)), hi: 2 * p().ell / 3 }, { K: 'K', q: 'corner', hi: 'high-frequency gain' }),
           solution: () => [{ tex: `K = g = ${tex(p().g)},\\; q = \\sqrt{3g/2\\ell} = ${tex(Math.sqrt(3 * p().g / (2 * p().ell)))},\\; |P_{out}| \\to \\tfrac{2\\ell}{3} = ${tex(2 * p().ell / 3)}\\;(${tex(db(2 * p().ell / 3))}\\,\\text{dB})` }, { html: '−40 dB/dec below q, flat above it; the phase is ±180° everywhere (Fig. 15-14).' }],
@@ -234,12 +255,16 @@
     buildProblem(parent, ctx) {
       const s = () => this.specs(ctx);
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
+        { id: 'in', title: 'Inner loop: Bode plots of the plant and of the plant under PD control',
+          html: 'Use the B.10 gains (hw16.py). In your code: bode(P_in) and bode(P_in·C_in) on one graph. Here: Loop = inner, and the gains on the right (B.10 button).' },
         { id: 'a', title: '(a) Inner-loop tracking error below 1 rad/s', inputs: { v: '%' },
           check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().grIn }, { v: 'percent' }),
           solution: () => [{ tex: `B_r = ${tex(s().BrIn)}\\,\\text{dB} \\Rightarrow \\gamma_r = ${tex(100 * s().grIn)}\\%` }, { html: 'The book reads 6.5 dB → 47% from Fig. 16-10 (p. 297), which matches t<sub>r,θ</sub> = 0.5 s (B.8) gains, not the B.10 listing\'s 0.2 s.' }] },
         { id: 'b', title: '(b) Percent of inner-loop noise above 200 rad/s in θ', inputs: { v: '%' },
           check: (v) => PD().checkNumbers({ v: v.v }, { v: 100 * s().gnIn }, { v: 'percent' }),
           solution: () => [{ tex: `|PC(j200)| = ${tex(-s().BnIn)}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gnIn)}\\%` }, { html: 'Book: −32.2 dB → 2.45% (p. 297), again from different gains.' }] },
+        { id: 'out', title: 'Outer loop: Bode plots of the plant and of the plant under PID control',
+          html: 'Same, with bode(P_out) and bode(P_out·C_out). Here: Loop = outer.' },
         { id: 'c', title: '(c) Outer-loop tracking error below 0.001 rad/s for |r| ≤ 50', inputs: { v: '|e| bound' },
           check: (v) => PD().checkNumbers({ v: v.v }, { v: 50 * s().grOut }, { v: 'bound' }),
           solution: () => [{ tex: `B_r = ${tex(s().BrOut)}\\,\\text{dB},\\; |e| \\le 50\\gamma_r = ${tex(50 * s().grOut)}` }, { html: 'Book: 154 dB → γ<sub>r</sub> = 2·10⁻⁸, |e| ≤ 1·10⁻⁶ (p. 297; it prints "100e−08").' }] },
