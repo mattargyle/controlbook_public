@@ -5,7 +5,8 @@ Run with the repo venv:  .venv/bin/python workbench/tools/regress_E.py
 
 The book has no worked solutions for E, so this checks the workbench JS three ways:
   1. f(x, u): the ten test vectors of _E_blockbeam/python/testDynamics.py, with the
-     same |error| < 1e-14 test the script uses (it assumes g = 9.81).
+     same |error| < 1e-14 test the script uses (it assumes g = 9.81); also the
+     Python plant (plantPy) that student controllers run against.
   2. Designs: JS gains against independent Python (closed-form formulas,
      python-control place / margin / bandwidth, numpy eigenvalues, a Routh-free
      bisection for the critical integrator gain).
@@ -234,6 +235,7 @@ const sys = WB.systems.E, E = WB.E, CH = WB.studies.E.chapters;
 const p = {m1: .35, m2: 2, ell: .5, F_max: 15, g: 9.8};
 const out = {};
 out.f = %(X)s.map((x, i) => sys.f(x, %(U)s[i], {...p, g: 9.81}));
+out.plantPy = sys.plantPy;
 const mm = %(MM)s, pt = {...p};
 for (const k of Object.keys(mm)) pt[k] = p[k] * (1 + mm[k] / 100);
 const S = {sim: {Ts: 0.01}};
@@ -315,6 +317,13 @@ def main():
     report("f(x,u) vs testDynamics.py", bool((err < 1e-14).all()), f"max |err| = {err.max():.2e} over {len(X)} vectors (g = 9.81)")
     errpy = np.abs(np.array([f(x, u, {**P, "g": 9.81}) for x, u in zip(X, U)]) - XD)
     report("python f (same formula) vs test", bool((errpy < 1e-14).all()), f"max |err| = {errpy.max():.2e}")
+    # the plant student controllers run against (WB.myCtrl), as Python source
+    import types
+    ns = {"np": np, "P": types.SimpleNamespace(**{**P, "g": 9.81})}
+    exec(js["plantPy"], ns)
+    errpp = np.abs(np.array([ns["f"](np.array(x, dtype=float).reshape(4, 1), u).flatten() for x, u in zip(X, U)]) - XD)
+    hok = all(ns["h"](np.array(x, dtype=float).reshape(4, 1)) == [x[0], x[1]] for x in X)
+    report("plantPy f, h vs testDynamics.py", bool((errpp < 1e-14).all()) and hok, f"max |err| = {errpp.max():.2e}, h = [z, θ]")
 
     # 2. designs
     d8 = pd_design(1, 0.707, 10, 0.707)

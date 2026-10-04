@@ -53,7 +53,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     E.knob(sec, ctx, 'kIth', 'k<sub>I<sub>θ</sub></sub>', 0, 50, 0.01, { sig: 3 });
     E.knob(sec, ctx, 'sigma', 'σ', 0.005, 0.3, 0.001, { unit: 's', sig: 3 });
     // Work mode: the E.10 sample design is an answer to E.10(b), so its button waits for it.
-    const e10 = work && !E.shows(ctx, `${ctx.sys.problems.ch10.id}/b2`);
+    const e10 = work && !E.shows(ctx, `${ctx.sys.problems.ch10.id}/b`);
     sec.append(el('p', { class: 'muted small', text: work
       ? `Defaults: the E.8 specs (t_rθ = 1 s, M = 10, ζ = 0.707), k_Iθ = 0 and σ = 0.05; k_Iz starts at E.P.6's starting value. Set k_Iz yourself (E.P.6(c)).${e10 ? ' The E.10 sample design is available once E.10(b) is solved.' : ''}`
       : 'Defaults: the E.8 specs (t_rθ = 1 s, M = 10, ζ = 0.707) with k_Iz = −10⁻⁴ from E.P.6, k_Iθ = 0 and σ = 0.05. These are not the gains that pass E.10 (see the E.10 solution).' }));
@@ -84,7 +84,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       ...bind(ctx, 'loop'),
     });
   }
-  const FL_NOTE = 'Work mode: the time plots add F_fl(z) once E.4(c) is solved (Ch 4 tab); until then F = F̃.';
+  const FL_NOTE = 'Work mode: the time plots add F_fl once E.4(c) is solved (Ch 4 tab); until then F = F̃.';
   const E10_SAMPLE = { trTh: 0.15, zetaTh: 0.707, M: 8, zetaZ: 0.707, kIz: -0.05, kIth: 20 };
   const freqDefaults = (extra = {}) => ({ comp: 'fl', trTh: 1, zetaTh: 0.707, M: 10, zetaZ: 0.707, kIz: -1e-4, kIth: 0, sigma: 0.05, loop: 'in', vbar: 0.05, ...extra });
   const nestedCtl = (ctx, o) => E.nestedPID(ctx, loopsOf(ctx).g, { comp: 'fl', meas: 'dirty', sigma: ctx.st.sigma, antiwindup: 'gate', vbar: ctx.st.vbar }, o);
@@ -464,12 +464,24 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     if (b.lpf.on) C = T.mul(C, lpf(b.lpf));
     return C;
   }
+  // Work mode: the student's own C_in, C_out and F from (a) and (b) (Python
+  // coefficient lists, st.mine), each 1 until given; Explore: the block knobs.
   function lsDesign(ctx) {
-    const st = ctx.st, pr = ctx.sys.problems.ch18;
-    const Cin = buildC(st.d.in), Cout = buildC(st.d.out, -1);
+    const st = ctx.st;
+    if (ctx.S && ctx.S.mode === 'work') {
+      const m = st.mine || {}, tfOr = (g) => (g ? T.tf(g.num, g.den) : T.gain(1));
+      return lsEval(ctx, tfOr(m.in), tfOr(m.out), tfOr(m.F));
+    }
+    return lsEval(ctx, buildC(st.d.in), buildC(st.d.out, -1), st.d.pf.on ? T.lpf(st.d.pf.p) : T.gain(1));
+  }
+  // Loops, specs and margins of a design. dinOk: a constant input disturbance leaves
+  // no steady-state error in z. Z/D = −g b0 den_in den_out / (s⁴ den_in den_out +
+  // s² b0 num_in den_out − g b0 num_in num_out), so that needs a pole at s = 0 in
+  // C_in C_out that a zero there does not cancel.
+  function lsEval(ctx, Cin, Cout, F) {
+    const pr = ctx.sys.problems.ch18;
     const Lin = T.mul(Pin(ctx), Cin), Tin = T.feedback(Lin);
     const Po = T.mul(Pout(ctx), Tin), Lout = T.mul(Po, Cout), Tout = T.feedback(Lout);
-    const F = st.d.pf.on ? T.lpf(st.d.pf.p) : T.gain(1);
     const spec = (Lg, s) => {
       const m = T.bode(Lg, W).mag;
       let lo = Infinity, hi = 0;
@@ -481,19 +493,127 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     const stableIn = L.roots(L.polyAdd(Lin.den, Lin.num)).every((q) => q.re < 0);
     const stableOut = L.roots(L.polyAdd(Lout.den, Lout.num)).every((q) => q.re < 0);
     const peak = (G) => Math.max(...T.bode(G, W).mag);
-    return { Cin, Cout, Lin, Tin, Po, Lout, Tout, F, si, so, stableIn, stableOut, intOk: st.d.out.pi.on, peakT: peak(Tout), peakFT: peak(T.mul(F, Tout)) };
+    const c0 = (q) => Math.abs(q[q.length - 1]), big = (q) => Math.max(...q.map(Math.abs));
+    const dinOk = c0(Cin.den) * c0(Cout.den) <= 1e-12 * big(Cin.den) * big(Cout.den) && c0(Cin.num) * c0(Cout.num) > 1e-12 * big(Cin.num) * big(Cout.num);
+    return { Cin, Cout, Lin, Tin, Po, Lout, Tout, F, si, so, stableIn, stableOut, dinOk, peakT: peak(Tout), peakFT: peak(T.mul(F, Tout)) };
   }
 
-  // The sample designs answer E.18(a)/(b): in Work mode they load once that part is solved.
-  const sampleOk = (ctx, part) => E.shows(ctx, `${ctx.sys.problems.ch18.id}/${part}`);
-  const SAMPLE_LATER = { ok: false, msg: 'The sample design is an answer to this part: it loads once the part is solved (or in Explore mode).' };
+  // A filter with the output taken after the state update (as the repo's
+  // transferFunction), with T.filter's RK4 substeps; for the E.18(c) check.
+  function filterAfter(G, Ts) {
+    const { A, B, C: Cv, D, n } = T.ss(G);
+    let x = new Array(n).fill(0);
+    const f = (xx, u) => xx.map((_, i) => A[i].reduce((sum, a, j) => sum + a * xx[j], 0) + B[i] * u);
+    const fastest = n ? Math.max(...L.roots(G.den).map((r) => Math.hypot(r.re, r.im))) : 0;
+    const nSub = Math.max(1, Math.ceil(fastest * Ts / 1.5)), h = Ts / nSub;
+    return { step(u) { for (let k = 0; k < nSub && n; k++) x = M.rk4Step(f, x, u, h); return Cv.reduce((sum, c, j) => sum + c * x[j], 0) + D * u; } };
+  }
+
+  // Solutions: the sample designs (regress_E.py checks them with python-control) and
+  // their state-space implementation.
+  const LS_SOL = {
+    a: `# lead at 40 rad/s (M = 20), a low-pass filter at 400 rad/s, gain 135
+k = 135.0
+M, w = 20.0, 40.0
+lead_num = [M, M * w / np.sqrt(M)]
+lead_den = [1.0, w * np.sqrt(M)]
+p = 400.0
+C_in_num = k * np.convolve(lead_num, [p])
+C_in_den = np.convolve(lead_den, [1.0, p])
+`,
+    b: `# integrator (s + 0.2)/s, lead at 2 rad/s (M = 30), low-pass at 30 rad/s.
+# The gain is negative: P = P_out T_in starts at -g/s^2.
+k = -0.0735
+M, w = 30.0, 2.0
+lead_num = [M, M * w / np.sqrt(M)]
+lead_den = [1.0, w * np.sqrt(M)]
+C_out_num = k * np.convolve(np.convolve([1.0, 0.2], lead_num), [30.0])
+C_out_den = np.convolve(np.convolve([1.0, 0.0], lead_den), [1.0, 30.0])
+# prefilter
+F_num = [0.7]
+F_den = [1.0, 0.7]
+`,
+    c: `class TransferFunction:
+    # controllable canonical form (Eq. 18.3-18.4), integrated with RK4
+    def __init__(self, num, den):
+        num = np.array(num, dtype=float) / den[0]
+        den = np.array(den, dtype=float) / den[0]
+        n = len(den) - 1
+        num = np.concatenate([np.zeros(n + 1 - len(num)), num])   # pad to n + 1
+        self.A = np.zeros((n, n))
+        self.A[0, :] = -den[1:]
+        self.A[1:, :-1] = np.eye(n - 1)
+        self.B = np.zeros((n, 1))
+        self.B[0, 0] = 1.0
+        self.C = (num[1:] - num[0] * den[1:]).reshape(1, n)
+        self.D = num[0]
+        self.x = np.zeros((n, 1))
+        # RK4 is unstable for |pole| * h > 2.8: take enough substeps per Ts
+        fastest = max([abs(q) for q in np.roots(den)] + [0.0])
+        self.N = max(1, int(np.ceil(fastest * P.Ts / 1.5)))
+
+    def update(self, u):
+        h = P.Ts / self.N
+        f = lambda x: self.A @ x + self.B * u
+        for _ in range(self.N):
+            F1 = f(self.x); F2 = f(self.x + h / 2 * F1)
+            F3 = f(self.x + h / 2 * F2); F4 = f(self.x + h * F3)
+            self.x = self.x + h / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        return (self.C @ self.x)[0, 0] + self.D * u
+
+
+class Controller:
+    def __init__(self):
+        self.ze = P.ell / 2
+        self.C_in = TransferFunction(P.C_in_num, P.C_in_den)
+        self.C_out = TransferFunction(P.C_out_num, P.C_out_den)
+        self.F = TransferFunction(P.F_num, P.F_den)
+
+    def update(self, z_r, y):
+        z = y[0, 0]
+        theta = y[1, 0]
+        # deviation variables about z_e: the prefilter acts on z_r - z_e
+        z_r_filtered = self.F.update(z_r - self.ze)
+        theta_r = self.C_out.update(z_r_filtered - (z - self.ze))
+        F_tilde = self.C_in.update(theta_r - theta)
+        F = P.m1 * P.g * z / P.ell + P.m2 * P.g / 2 + F_tilde
+        return max(-P.F_max, min(P.F_max, F))
+`,
+  };
+
+  // Evaluate the student's coefficient lists (names: [numName, denName]) into a
+  // transfer function, or {ok: false, msg}.
+  async function readTf(ctx, code, names) {
+    const out = await WB.py.evaluate(code, [{ params: ctx.pModel, vars: names.flat() }]);
+    if (out.error) return WB.yours.pyError(out);
+    const v = out.rows[0].vars, res = {};
+    for (const [nn, dn] of names) {
+      const num = L.trimLeading([v[nn]].flat(Infinity)), den = L.trimLeading([v[dn]].flat(Infinity));
+      if (![...num, ...den].every((x) => typeof x === 'number' && Number.isFinite(x))) return { ok: false, msg: `${nn} and ${dn} must be lists of real numbers.` };
+      if (!den.length || den[0] === 0) return { ok: false, msg: `${dn} must have a nonzero leading coefficient.` };
+      if (num.length > den.length) return { ok: false, msg: `${nn}/${dn} must be proper: the numerator degree can be at most the denominator degree.` };
+      res[nn] = { num, den };
+    }
+    return { ok: true, tfs: res };
+  }
 
   CH.ch18 = {
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping both loops', pages: 'pp. 323–374',
-    defaults() { return { loop: 'in', showT: true, d: startDesign() }; },
+    // mine: the student's C_in, C_out, F from (a) and (b) (Work mode).
+    defaults() { return { loop: 'in', showT: true, d: startDesign(), mine: null }; },
     simDefaults(sys) { return sys.problems.ch18.sim; },
     gains() { return {}; },
     linearLabel: 'linear design model',
+    // Work mode simulates the student's E.18(c) controller, which gets the designed
+    // C_in, C_out, F as coefficient lists in P (as loopShaping*.py gives them).
+    implement: {
+      feed: 'y', linear: false,
+      params(ctx) {
+        const d = lsDesign(ctx), c = (G) => [G.num.slice(), G.den.slice()];
+        const [a, b] = c(d.Cin), [e, f] = c(d.Cout), [g, h] = c(d.F);
+        return { C_in_num: a, C_in_den: b, C_out_num: e, C_out_den: f, F_num: g, F_den: h };
+      },
+    },
     outputSeries: E.pid.thetaRSeries,
 
     // Listing 18.3 style for both loops: θ_r = C_out(F(z̃_r) − z̃), F̃ = C_in(θ_r − θ), F = F_fl(z) + F̃.
@@ -520,11 +640,22 @@ WB.studies.E = WB.studies.E || { chapters: {} };
 
     buildControls(parent, ctx) {
       const st = ctx.st;
+      if (ctx.S.mode === 'work') {
+        // C_in, C_out and F come from the student's Python in (a) and (b), so no block menu here.
+        WB.myCtrl.banner(section(parent, 'Your controller'), ctx, `${ctx.sys.problems.ch18.id}(c)`);
+        const pl = section(parent, 'Plot', 'p. 338–339 · §18.1.9');
+        loopToggle(pl, ctx, 'Bode plot and s-plane');
+        segmented(pl, { label: 'Bode: closed loop', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT', () => st) });
+        pl.append(el('p', { class: 'muted small', text: 'Give C_in in (a) and C_out, F in (b); until then each is 1.' }));
+        this.specSection(parent, ctx);
+        return;
+      }
       const top = section(parent, 'Design', 'p. 338–339 · §18.1.9');
       loopToggle(top, ctx, 'Edit and plot');
       top.append(el('div', { class: 'btn-row' },
         el('button', { type: 'button', class: 'btn', text: 'Starting design', onclick: () => { st.d = startDesign(); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn btn-quiet', text: 'Outer: plain PI + lead', onclick: () => { st.d.out = startDesign().out; ctx.update(); } })));
+        el('button', { type: 'button', class: 'btn btn-quiet', text: 'Outer: plain PI + lead', onclick: () => { st.d.out = startDesign().out; ctx.update(); } }),
+        el('button', { type: 'button', class: 'btn btn-quiet', text: 'Sample design', title: 'the E.18 solution: both loops and the prefilter', onclick: () => { st.d.in = sampleInner(); st.d.out = sampleOuter(); st.d.pf = { on: true, p: 0.7 }; ctx.update(); } })));
       const which = st.loop === 'out' ? 'out' : 'in';
       const b = st.d[which];
       top.append(el('p', { class: 'muted small', text: which === 'in'
@@ -556,7 +687,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       WB.ui.onOff(pf, ctx, () => st.d.pf);
       slider(pf, { label: 'p', unit: 'rad/s', min: 0.05, max: 50, log: true, sig: 3, ...bind(ctx, 'p', () => st.d.pf), disabled: () => !st.d.pf.on });
       segmented(pf, { label: 'Bode: closed loop', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT', () => st) });
+      this.specSection(parent, ctx);
+    },
 
+    specSection(parent, ctx) {
       const sp = section(parent, 'E.18 specs', 'p. 392');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
@@ -570,7 +704,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           row(`outer |L| ≥ ${fmt(db(1 / pr.outer.gr), 3)} dB below ${pr.outer.wr} rad/s`, d.so.lowOk, `${fmt(db(d.so.lo), 3)} dB`),
           row(`outer |L| ≤ ${fmt(db(pr.outer.gn), 3)} dB above ${pr.outer.wn} rad/s`, d.so.highOk, `${fmt(db(d.so.hi), 3)} dB`),
           row('outer PM ≈ 60° (±5°)', d.so.pmOk && d.stableOut, `${fmt(d.so.mg.pm, 3)}° at ${fmt(d.so.mg.wc, 3)}`),
-          row('integrator in C_out (input d)', d.intOk, d.intOk ? 'yes' : 'no'),
+          row('constant d_in rejected', d.dinOk, d.dinOk ? 'yes' : 'no'),
         );
       });
     },
@@ -611,54 +745,101 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Specs as Bode bounds', page: 'p. 287 · Eq. 16.5, p. 287 · Eq. 16.6',
           theory: '|L(j\\omega)| \\ge \\frac{1}{\\gamma_r},\\; \\omega \\le \\omega_r;\\quad |L(j\\omega)| \\le \\gamma_n,\\; \\omega \\ge \\omega_n;\\quad \\gamma = 0.0032 \\leftrightarrow 49.9\\,\\text{dB}' },
         { title: 'Your controllers', page: 'p. 323',
-          theory: `C_{in} = ${T.texTf(d.Cin, 3)}`,
-          numbers: `C_{out} = ${T.texTf(d.Cout, 3)}` },
+          theory: ctx.S.mode === 'work' && !(ctx.st.mine || {}).in ? 'C_{in} = 1\\quad\\text{(none yet: (a))}' : `C_{in} = ${T.texTf(d.Cin, 3)}`,
+          numbers: ctx.S.mode === 'work' && !(ctx.st.mine || {}).out ? 'C_{out} = 1,\\; F = 1\\quad\\text{(none yet: (b))}' : `C_{out} = ${T.texTf(d.Cout, 3)},\\quad F = ${T.texTf(d.F, 3)}` },
         { title: 'Closed-loop peaking and the prefilter', page: 'p. 336 · Eq. 18.5–18.7',
           theory: '\\max|T_{out}| \\text{ vs. } \\max|F\\,T_{out}|',
           numbers: `${tex(db(d.peakT))}\\,\\text{dB} \\to ${tex(db(d.peakFT))}\\,\\text{dB}` },
         { title: 'Implementation', page: 'p. 335 · Eq. 18.3–18.4',
-          theory: '\\dot x_C = A_Cx_C + B_Ce,\\; u = C_Cx_C + D_Ce \\;(\\text{both loops, RK4 at } T_s),\\quad F = F_{fl}(z) + \\tilde F' },
+          theory: '\\dot x_C = A_Cx_C + B_Ce,\\; u = C_Cx_C + D_Ce \\;(\\text{both loops, RK4 at } T_s),\\quad F = F_{fl} + \\tilde F' },
       ];
     },
 
-    buildProblem(parent, ctx) {
+    // Read the student's lists into st.mine (key 'in', or 'out' with F).
+    async loadMine(ctx, code, which) {
+      const names = which === 'in' ? [['C_in_num', 'C_in_den']] : [['C_out_num', 'C_out_den'], ['F_num', 'F_den']];
+      const r = await readTf(ctx, code, names);
+      if (r.ok === false) return r;
       const st = ctx.st;
-      PD().problemPanel(parent, ctx, ctx.sys.problems.ch18, [
+      st.mine = { ...(st.mine || {}) };
+      if (which === 'in') st.mine.in = r.tfs.C_in_num;
+      else { st.mine.out = r.tfs.C_out_num; st.mine.F = r.tfs.F_num; }
+      ctx.update();
+      return { ok: true, mine: st.mine };
+    },
+
+    buildProblem(parent, ctx) {
+      const st = ctx.st, prob = ctx.sys.problems.ch18;
+      const tfOf = (g) => T.tf(g.num, g.den);
+      PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: '(a) Inner loop meets its specs',
-          check: () => { const d = lsDesign(ctx), s = d.si; const ok = s.lowOk && s.highOk && s.pmOk && d.stableIn; return { ok, msg: `low ${s.lowOk ? '✓' : '✗'}, high ${s.highOk ? '✓' : '✗'}, PM ${fmt(s.mg.pm, 3)}° ${s.pmOk ? '✓' : '✗'}` }; },
-          actions: [{ label: 'Load sample inner design', run: () => { if (!sampleOk(ctx, 'a')) return SAMPLE_LATER; st.d.in = sampleInner(); st.loop = 'in'; ctx.update(); return null; } }],
+          id: 'a', title: '(a) Design the inner control C<sub>in</sub>(s): phase margin close to 60°, tracking error γ<sub>r</sub> = 0.0032 below ω<sub>r</sub> = 1 rad/s, noise above 1000 rad/s rejected by γ<sub>n</sub> = 0.0032',
+          html: 'Give C<sub>in</sub>(s) as coefficient lists, highest power of s first (<code>np.convolve</code> multiplies two factors), for P<sub>in</sub>(s) from E.5. <em>Use my C_in</em> draws P<sub>in</sub>C<sub>in</sub> in the Bode plot (inner loop), the s-plane and the spec readouts. The check also requires a stable closed loop.',
+          code: {
+            template: 'C_in_num = [1.0]\nC_in_den = [1.0]\n',
+            check: async (code) => {
+              const r = await this.loadMine(ctx, code, 'in');
+              if (r.ok === false) return r;
+              const d = lsEval(ctx, tfOf(r.mine.in), T.gain(1), T.gain(1)), s = d.si;
+              const ok = s.lowOk && s.highOk && s.pmOk && d.stableIn;
+              return { ok, msg: `low ${s.lowOk ? '✓' : '✗'}, high ${s.highOk ? '✓' : '✗'}, PM ${fmt(s.mg.pm, 3)}° ${s.pmOk ? '✓' : '✗'}${d.stableIn ? '' : ', closed loop unstable ✗'}` };
+            },
+            actions: [{ label: 'Use my C_in', run: async (code) => { const r = await this.loadMine(ctx, code, 'in'); if (r.ok === false) return r; st.loop = 'in'; ctx.update(); return { info: true, msg: 'Your C_in is in the Bode plot (inner loop), the s-plane and the spec readouts.' }; } }],
+          },
           solution: () => [
-            { html: 'P<sub>in</sub> = b₀/s² has −40 dB/dec and −180° everywhere, so a gain alone gives PM = 0. To get +49.9 dB at 1 rad/s and −49.9 dB at 1000 rad/s, the loop needs about 100 dB over three decades: it can cross over near 40 rad/s with phase lead there, then roll off.' },
-            { html: 'Sample: lead at ω = 40 rad/s with M = 20 (+64.8° max), a low-pass at 400 rad/s, and k = 135 so the loop crosses at 40 rad/s. PM ≈ 59°, |L(j1)| ≈ 51.1 dB, |L(j1000)| ≈ −51.6 dB, inner bandwidth ≈ 66 rad/s (python-control agrees).' },
+            { code: LS_SOL.a },
+            { html: 'P<sub>in</sub> = b₀/s² has −40 dB/dec and −180° everywhere, so a gain alone gives PM = 0. To get +49.9 dB at 1 rad/s and −49.9 dB at 1000 rad/s, the loop needs about 100 dB over three decades: it can cross over near 40 rad/s with phase lead there, then roll off. Lead at ω = 40 rad/s with M = 20 (+64.8° max), a low-pass at 400 rad/s, and k = 135 so the loop crosses at 40 rad/s: PM ≈ 59°, |L(j1)| ≈ 51.1 dB, |L(j1000)| ≈ −51.6 dB, inner bandwidth ≈ 66 rad/s (python-control agrees).' },
           ],
         },
         {
-          id: 'b', title: '(b) Outer loop meets its specs, prefilter reduces peaking',
-          html: 'Passes when the three outer specs hold, C<sub>out</sub> has an integrator, and max|F·T<sub>out</sub>| ≤ 0.5 dB.',
-          check: () => {
-            const d = lsDesign(ctx), s = d.so;
-            const ok = s.lowOk && s.highOk && s.pmOk && d.stableOut && d.intOk && db(d.peakFT) <= 0.5;
-            return { ok, msg: `low ${s.lowOk ? '✓' : '✗'}, high ${s.highOk ? '✓' : '✗'}, PM ${fmt(s.mg.pm, 3)}°, integrator ${d.intOk ? '✓' : '✗'}, peak |FT| ${fmt(db(d.peakFT), 3)} dB` };
+          id: 'b', title: '(b) Design the outer controller C<sub>out</sub> for P = P<sub>out</sub>P<sub>in</sub>C<sub>in</sub>/(1 + P<sub>in</sub>C<sub>in</sub>): phase margin close to 60°, constant input disturbances rejected, γ<sub>r</sub> = 0.01 below 0.1 rad/s, γ<sub>n</sub> = 0.001 above 100 rad/s; add a prefilter F(s) to reduce closed-loop peaking',
+          html: 'Give C<sub>out</sub>(s) and F(s) as coefficient lists (C<sub>in</sub> is your design from (a)). <em>Use my C_out, F</em> draws P·C<sub>out</sub> and F·T<sub>out</sub> in the Bode plot (outer loop) and the spec readouts. The check requires the three outer specs, a stable closed loop, zero steady-state error to a constant input disturbance, and max|F·T<sub>out</sub>| ≤ 0.5 dB.',
+          code: {
+            template: 'C_out_num = [1.0]\nC_out_den = [1.0]\nF_num = [1.0]\nF_den = [1.0]\n',
+            check: async (code) => {
+              if (!(st.mine || {}).in) return { ok: false, msg: 'Give C_in in (a) first (Use my C_in or Check).' };
+              const r = await this.loadMine(ctx, code, 'out');
+              if (r.ok === false) return r;
+              const d = lsEval(ctx, tfOf(r.mine.in), tfOf(r.mine.out), tfOf(r.mine.F)), s = d.so;
+              const ok = s.lowOk && s.highOk && s.pmOk && d.stableOut && d.dinOk && db(d.peakFT) <= 0.5;
+              return { ok, msg: `low ${s.lowOk ? '✓' : '✗'}, high ${s.highOk ? '✓' : '✗'}, PM ${fmt(s.mg.pm, 3)}° ${s.pmOk ? '✓' : '✗'}${d.stableOut ? '' : ', closed loop unstable ✗'}, constant d_in rejected ${d.dinOk ? '✓' : '✗'}, peak |FT| ${fmt(db(d.peakFT), 3)} dB` };
+            },
+            actions: [{ label: 'Use my C_out, F', run: async (code) => { const r = await this.loadMine(ctx, code, 'out'); if (r.ok === false) return r; st.loop = 'out'; ctx.update(); return { info: true, msg: 'Your C_out and F are in the Bode plot (outer loop), the s-plane and the spec readouts.' }; } }],
           },
-          actions: [{ label: 'Load sample outer design', run: () => { if (!sampleOk(ctx, 'b')) return SAMPLE_LATER; st.d.in = sampleInner(); st.d.out = sampleOuter(); st.d.pf = { on: true, p: 0.7 }; st.loop = 'out'; ctx.update(); return null; } }],
           solution: () => [
-            { html: 'An integrator (s + z<sub>I</sub>)/s rejects constant input disturbances. With −g/s² that is three integrators (−270°), so the loop needs strong lead at crossover. Sample: −k (s + 0.2)/s · lead(ω = 2, M = 30) · 30/(s + 30), k = 0.0735: PM ≈ 59.7° at 2 rad/s, |L(j0.1)| ≈ 44.5 dB, |L(j100)| ≈ −71 dB. Outer bandwidth ≈ 3.3 rad/s, about 20× below the inner loop.' },
+            { code: LS_SOL.b },
+            { html: 'An integrator (s + z<sub>I</sub>)/s rejects constant input disturbances. With −g/s² that is three integrators (−270°), so the loop needs strong lead at crossover. −k (s + 0.2)/s · lead(ω = 2, M = 30) · 30/(s + 30), k = 0.0735: PM ≈ 59.7° at 2 rad/s, |L(j0.1)| ≈ 44.5 dB, |L(j100)| ≈ −71 dB. Outer bandwidth ≈ 3.3 rad/s, about 20× below the inner loop.' },
             { html: 'Unfiltered, T<sub>out</sub> peaks at about 2 dB (21% overshoot). A prefilter F = 0.7/(s + 0.7) brings the peak to 0 dB, at the cost of a slower rise.' },
           ],
         },
-        {
-          id: 'c', title: '(c) Implemented in simulation',
-          html: 'Passes when the simulated |z<sub>r</sub> − z| just before the first switch is under 2 mm and is under 5 mm again just before t<sub>end</sub>. Set d = 0.5 N (starting at 20 s) in the left panel to test the input-disturbance rejection too.',
-          check: () => {
-            const res = ctx.app.result(), i = E.beforeSwitch(ctx, res), n = res.t.length - 1 - Math.round(0.05 / ctx.S.sim.Ts);
-            const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]), eEnd = Math.abs(res.rAll[0][n] - res.yAll[0][n]);
-            const ok = e < 0.002 && eEnd < 0.005 && isFinite(eEnd);
-            if (!E.ffApplied(ctx, 'fl')) return { ok: false, msg: 'F_fl(z) is applied once E.4(c) is solved (Ch 4 tab).' };
-            return { ok, msg: `error ${fmt(1000 * e, 3)} mm before the first switch, ${fmt(1000 * eEnd, 3)} mm just before t_end (d = ${fmt(ctx.S.sim.dist, 3)} N).` };
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Implement the control strategy in simulation using the state-space equivalents of C(s) and F(s)',
+          html: `Your designs from (a) and (b) are in <code>P.C_in_num</code>, <code>P.C_in_den</code>, <code>P.C_out_num</code>, <code>P.C_out_den</code>, <code>P.F_num</code>, <code>P.F_den</code> (coefficient lists, highest power of s first). Realize each as ż = Az + Bu, y = Cz + Du (Eq. 18.3–18.4), run the loops in deviation variables about z<sub>e</sub> (the prefilter acts on z<sub>r</sub> − z<sub>e</sub>; every filter starts at zero), and add ${E.flName(ctx)} as in E.8(e). One RK4 step per T<sub>s</sub> is unstable for poles faster than about 2.8/T<sub>s</sub> = 280 rad/s, so take several RK4 substeps per T<sub>s</sub> if your design has such poles. The check runs the square wave (0.25 ± 0.15 m, 0.05 Hz) with exact parameters and compares z(t) with the workbench running the same C<sub>in</sub>, C<sub>out</sub>, F (within 3% of the step).`,
+          check: async (code) => {
+            const m = st.mine || {};
+            if (ctx.S.mode === 'work' && !(m.in && m.out)) return { ok: false, msg: 'Give C_in in (a) and C_out, F in (b) first (Use my … or Check).' };
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'square', amplitude: 0.15, frequency: 0.05, tStep: 0 }, tEnd: 20 });
+            const mine = await WB.myCtrl.run(ctx, code, sc);
+            if (mine.ok === false) {
+              if (/inf\/NaN/.test(mine.detail || '')) return { ...mine, msg: `${mine.msg} Something blew up: one RK4 step per T_s is unstable for poles faster than about 280 rad/s.` };
+              return mine;
+            }
+            const P = sc.extraP, p = sc.params, z0 = ctx.sys.ze(p);
+            const G = { Cin: T.tf(P.C_in_num, P.C_in_den), Cout: T.tf(P.C_out_num, P.C_out_den), F: T.tf(P.F_num, P.F_den) };
+            // T.filter outputs before its state update; the repo's transferFunction after it. Either is fine.
+            const refFor = (make) => {
+              const Ci = make(G.Cin, sc.Ts), Co = make(G.Cout, sc.Ts), Ff = make(G.F, sc.Ts);
+              return WB.myCtrl.reference(ctx, sc, { update: (r, x, y) => ctx.sys.Ffl(y[0], p) + Ci.step(Co.step(Ff.step(r - z0) - (y[0] - z0)) - y[1]) });
+            };
+            const e = Math.min(WB.myCtrl.maxDiff(mine, refFor(T.filter)).e, WB.myCtrl.maxDiff(mine, refFor(filterAfter)).e);
+            const tol = 0.03 * 0.15;
+            if (e <= tol) return { ok: true, msg: `Your z(t) matches C_in, C_out and F run by the workbench to within ${fmt(1000 * e, 3)} mm.` };
+            const zBig = Math.max(...mine.yAll[0].map(Math.abs));
+            const blew = !(zBig < 10) ? ` Your loop is unstable (|z| reaches ${fmt(zBig, 3)} m): one RK4 step per T_s is unstable for poles faster than about 280 rad/s.` : '';
+            return { ok: false, msg: `Your z(t) differs from C_in, C_out and F run by the workbench by ${fmt(1000 * e, 3)} mm.${blew}` };
           },
-          solution: () => [{ html: 'Both C(s) and F(s) run as state-space filters (controllable canonical form) integrated with RK4 at T<sub>s</sub>, with substeps for the fast inner-loop poles. The sample design tracks the square wave and rejects the 0.5 N step through the outer integrator.' }],
-        },
+          solution: () => [{ code: LS_SOL.c }, { html: 'The repo\'s transferFunction (ctrlLoopshape.py, loopshape_tools.py): controllable canonical form integrated with RK4, here with substeps so the fast inner-loop poles (179 and 400 rad/s in the sample design) stay stable. The sample design tracks the square wave and rejects a constant input disturbance through the outer integrator (try d = 0.5 N in the left panel).' }],
+        }),
       ]);
     },
   };

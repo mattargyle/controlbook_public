@@ -35,6 +35,9 @@ window.WB = window.WB || {};
   }
   // Is the workbench's F_ff applied (false: Work mode before E.4(a)/(c))?
   const ffApplied = (ctx, comp) => comp === 'none' || shows(ctx, e4(comp === 'fl' ? 'c' : 'a'));
+  // Name of the feedback-linearizing force in labels: F_fl(z) says what it depends
+  // on, which answers E.4(c), so Work mode writes plain F_fl until then.
+  const flName = (ctx, html = true) => (shows(ctx, e4('c')) ? (html ? 'F<sub>fl</sub>(z)' : 'F_fl(z)') : (html ? 'F<sub>fl</sub>' : 'F_fl'));
   // "your F_e" slider for comp 'eq' in Work mode before E.4(a) is solved, and a
   // note saying what is applied. Shown or hidden with the comp control's value.
   function ffWorkControls(parent, ctx) {
@@ -46,8 +49,42 @@ window.WB = window.WB || {};
       slider(parent, { label: 'your F<sub>e</sub>', unit: 'N', min: 0, max: 30, step: 0.01, sig: 4, hint: 'applied with F_e until E.4(a) is solved',
         ...bind(ctx, 'FeW'), disabled: () => ctx.st.comp !== 'eq' });
     }
-    parent.append(el('p', { class: 'muted small', text: `Work mode: ${[!solvedC && 'F_fl(z) is applied once E.4(c) is solved (Ch 4 tab); until then it adds nothing', !solvedA && 'F_e is your F_e until E.4(a) is solved'].filter(Boolean).join('; ')}.` }));
+    parent.append(el('p', { class: 'muted small', text: `Work mode: ${[!solvedC && 'F_fl is applied once E.4(c) is solved (Ch 4 tab); until then it adds nothing', !solvedA && 'F_e is your F_e until E.4(a) is solved'].filter(Boolean).join('; ')}.` }));
   }
+
+  // ------------------------------------------------ student-controller checks --
+  // Helpers for the implementation parts (WB.myCtrl). Results are WB.sim results;
+  // times in s, positions in m.
+  const kAt = (res, t) => Math.min(res.t.length - 1, Math.round(t / (res.t[1] - res.t[0])));
+  // |z_r − z| at time t.
+  const errAt = (res, t) => { const k = kAt(res, t); return Math.abs(res.r[k] - res.yAll[0][k]); };
+  // The block stays on the beam of length ell (the plant's) for the whole run.
+  function onBeamRes(res, ell) {
+    let zmin = Infinity, zmax = -Infinity;
+    for (const z of res.yAll[0]) { if (!isFinite(z)) { zmin = -Infinity; break; } zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
+    const ok = zmin >= 0 && zmax <= ell;
+    return { ok, msg: ok ? `the block stays on the beam (z in [${fmt(zmin, 3)}, ${fmt(zmax, 3)}] m)` : `the block leaves the beam (z from ${fmt(zmin, 3)} to ${fmt(zmax, 3)} m, beam 0–${fmt(ell, 3)} m)` };
+  }
+  // The student's x̂ (extras xhat0..3), as absolute z (a student may return z̃ = z − z_e
+  // instead: then z_e is added back, whichever lies closer to the true z).
+  function xhatOf(res, ze) {
+    const h = [0, 1, 2, 3].map((i) => res.extras[`xhat${i}`]);
+    if (h.some((a) => !a) || Array.prototype.some.call(h[0], (v) => !Number.isFinite(v))) return null;
+    let dAbs = 0, dDev = 0;
+    res.t.forEach((_, k) => { dAbs += Math.abs(res.x[k][0] - h[0][k]); dDev += Math.abs(res.x[k][0] - h[0][k] - ze); });
+    if (dDev < dAbs) h[0] = Float64Array.from(h[0], (v) => v + ze);
+    return h;
+  }
+  // Largest |x_i − x̂_i| over the time windows ([[t0, t1], ...]).
+  function estErr(res, xh, windows) {
+    const e = [0, 0, 0, 0];
+    res.t.forEach((t, k) => {
+      if (!windows.some(([a, b]) => t >= a - 1e-9 && t <= b + 1e-9)) return;
+      for (let i = 0; i < 4; i++) e[i] = Math.max(e[i], Math.abs(res.x[k][i] - xh[i][k]));
+    });
+    return e;
+  }
+  const NEED_XHAT = { ok: false, msg: 'Return (F, x_hat) from update, with x_hat the estimate of x = (z, θ, ż, θ̇) as a 4×1 array, so the check can see your estimate.' };
 
   // -------------------------------------------------- successive loop closure --
   // Design model (E.5(c), p. 386–387): P_in = b0/s², b0 = ℓ/(m2ℓ²/3 + m1 z_e²);
@@ -265,23 +302,6 @@ window.WB = window.WB || {};
   // ---------------------------------------------------------------- UI bits --
   const readout = (parent, rows) => WB.ui.readout(parent, rows);
 
-  // Grid of number boxes for matrix gains (K, L) in Work mode. obj[key] is a
-  // number, or an array for matrix entries (key 'L' with idx).
-  function numGrid(parent, items, onChange) {
-    const grid = el('div', { class: 'part-inputs' });
-    for (const it of items) {
-      const inp = el('input', { type: 'number', step: 'any', class: 'num', 'aria-label': it.label.replace(/<[^>]+>/g, '') });
-      inp.style.width = '92px';
-      inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (!isNaN(v)) { it.set(v); onChange(); } });
-      const lab = el('label', { class: 'part-label' });
-      lab.innerHTML = it.label;
-      grid.append(el('div', { class: 'part-field' }, lab, inp));
-      WB.ui.addRefresher(() => { if (document.activeElement !== inp) inp.value = Number(it.get().toPrecision(5)); });
-    }
-    parent.append(grid);
-    return grid;
-  }
-
   // Slider helper bound to ctx.st[key].
   function knob(parent, ctx, key, label, min, max, step, extra = {}) {
     return slider(parent, { label, min, max, step, sig: extra.sig || 4, unit: extra.unit, hint: extra.hint, log: extra.log, disabled: extra.disabled,
@@ -322,9 +342,9 @@ window.WB = window.WB || {};
   const bandwidth = (Tc, W) => WB.tf.bandwidth(Tc, W, WB.tf.mag(Tc, W[0]) * 10 ** (-3 / 20));
 
   WB.E = {
-    shows, ffOf, ffApplied, ffWorkControls,
+    shows, ffOf, ffApplied, ffWorkControls, flName, kAt, errAt, onBeamRes, xhatOf, estErr, NEED_XHAT,
     pdDesign, innerPoles, outerPoles, nestedPoles, nestedPID, nestedLinearSim,
     ssPoles, augI, augD, obsGain, ssDesign, makeSS, Cr,
-    readout, numGrid, knob, beforeSwitch, beforeLastSwitch, onBeam, P, answersOf, poleText, bandwidth, fmt,
+    readout, knob, beforeSwitch, beforeLastSwitch, onBeam, P, answersOf, poleText, bandwidth, fmt,
   };
 })();

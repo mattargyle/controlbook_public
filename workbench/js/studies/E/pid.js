@@ -26,12 +26,108 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const showsAnswer = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isSolved(key);
   const ids = (ctx) => ({ e4: ctx.sys.problems.ch4.id, e5: ctx.sys.problems.ch5.id, e8: ctx.sys.problems.ch8.id, e9: ctx.sys.problems.ch9.id, p6: ctx.sys.problems.p6.id, e10: ctx.sys.problems.ch10.id });
 
+  // ------------------------------------------------ solution controllers --
+  // E.8: nested PD from the state, F = F_fl(z) + F̃. trLines set tr_th (and tr_z);
+  // sat adds the E.8(f) saturation.
+  const E8_SOL = (trLines, sat) => `class Controller:
+    def __init__(self):
+        # inner loop (theta) on P_in = b0/s^2, the block at z_e = ell/2 (E.5(c))
+        ze = P.ell / 2
+        b0 = P.ell / (P.m2 * P.ell**2 / 3 + P.m1 * ze**2)
+        ${trLines}
+        zeta_th = 0.707
+        wn_th = 2.2 / tr_th
+        self.kp_th = wn_th**2 / b0
+        self.kd_th = 2 * zeta_th * wn_th / b0
+        # outer loop (z) on P_out = -g/s^2, the inner loop as its DC gain (1)
+        zeta_z = 0.707
+        wn_z = 2.2 / tr_z
+        self.kp_z = -wn_z**2 / P.g
+        self.kd_z = -2 * zeta_z * wn_z / P.g
+
+    def update(self, z_r, x):
+        z = x[0, 0]
+        theta = x[1, 0]
+        zdot = x[2, 0]
+        thetadot = x[3, 0]
+        theta_r = self.kp_z * (z_r - z) - self.kd_z * zdot
+        F_tilde = self.kp_th * (theta_r - theta) - self.kd_th * thetadot
+        # feedback linearization (E.4(c)) with the actual block position
+        F_fl = P.m1 * P.g * z / P.ell + P.m2 * P.g / 2
+${sat ? '        F = F_fl + F_tilde\n        return max(-P.F_max, min(P.F_max, F))\n' : '        return F_fl + F_tilde\n'}`;
+
+  // E.10: nested PID from the measured z, θ (dirty derivatives, both integrators).
+  // gate adds the E.10(c) anti-windup.
+  const E10_SOL = (gate) => `class Controller:
+    def __init__(self):
+        # the E.8 loops, made much faster so they survive 20% parameter error
+        ze = P.ell / 2
+        b0 = P.ell / (P.m2 * P.ell**2 / 3 + P.m1 * ze**2)
+        tr_th = 0.15
+        zeta_th = 0.707
+        wn_th = 2.2 / tr_th
+        self.kp_th = wn_th**2 / b0
+        self.kd_th = 2 * zeta_th * wn_th / b0
+        self.ki_th = 20.0
+        tr_z = 8 * tr_th
+        zeta_z = 0.707
+        wn_z = 2.2 / tr_z
+        self.kp_z = -wn_z**2 / P.g
+        self.kd_z = -2 * zeta_z * wn_z / P.g
+        self.ki_z = -0.05            # negative, like kp_z and kd_z
+        # dirty derivatives (Eq. 10.4), sigma = 0.05
+        sigma = 0.05
+        self.beta = (2 * sigma - P.Ts) / (2 * sigma + P.Ts)
+        self.gamma = 2 / (2 * sigma + P.Ts)
+        self.z_prev = P.z0
+        self.theta_prev = P.theta0
+        self.zdot = P.zdot0
+        self.thetadot = P.thetadot0
+        self.int_z = 0.0
+        self.err_z_prev = 0.0
+        self.int_th = 0.0
+        self.err_th_prev = 0.0
+
+    def update(self, z_r, y):
+        z = y[0, 0]
+        theta = y[1, 0]
+        self.zdot = self.beta * self.zdot + self.gamma * (z - self.z_prev)
+        self.thetadot = self.beta * self.thetadot + self.gamma * (theta - self.theta_prev)
+        self.z_prev = z
+        self.theta_prev = theta
+        # outer loop: PID on z gives theta_r
+        err_z = z_r - z
+${gate ? '        # anti-windup: integrate only while the block is nearly still\n        if abs(self.zdot) < 0.05:\n            self.int_z += P.Ts / 2 * (err_z + self.err_z_prev)\n' : '        self.int_z += P.Ts / 2 * (err_z + self.err_z_prev)\n'}        self.err_z_prev = err_z
+        theta_r = self.kp_z * err_z + self.ki_z * self.int_z - self.kd_z * self.zdot
+        # inner loop: PID on theta gives F_tilde
+        err_th = theta_r - theta
+        self.int_th += P.Ts / 2 * (err_th + self.err_th_prev)
+        self.err_th_prev = err_th
+        F_tilde = self.kp_th * err_th + self.ki_th * self.int_th - self.kd_th * self.thetadot
+        F = P.m1 * P.g * z / P.ell + P.m2 * P.g / 2 + F_tilde
+        return max(-P.F_max, min(P.F_max, F))
+`;
+
+  // Work mode for the implementation chapters (E.8, E.10): the PD gain sliders only
+  // place the s-plane poles (their names are in the problem statement); the time
+  // plots show the student's own controller (WB.myCtrl), named by `part`.
+  function workControls(parent, ctx, part) {
+    const sec = section(parent, 'PD gains (s-plane)', 'p. 118 · Fig. 8-10');
+    workGainSliders(sec, ctx);
+    separationReadout(sec, ctx);
+    sec.append(el('p', { class: 'muted small', text: 'These place the inner (θ) and outer (z) poles in the s-plane. They do not drive the simulation.' }));
+    WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
+  }
+  const STEP = (amplitude) => ({ type: 'step', amplitude, tStep: 0 });
+  const SQUARE = (amplitude, frequency) => ({ type: 'square', amplitude, frequency, tStep: 0 });
+  const mis = (m) => Object.entries(m).map(([k, v]) => `${k === 'ell' ? 'ℓ' : k} ${v > 0 ? '+' : '−'}${Math.abs(v)}%`).join(', ');
+
   // ------------------------------------------------------------ shared UI --
   function compControl(parent, ctx) {
     segmented(parent, {
       label: 'Gravity / equilibrium force',
       options: [
-        { value: 'fl', label: 'F<sub>fl</sub>(z) (E.8e)', title: 'feedback linearization with the measured z' },
+        { value: 'fl', label: `${E.flName(ctx)} (E.8e)`, title: E.shows(ctx, `${ctx.sys.problems.ch4.id}/c`) ? 'feedback linearization with the measured z' : 'feedback linearization (your E.4(c))' },
         { value: 'eq', label: 'F<sub>e</sub> at z<sub>e</sub>', title: 'constant equilibrium force' },
         { value: 'none', label: 'none' },
       ],
@@ -235,8 +331,12 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   }
 
   // ------------------------------------------------------------- Chapter 8 --
+  const STEP_E = 0.15;  // E.8(e) check: z̃_r step [m]
   CH.ch8 = {
     id: 'ch8', num: 8, tab: 'Ch 8', title: 'Successive loop closure (PD)', pages: 'pp. 107–136',
+    // Work mode simulates the student's E.8(e)/(f) controller, which gets the state
+    // (as the book's Ch 8 code); no linear overlay (it would need the student's gains).
+    implement: { feed: 'state', linear: false },
 
     defaults(sys) {
       const pr = sys.problems.ch8;
@@ -251,13 +351,16 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     outputSeries: thetaRSeries,
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'PD inner and outer loops', 'p. 118 · Fig. 8-10');
-      compControl(sec, ctx);
-      if (ctx.S.mode === 'work') workGainSliders(sec, ctx);
-      separationReadout(sec, ctx);
-      const spec = section(parent, ctx.S.mode === 'work' ? 'Specs (target rings)' : 'Design knobs', 'p. 387 · E.8(b, d)');
-      designKnobs(spec, ctx);
-      if (ctx.S.mode === 'explore') {
+      const work = ctx.S.mode === 'work';
+      if (work) workControls(parent, ctx, `${ctx.sys.problems.ch8.id}(e) or (f)`);
+      else {
+        const sec = section(parent, 'PD inner and outer loops', 'p. 118 · Fig. 8-10');
+        compControl(sec, ctx);
+        separationReadout(sec, ctx);
+      }
+      const spec = section(parent, work ? 'Specs (target rings)' : 'Design knobs', 'p. 387 · E.8(b, d)');
+      designKnobs(spec, ctx, { rule: !work });
+      if (!work) {
         spec.append(el('p', { class: 'muted small', text: 'Drag an inner (θ) or outer (z) pole. Moving the outer pair changes M; moving the inner pair keeps t_rz.' }));
         gainReadout(spec, ctx);
       }
@@ -271,6 +374,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     onPoleDrag: loopDrag,
 
     extraPlot(ctx, res) {
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       return {
         opts: { title: 'force split F = F_ff + F̃', yLabel: 'F [N]', unit: 'N' },
         data: { series: [
@@ -348,58 +452,57 @@ WB.studies.E = WB.studies.E || { chapters: {} };
             ];
           },
         },
-        {
-          id: 'e', title: '(e) Simulate the square wave 0.25 ± 0.15 m at 0.01 Hz',
-          html: 'Passes when, with F<sub>fl</sub>(z) on, |z<sub>r</sub> − z| just before the first switch (t = 50 s) is under 5 mm and F stays inside ±F<sub>max</sub>.',
-          check: () => {
-            const res = ctx.app.result();
-            if (ctx.st.comp !== 'fl') return { ok: false, msg: 'Select F_fl(z): the problem asks for the actual block position in the equilibrium force.' };
-            if (!E.ffApplied(ctx, 'fl')) return { ok: false, msg: 'F_fl(z) is applied once E.4(c) is solved (Ch 4 tab).' };
-            const i = E.beforeSwitch(ctx, res);
-            const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]);
-            let peak = 0; for (const u of res.uDemand) peak = Math.max(peak, Math.abs(u));
-            const ok = e < 0.005 && peak <= ctx.sys.uLimit(ctx.pModel);
-            return { ok, msg: `error ${fmt(1000 * e, 3)} mm at t = ${fmt(res.t[i], 3)} s, peak |F| = ${fmt(peak, 3)} N.` };
+        WB.myCtrl.part(ctx, {
+          id: 'e', title: '(e) Implement the successive loop closure design in simulation, using the actual block position in the feedback-linearizing term',
+          html: `Write the nested PD controller with your gains from (b) and (d). <code>update</code> gets z<sub>r</sub> and the state x = (z, θ, ż, θ̇), as in the book's Ch 8 code, and returns F. <em>Run my controller</em> drives the time plots (the chapter starts with the book's square wave). The check simulates a ${STEP_E} m step of z̃<sub>r</sub> for 30 s with the nominal and with other parameters and compares z(t) with the design (within 2% of the step).`,
+          check: (code) => {
+            const tune = { trTh: prob.trTh, zetaTh: prob.zetaTh, M: prob.M, zetaZ: prob.zetaZ, rule: '2.2' };
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: STEP(STEP_E), tEnd: 30, feed: 'state' });
+              return {
+                sc, label: pc.label,
+                ref: () => WB.myCtrl.reference(ctx, sc, E.nestedPID(WB.myCtrl.refCtx(ctx, sc), E.pdDesign(sc.params, tune), { comp: 'fl', meas: 'state', ffAlways: true })),
+              };
+            });
+            return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.02 * STEP_E });
           },
-          solution: () => [{ html: 'With the E.8 gains the design is a slow second-order step (t<sub>r</sub> ≈ 10 s, ~4% overshoot), and F stays between about 9.5 and 13 N. The simulation at T<sub>s</sub> = 0.01 s overshoots by ~48% because F<sub>fl</sub>(z) is sampled and held (see the "Sampling the feedback-linearizing force" card); at T<sub>s</sub> = 0.001 s it is ~7%. Switch the equilibrium force to F<sub>e</sub> or none to see why F<sub>fl</sub>(z) matters: with F<sub>e</sub> the uncancelled m₁g z̃ term shifts the loop poles; with none the beam falls.' }],
-        },
-        {
-          id: 'f', title: `(f) Fastest t<sub>r<sub>z</sub></sub> without saturating on a ${prob.stepZ} m step of z̃<sub>r</sub>`,
-          html: `Checked by simulation: block at rest at z<sub>e</sub>, z̃<sub>r</sub> steps to ${prob.stepZ} m, t<sub>r<sub>θ</sub></sub> = t<sub>r<sub>z</sub></sub>/${prob.M}, ζ = ${prob.zetaTh}, F<sub>fl</sub>(z) on. The peak demanded |F| should land between 95% and 100% of F<sub>max</sub>.`,
-          inputs: { trZ: 't<sub>r<sub>z</sub></sub> [s]' },
-          check: (v) => {
-            const trZ = num(v.trZ);
-            if (trZ === null || trZ <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-            const k = { trTh: 1, zetaTh: prob.zetaTh, M: prob.M, zetaZ: prob.zetaZ, rule: '2.2', step: prob.stepZ };
-            const pk = peakForTrZ(ctx, trZ, k) / ctx.sys.uLimit(ctx.pModel), pct = (100 * pk).toFixed(1);
-            if (pk > 1.0005) return { ok: false, msg: `Peak demand is ${pct}% of Fmax, so it saturates. Slow it down.` };
-            if (pk < 0.95) return { ok: false, msg: `Peak demand is ${pct}% of Fmax. You can go faster.` };
-            return { ok: true, msg: `Peak demand is ${pct}% of Fmax.` };
+          solution: () => [
+            { code: E8_SOL('tr_th = 1.0\n        tr_z = 10 * tr_th', false) },
+            { html: 'With the E.8 gains the design is a slow second-order step (t<sub>r</sub> ≈ 10 s, ~4% overshoot), and F stays between about 9.5 and 13 N. The simulation at T<sub>s</sub> = 0.01 s overshoots by ~48% because F<sub>fl</sub>(z) is sampled and held (see the "Sampling the feedback-linearizing force" card); at T<sub>s</sub> = 0.001 s it is ~7%. Replace F<sub>fl</sub>(z) by the constant F<sub>e</sub> to see why it matters: the uncancelled m₁g z̃ term shifts the loop poles.' },
+          ],
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'f', title: `(f) Saturate F at F<sub>max</sub> = ${ctx.pModel.F_max} N; tune the outer rise time for the fastest response without saturation on a ${prob.stepZ} m step of z̃<sub>r</sub>`,
+          seed: [`${prob.id}/e`],
+          html: `Keep ζ = ${prob.zetaTh} in both loops and t<sub>r<sub>θ</sub></sub> = t<sub>r<sub>z</sub></sub>/${prob.M}. The check gives your controller a large error (its output must stay within ±F<sub>max</sub>), then simulates a ${prob.stepZ} m step of z̃<sub>r</sub> with the block at rest at z<sub>e</sub>: your peak |F| must reach 95% of F<sub>max</sub>, and F may sit at the limit for at most 2 samples.`,
+          check: async (code) => {
+            const p = ctx.pModel, Fmax = ctx.sys.uLimit(p), z0 = ctx.sys.ze(p);
+            const pr = await WB.myCtrl.probe(ctx, code, [[z0 + 5, [z0, 0, 0, 0]], [z0 - 5, [z0, 0, 0, 0]]]);
+            if (pr.ok === false) return pr;
+            const big = pr.u.map((u) => u[0]).find((u) => Math.abs(u) > Fmax * (1 + 1e-9));
+            if (big !== undefined) return { ok: false, msg: `For a 5 m error from rest your controller returns F = ${fmt(big, 4)} N. Saturate its output at ±F_max (P.F_max).` };
+            const sc = WB.myCtrl.scenario(ctx, { ref: STEP(prob.stepZ), init: { z0 }, tEnd: 8, feed: 'state' });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            let peak = 0, nAt = 0;
+            for (const u of res.uDemand) { peak = Math.max(peak, Math.abs(u)); if (Math.abs(u) >= Fmax * (1 - 1e-6)) nAt++; }
+            const pct = (100 * peak / Fmax).toFixed(1);
+            if (nAt > 2) return { ok: false, msg: `F sits at the limit for ${nAt} samples, so the input saturates. Slow it down.` };
+            if (peak < 0.95 * Fmax) return { ok: false, msg: `Peak |F| is ${pct}% of Fmax. You can go faster.` };
+            return { ok: true, msg: `Peak |F| is ${pct}% of Fmax${nAt ? `, at the limit for ${nAt} sample${nAt > 1 ? 's' : ''}` : ''}.` };
           },
-          actions: [{
-            label: 'Try it',
-            run: (v) => {
-              const trZ = num(v.trZ);
-              if (trZ === null || trZ <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-              ctx.app.setMode('explore');
-              Object.assign(ctx.st, { trTh: trZ / prob.M, M: prob.M, zetaTh: prob.zetaTh, zetaZ: prob.zetaZ, rule: '2.2', comp: 'fl' });
-              Object.assign(ctx.S.sim, { type: 'step', amplitude: prob.stepZ, tStep: 0, y0: ctx.sys.ze(ctx.pModel), tEnd: Math.max(10, 6 * trZ) });
-              ctx.update();
-              return null;
-            },
-          }],
           solution: () => {
             const k = { trTh: 1, zetaTh: prob.zetaTh, M: prob.M, zetaZ: prob.zetaZ, rule: '2.2', step: prob.stepZ };
             const tr = fastestTrZ(ctx, k);
-            const d = E.pdDesign(ctx.pModel, { ...k, trTh: tr / prob.M });
             const p = ctx.pModel, z0 = ctx.sys.ze(p);
             return [
               { html: `The Eq. 8.8 bound alone does not settle it here. Right after the step, ż = θ̇ = θ = 0, so F̃(0⁺) = k<sub>P<sub>θ</sub></sub>k<sub>P<sub>z</sub></sub>·0.25 is <em>negative</em> (the beam tilts down to start the block moving out). On that side the room is F<sub>fl</sub>(z<sub>e</sub>) + F<sub>max</sub> = ${fmt(ctx.sys.Ffl(z0, p) + ctx.sys.uLimit(p), 3)} N. The binding limit is the braking phase: the beam tilts up while the block nears z = ${fmt(z0 + prob.stepZ, 3)} m, where F<sub>fl</sub> = ${fmt(ctx.sys.Ffl(z0 + prob.stepZ, p), 3)} N leaves only ${fmt(ctx.sys.uLimit(p) - ctx.sys.Ffl(z0 + prob.stepZ, p), 3)} N for F̃.` },
-              { tex: `\\text{bisection on the simulated peak}:\\quad t_{r_z} \\approx ${tex(tr, 3)}\\,\\text{s}\\;(t_{r_\\theta} = ${tex(tr / prob.M, 3)}),\\quad k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)}` },
+              { tex: `\\text{bisection on the simulated peak}:\\quad t_{r_z} \\approx ${tex(tr, 4)}\\,\\text{s}\\;(t_{r_\\theta} = t_{r_z}/${prob.M})` },
+              { code: E8_SOL(`tr_z = ${M.fmt(tr * 1.02, 4)}   # just above the fastest t_r,z\n        tr_th = tr_z / ${prob.M}`, true) },
               { html: 'This reads "step of 0.25 on z̃<sub>r</sub>" as z<sub>r</sub> going from z<sub>e</sub> to z<sub>e</sub> + 0.25 with the block starting at z<sub>e</sub>. Starting at z = 0 instead gives t<sub>r<sub>z</sub></sub> ≈ 1.04 s (see ISSUES.md).' },
             ];
           },
-        },
+        }),
       ]);
     },
   };
@@ -747,6 +850,18 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   };
 
   // ------------------------------------------------------------ Chapter 10 --
+  // E.10(c) checks: a constant θ-measurement offset only a z integrator removes, and a
+  // step during which a z integrator that integrates all the time winds up.
+  const OFFSET_DEG = 0.5, WIND_STEP = 0.15, WIND_OS = 0.01;
+  // The E.10(b) test: the book's square wave on the fixed α = 0.2 plant. Resolves to
+  // {ok, msg, res}, or a Python error {ok: false, msg, detail}.
+  async function trackCheck(ctx, code, prob) {
+    const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(0.15, 0.01), tEnd: 50, mismatch: prob.mismatch });
+    const res = await WB.myCtrl.run(ctx, code, sc);
+    if (res.ok === false) return res;
+    const ob = E.onBeamRes(res, sc.plantParams.ell), e = E.errAt(res, 49.95);
+    return { ok: ob.ok && e < 0.002, msg: `${ob.msg}; |z_r − z| before the first switch: ${fmt(1000 * e, 3)} mm.`, res };
+  }
   CH.ch10 = {
     id: 'ch10', num: 10, tab: 'Ch 10', title: 'Digital nested PID', pages: 'pp. 155–169',
     defaults(sys) {
@@ -761,20 +876,24 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     gains(ctx) { return ctx.S.mode === 'work' ? workGains(ctx.st) : { ...designed(ctx), kIz: ctx.st.kIzx, kIth: ctx.st.kIthx }; },
     opts(ctx) { return { comp: ctx.st.comp, meas: 'dirty', sigma: ctx.st.sigma, antiwindup: ctx.st.antiwindup, vbar: ctx.st.vbar }; },
     controller(ctx, o) { return E.nestedPID(ctx, ctx.gains, this.opts(ctx), o); },
+    // Work mode simulates the student's E.10(b)/(c) controller, from the measured z, θ.
+    implement: { feed: 'y', linear: false },
     linearSim(ctx, c) { return E.nestedLinearSim(ctx, c, ctx.gains, this.opts(ctx)); },
     linearLabel: 'linear design model (exact parameters)',
     targets(ctx) { return ctx.S.mode === 'explore' ? { tr: designed(ctx).trZ } : {}; },
     outputSeries: thetaRSeries,
 
     buildControls(parent, ctx) {
-      const sec = section(parent, 'Nested PID from measured z, θ', 'p. 155, p. 389 · E.10(b)');
-      if (ctx.S.mode === 'work') workGainSliders(sec, ctx, { kI: true, kIth: true });
-      else {
-        designKnobs(sec, ctx, { rule: false });
-        E.knob(sec, ctx, 'kIzx', 'k<sub>I<sub>z</sub></sub>', -0.2, 0, 0.00001, { unit: 'rad/(m·s)' });
-        E.knob(sec, ctx, 'kIthx', 'k<sub>I<sub>θ</sub></sub>', 0, 50, 0.01);
-        gainReadout(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz', 'kIz', 'kIth']);
+      if (ctx.S.mode === 'work') {
+        workControls(parent, ctx, `${ctx.sys.problems.ch10.id}(b) or (c)`);
+        zoomControl(section(parent, 'View'), ctx);
+        return;
       }
+      const sec = section(parent, 'Nested PID from measured z, θ', 'p. 155, p. 389 · E.10(b)');
+      designKnobs(sec, ctx, { rule: false });
+      E.knob(sec, ctx, 'kIzx', 'k<sub>I<sub>z</sub></sub>', -0.2, 0, 0.00001, { unit: 'rad/(m·s)' });
+      E.knob(sec, ctx, 'kIthx', 'k<sub>I<sub>θ</sub></sub>', 0, 50, 0.01);
+      gainReadout(sec, ctx, ['kPth', 'kDth', 'kPz', 'kDz', 'kIz', 'kIth']);
       separationReadout(sec, ctx);
       const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.3–10.4');
       E.knob(imp, ctx, 'sigma', 'σ', 0.002, 0.5, 0.001, { unit: 's', sig: 3, hint: 'dirty-derivative bandwidth 1/σ rad/s' });
@@ -796,6 +915,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     splane(ctx) { return { markers: loopMarkers(ctx), kindNames: KIND_NAMES }; },
 
     extraPlot(ctx, res) {
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       if (ctx.st.extra === 'int') {
         return { opts: { title: 'z integrator ∫e_z dt', yLabel: '∫e dt [m·s]', unit: 'm·s' },
           data: { series: [{ label: '∫(z_r − z) dt', y: Array.from(res.extras.Iz || []), color: '--series-1' }] } };
@@ -817,13 +937,13 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       const d = designed(ctx);
       return [
-        { title: 'Nested digital PID', page: 'p. 160 · Listing 10.1, p. 163 (B.10)',
+        { title: 'Nested digital PID', page: 'p. 160 · Listing 10.1, p. 163 (B.10)', answers: `${ids(ctx).e10}/b`,
           theory: '\\theta_r = k_{P_z}e_z + k_{I_z}\\textstyle\\int e_z - k_{D_z}\\dot{\\hat z},\\quad \\tilde F = k_{P_\\theta}(\\theta_r - \\theta) + k_{I_\\theta}\\textstyle\\int e_\\theta - k_{D_\\theta}\\dot{\\hat\\theta},\\quad F = F_{fl}(z) + \\tilde F' },
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)' },
-        { title: 'Dirty-derivative coefficients', page: 'p. 389 · E.10(b)', answers: `${ids(ctx).e10}/b1`,
+        { title: 'Dirty-derivative coefficients', page: 'p. 389 · E.10(b)', answers: `${ids(ctx).e10}/b`,
           theory: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad \\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}` },
-        { title: 'Anti-windup when k_I < 0', page: 'p. 157 · §10.1.1, p. 389 · E.10(c)',
+        { title: 'Anti-windup when k_I < 0', page: 'p. 157 · §10.1.1, p. 389 · E.10(c)', answers: `${ids(ctx).e10}/c`,
           theory: '\\text{integrate } e_z \\text{ only while } |\\dot{\\hat z}| < \\bar v' },
         { title: 'Gains from the knobs (E.8 formulas)', page: 'p. 387 · E.8', answers: [`${ids(ctx).e8}/b`, `${ids(ctx).e8}/d`],
           theory: 'k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g},\\quad \\omega_n = 2.2/t_r',
@@ -843,45 +963,49 @@ WB.studies.E = WB.studies.E || { chapters: {} };
             return mis.some((v) => Math.abs(v) > 0) ? { ok: true, msg: `Mismatch: ${Object.entries(ctx.S.mismatch).map(([k, v]) => `${k} ${fmt(v, 3)}%`).join(', ')}.` } : { ok: false, msg: 'The true plant equals the model. Randomize it.' };
           },
         },
-        {
-          id: 'b0', title: '(b) Use only the measured z, θ and z<sub>r</sub>',
-          html: 'The nested PID here gets only the measurements and the reference; ż and θ̇ come from dirty derivatives with σ = 0.05. In your own controller class, <code>update(r, y)</code> receives y = (z, θ), not the state.',
-        },
-        {
-          id: 'b1', title: '(b) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
-          inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
-          check: (v) => PD().checkNumbers(v, { a: 0.09 / 0.11, b: 2 / 0.11 }, {}),
-          solution: () => [{ tex: '\\frac{0.09}{0.11} = 0.8182,\\quad \\frac{2}{0.11} = 18.18' }],
-        },
-        {
-          id: 'b2', title: '(b) Tune so there is no steady-state error, with 20% parameter error',
-          html: 'Checks the current simulation (with the plant mismatch in the left panel): the block must stay on the beam (0 ≤ z ≤ ℓ of the true plant) for the whole run, and |z<sub>r</sub> − z| just before the first switch must be under 2 mm.',
-          check: () => {
-            const res = ctx.app.result();
-            const i = E.beforeSwitch(ctx, res);
-            const e = Math.abs(res.rAll[0][i] - res.yAll[0][i]);
-            const ob = E.onBeam(ctx, res);
-            const mm = Object.values(ctx.S.mismatch).some((v) => v !== 0);
-            const ok = ob.ok && e < 0.002 && isFinite(e);
-            return { ok, msg: `${ob.msg}; error ${fmt(1000 * e, 3)} mm at t = ${fmt(res.t[i], 3)} s${mm ? '' : ' (no mismatch set!)'}.` };
+        WB.myCtrl.part(ctx, {
+          id: 'b', title: '(b) Implement the nested PID loops of E.8 using only the measured z, θ and z<sub>r</sub>, with dirty derivatives (σ = 0.05); tune the integrators so there is no steady-state error',
+          seed: [`${ids(ctx).e8}/f`, `${ids(ctx).e8}/e`],
+          html: `Start from your E.8 controller. From here on <code>update(z_r, y)</code> gets the noisy measurement y = (z, θ), not the state. The check runs the book's square wave (0.25 ± 0.15 m, 0.01 Hz) on a plant that differs from the model by ${mis(prob.mismatch)} (a fixed α = 0.2 draw): the block must stay on the beam (0 ≤ z ≤ ℓ of that plant), and |z<sub>r</sub> − z| just before the first switch (t = 50 s) must be under 2 mm.`,
+          check: async (code) => {
+            const r = await trackCheck(ctx, code, prob);
+            return r.res ? { ok: r.ok, msg: r.msg } : r;
           },
           solution: () => [
+            { code: E10_SOL(false) },
             { html: 'With the E.8 gains the loop cannot survive even 1% error in m₂: an unmodeled force ΔF tilts the beam by ΔF/k<sub>P<sub>θ</sub></sub> before the outer loop (whose authority is only |k<sub>P<sub>z</sub></sub>| ≈ 0.005 rad per metre of error) can react, and the block slides off (see the E.9 force-disturbance card). No integrator gain fixes that.' },
-            { html: 'The loops have to be much faster. A design that survives most α = 0.2 draws: t<sub>r<sub>θ</sub></sub> = 0.15 s, M = 8 (t<sub>r<sub>z</sub></sub> = 1.2 s), ζ = 0.707 in both loops, k<sub>I<sub>z</sub></sub> = −0.05 with the |ż| &lt; 0.05 m/s gate, and an inner integrator k<sub>I<sub>θ</sub></sub> = 20 (k<sub>I,crit</sub> ≈ −0.89 for these gains). These are the Explore-mode defaults. With the page\'s fixed draw (m₁ +12%, m₂ −9%, ℓ +15%) the block stays between 0.08 m and 0.41 m and the error before the switch is about 0.02 mm.' },
-            { html: 'Robustness, tested in Python and JS over 90 random draws (each of m₁, m₂, ℓ uniform within ±20%, three seeds of 30): 74 of 90 pass this check (23, 26 and 25 per seed). Counting "stays within 0 ≤ z ≤ 0.5 m" instead of the true ℓ, 83 of 90 pass. The 7 draws that diverge all need at least 14.45 N of the 15 N limit just to hold the block at z = 0.4 m (two need more than 15 N), so there is no force left to brake and no gain choice saves them. The other failures overshoot past a beam end that has shrunk to 0.40–0.45 m, close to the 0.4 m reference. Nothing in this family passes every draw.' },
+            { html: 'The loops have to be much faster. This design survives most α = 0.2 draws: t<sub>r<sub>θ</sub></sub> = 0.15 s, M = 8 (t<sub>r<sub>z</sub></sub> = 1.2 s), ζ = 0.707 in both loops, k<sub>I<sub>z</sub></sub> = −0.05 and an inner integrator k<sub>I<sub>θ</sub></sub> = 20 (k<sub>I,crit</sub> ≈ −0.89 for these gains). These are the Explore-mode defaults. With the page\'s fixed draw the block stays between 0.25 m and 0.41 m and the error before the switch is about 0.03 mm. The inner integrator alone already removes a constant force error (at rest θ = 0 forces θ<sub>r</sub> = 0, so z = z<sub>r</sub>); the z integrator is needed for errors that act on z itself (part (c)).' },
+            { html: 'Robustness, tested in Python and JS over 90 random draws (each of m₁, m₂, ℓ uniform within ±20%, three seeds of 30), with the |ż| gate of (c): 74 of 90 stay on the beam with the error under 2 mm (23, 26 and 25 per seed). Counting "stays within 0 ≤ z ≤ 0.5 m" instead of the true ℓ, 83 of 90 pass. The 7 draws that diverge all need at least 14.45 N of the 15 N limit just to hold the block at z = 0.4 m (two need more than 15 N), so there is no force left to brake and no gain choice saves them. Nothing in this family passes every draw.' },
           ],
-        },
-        {
-          id: 'c', title: '(c) Negative integrator gain and the new anti-windup scheme',
-          html: 'Enter the sign the outer integrator gain k<sub>I<sub>z</sub></sub> must have. Then select the anti-windup scheme that integrates only while |ż| is small (Implementation controls) and try a few values of v̄.',
-          inputs: { s: 'sign of k<sub>I<sub>z</sub></sub> (+1 or −1)' },
-          check: (v) => {
-            const r = PD().checkNumbers(v, { s: -1 }, { s: 'sign' });
-            if (r.ok && ctx.st.antiwindup !== 'gate') return { ok: false, msg: 'Right sign. Now select the |ż| < v̄ anti-windup scheme.' };
-            return r;
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) The integrator gain on z is negative; replace the old anti-windup scheme with one that integrates only when |ż| is small',
+          seed: [`${prob.id}/b`],
+          html: `The check runs (1) the tracking test of (b); (2) a beam-angle measurement that reads ${OFFSET_DEG}° off (a sensor mounted slightly off level), with z<sub>r</sub> = z<sub>e</sub> and exact parameters: only an integrator on z removes the resulting offset, so |z<sub>r</sub> − z| must be under 1 mm at t = 30 s; (3) a ${WIND_STEP} m step of z̃<sub>r</sub> from rest with exact parameters, during which a z integrator that keeps integrating winds up: z may overshoot by at most ${WIND_OS * 1000} mm.`,
+          check: async (code) => {
+            const r = await trackCheck(ctx, code, prob);
+            if (!r.res) return r;
+            if (!r.ok) return { ok: false, msg: `Tracking test (b): ${r.msg}` };
+            const sc = WB.myCtrl.scenario(ctx, { ref: STEP(0), tEnd: 30 });
+            const off = OFFSET_DEG * M.DEG;
+            sc.noise = () => [0, off];   // a constant θ measurement offset
+            const ro = await WB.myCtrl.run(ctx, code, sc);
+            if (ro.ok === false) return ro;
+            const eo = E.errAt(ro, 29.95);
+            if (!(eo < 0.001)) return { ok: false, msg: `Tracking passes, but with θ measured ${OFFSET_DEG}° off, z is ${fmt(1000 * eo, 3)} mm from z_r at t = 30 s. An integrator on z must remove this offset.` };
+            const sw = WB.myCtrl.scenario(ctx, { ref: STEP(WIND_STEP), tEnd: 15 });
+            const rw = await WB.myCtrl.run(ctx, code, sw);
+            if (rw.ok === false) return rw;
+            const os = Math.max(...rw.yAll[0]) - (ctx.sys.refs[0].offset + WIND_STEP);
+            const msg = `θ offset: ${fmt(1000 * eo, 3)} mm at 30 s; ${WIND_STEP} m step: overshoot ${fmt(1000 * Math.max(0, os), 3)} mm.`;
+            if (!(os <= WIND_OS)) return { ok: false, msg: `${msg} The z integrator winds up during the move.` };
+            return { ok: true, msg: `${r.msg} ${msg}` };
           },
-          solution: () => [{ html: 'k<sub>P<sub>z</sub></sub> and k<sub>D<sub>z</sub></sub> are negative because a positive beam angle accelerates the block toward the pivot (z̈ = −gθ), so k<sub>I<sub>z</sub></sub> must be negative as well. The saturation is on F in the inner loop, so the outer integrator cannot unwind from u<sub>sat</sub> − u<sub>unsat</sub>; integrating only while |ż| is small stops windup during the large moves.' }],
-        },
+          solution: () => [
+            { code: E10_SOL(true) },
+            { html: 'k<sub>P<sub>z</sub></sub> and k<sub>D<sub>z</sub></sub> are negative because a positive beam angle accelerates the block toward the pivot (z̈ = −gθ), so k<sub>I<sub>z</sub></sub> must be negative as well. The saturation is on F in the inner loop, so the outer integrator never sees it, and holding it while F saturates changes nothing (F saturates for only a few samples). Integrating only while |ż| &lt; 0.05 m/s stops the windup during large moves: without the gate the same gains overshoot the 0.15 m step by about 18 mm (7 mm with it).' },
+          ],
+        }),
       ]);
     },
   };

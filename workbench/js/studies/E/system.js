@@ -10,6 +10,7 @@
 //   x_e  = (z_e, 0, 0, 0) with z_e = ℓ/2: the operating point for linearization (E.4, E.8a)
 //   F_e  = m1 g z_e/ℓ + m2 g/2: the constant force that holds the beam level at z_e
 //   F_fl(z) = m1 g z/ℓ + m2 g/2: feedback linearization with the measured z (E.8e)
+// Work-mode labels name F_fl(z) only once E.4(c) is solved (WB.E.flName).
 window.WB = window.WB || {};
 WB.systems = WB.systems || {};
 
@@ -82,6 +83,23 @@ WB.systems = WB.systems || {};
     },
     h(x) { return [x[0], x[1]]; },
     uLimit(p) { return p.F_max; },
+
+    // The plant for student controllers (WB.myCtrl), as Python: f(state, F), the
+    // same operations as f above, and the measured outputs h(state) = [z, θ].
+    // Python names for the controller template.
+    plantPy: 'def f(state, F):\n    z = state[0][0]\n    theta = state[1][0]\n    zdot = state[2][0]\n    thetadot = state[3][0]\n'
+      + '    zddot = (1.0 / P.m1) * (P.m1 * z * thetadot**2 - P.m1 * P.g * np.sin(theta))\n'
+      + '    thetaddot = (1.0 / ((P.m2 * P.ell**2) / 3.0 + P.m1 * z**2)) * (F * P.ell * np.cos(theta) - 2.0 * P.m1 * z * zdot * thetadot'
+      + ' - P.m1 * P.g * z * np.cos(theta) - P.m2 * P.g * P.ell / 2.0 * np.cos(theta))\n'
+      + '    return np.array([[zdot], [thetadot], [zddot], [thetaddot]])\n\ndef h(state):\n    return [state[0][0], state[1][0]]\n',
+    py: { r: 'z_r', y: ['z', 'theta'], x: ['z', 'theta', 'zdot', 'thetadot'], u: 'F', rDoc: 'z_r: the commanded block position [m]' },
+    // A second parameter set for controller checks (gains must come from P, not
+    // numbers): the inner-loop gain b0 = ℓ/J_e drops 26%, m1 g/ℓ (F_fl's slope) 54%,
+    // m1 g/J_e (the Jacobian's A41) 66%, while F_e stays well inside F_max and the
+    // sampled F_fl(z) of E.8(e) keeps its outer loop stable (see ISSUES.md).
+    altParams(p) { return { ...p, m1: p.m1 * 0.6, m2: p.m2 * 1.1, ell: p.ell * 1.3 }; },
+    // Entries of P beyond the parameters (as in blockbeamParam.py): the initial state.
+    pyParams(x0) { return { z0: x0[0], theta0: x0[1], zdot0: x0[2], thetadot0: x0[3] }; },
 
     // E.2: K = ½ m1 (ż² + z²θ̇²) + ½ (m2ℓ²/3) θ̇²; E.3: P = (m1 g z + m2 g ℓ/2) sin θ (P = 0 at θ = 0).
     kinetic(x, p) { return 0.5 * p.m1 * (x[2] ** 2 + x[0] ** 2 * x[3] ** 2) + 0.5 * (p.m2 * p.ell ** 2 / 3) * x[3] ** 2; },

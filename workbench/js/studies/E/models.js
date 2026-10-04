@@ -63,10 +63,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       });
     }
   }
-  const COMPS = [
+  // The F_fl label names what it depends on only once E.4(c) is solved (WB.E.flName).
+  const COMPS = (ctx) => [
     { value: 'none', label: 'nothing' },
     { value: 'eq', label: 'F<sub>e</sub> (at z<sub>e</sub>)', title: 'constant equilibrium force' },
-    { value: 'fl', label: 'F<sub>fl</sub>(z)', title: 'feedback linearization with the measured z (E.8e)' },
+    { value: 'fl', label: WB.E.flName(ctx), title: WB.E.shows(ctx, E4C(ctx)) ? 'feedback linearization with the measured z (E.8e)' : 'feedback linearization (your E.4(c))' },
   ];
 
   const common = {
@@ -297,7 +298,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'Open-loop simulation', 'p. 386 · E.3(e)');
-      inputControls(sec, ctx, { comps: COMPS });
+      inputControls(sec, ctx, { comps: COMPS(ctx) });
       WB.E.ffWorkControls(sec, ctx);
       sec.append(el('p', { class: 'muted small', text: 'The block and beam has no stable equilibrium: any tilt makes the block slide and the beam tip further. The energy plot checks the EOM: E(t) − E(0) must equal the work done by F. In Work mode it is empty until you plot your own P or forces or solve (a) or (c): E(t) − E(0) appears with (a), the work done by F with (c), and your own curves whenever you plot them.' }));
     },
@@ -593,7 +594,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       slider(sec, { label: 'δθ(0)', unit: '°', min: -5, max: 5, step: 0.05, sig: 3, ...bind(ctx, 'dth0') });
       segmented(sec, {
         label: 'Linearization',
-        options: [{ value: 'jacobian', label: 'Jacobian: F = F<sub>e</sub> + F̃' }, { value: 'fl', label: 'feedback: F = F<sub>fl</sub>(z) + F̃' }],
+        options: [{ value: 'jacobian', label: 'Jacobian: F = F<sub>e</sub> + F̃' }, { value: 'fl', label: `feedback: F = ${WB.E.flName(ctx)} + F̃` }],
         ...bind(ctx, 'method'),
       });
       const inp = section(parent, 'Input F̃(t)', 'p. 386');
@@ -734,7 +735,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     segmented(parent, {
       label: 'Model and compensation',
       options: [
-        { value: 'simple', label: 'F = F<sub>fl</sub>(z) + F̃, E.5(c) model' },
+        { value: 'simple', label: `F = ${WB.E.flName(ctx)} + F̃, E.5(c) model` },
         { value: 'full', label: 'F = F<sub>e</sub> + F̃, full Jacobian' },
       ],
       ...bind(ctx, 'model'),
