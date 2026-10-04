@@ -290,11 +290,19 @@ WB.chapters = WB.chapters || {};
     simDefaults(sys) { return { ...sys.problems.ch10.sim, mismatch: sys.problems.ch10.mismatch }; },
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD } : designedGains(ctx); },
     controller: (ctx, o) => makePID(ctx, o),
+    implement: { feed: 'y' },  // Work mode simulates the student's A.10(c) controller
 
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') {
+        // The gains only place the s-plane poles; the plots show the student's controller.
+        const sec = section(parent, 'PID gains (s-plane)', 'p. 142');
+        gainSliders(sec, ctx);
+        sec.append(el('p', { class: 'muted small', text: 'These place the closed-loop × in the s-plane. They do not drive the simulation.' }));
+        WB.myCtrl.banner(section(parent, 'Your controller'), ctx, `${ctx.sys.problems.ch10.id}(c)`);
+        return;
+      }
       const sec = section(parent, 'Digital PID', 'p. 155 · Listing 10.2 p. 161');
-      if (ctx.S.mode === 'work') gainSliders(sec, ctx);
-      else { designSliders(sec, ctx, true); readout(sec, ctx); }
+      designSliders(sec, ctx, true); readout(sec, ctx);
       const imp = section(parent, 'Implementation', 'p. 157 · Eq. 10.3–10.4');
       segmented(imp, {
         label: 'θ̇ for the D term',
@@ -325,6 +333,7 @@ WB.chapters = WB.chapters || {};
 
     extraPlot(ctx, res) {
       const k = 180 / Math.PI;
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       if (ctx.st.extra === 'int') {
         return {
           opts: { title: 'integrator u_I(t)', yLabel: '∫e dt [rad·s]', unit: 'rad·s' },
@@ -355,10 +364,10 @@ WB.chapters = WB.chapters || {};
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
           theory: 'U_D(s) = \\frac{s}{\\sigma s + 1}Y(s),\\quad \\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)',
           numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad \\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}`,
-          spoiler: true, answers: `${ctx.sys.problems.ch10.id}/c2` },
+          spoiler: true, answers: `${ctx.sys.problems.ch10.id}/c` },
         { title: 'Anti-windup', page: 'p. 157 · §10.1.1',
           theory: '\\text{(1) integrate only when } |\\dot y| < \\bar v,\\quad \\text{(2) } u_I^+ = u_I + \\frac{1}{k_I}\\big(u_{sat} - u_{unsat}\\big)' },
-        { title: 'Gains from t_r, ζ (Listing 10.2)', page: 'p. 161', answers: [`${ctx.sys.problems.ch8.id}/a`, `${ctx.sys.problems.ch10.id}/c1`],
+        { title: 'Gains from t_r, ζ (Listing 10.2)', page: 'p. 161', answers: [`${ctx.sys.problems.ch8.id}/a`, `${ctx.sys.problems.ch10.id}/c`],
           theory: (st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2 t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}') + ',\\quad k_P = \\frac{\\omega_n^2 - a_0}{b_0},\\quad k_D = \\frac{2\\zeta\\omega_n - a_1}{b_0}',
           numbers: `\\omega_n = ${tex(dg.wn)},\\quad k_P = ${tex(dg.kP)},\\quad k_D = ${tex(dg.kD)},\\quad k_I = ${tex(dg.kI)}`,
           spoiler: true,
@@ -370,10 +379,7 @@ WB.chapters = WB.chapters || {};
 
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch10;
-      const ref = () => {
-        const wn = Math.PI / (2 * prob.tr * Math.sqrt(1 - prob.zeta ** 2));
-        return { wn, ...PD().gainsFromPoles(ctx.model, PD().polesFromWnZeta(wn, prob.zeta)) };
-      };
+      const ids = ctx.sys.problems;
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Parameters vary by up to 20%',
@@ -385,42 +391,24 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'b', title: '(b) Use only the measured θ and θ<sub>r</sub>',
-          html: 'The PID here gets only the (noisy) measurement and the reference; θ̇ comes from the dirty derivative in (c). In your PID controller, <code>update(r, y)</code> receives y, not the state.',
+          html: 'From here on your controller\'s <code>update(theta_r, y)</code> receives the noisy measurement y = [[θ]], not the state.',
         },
-        {
-          id: 'c1', title: `(c) PD gains for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,
-          html: 'Use the A.10 rule ω<sub>n</sub> = π / (2 t<sub>r</sub>√(1−ζ²)).',
-          inputs: { wn: 'ω<sub>n</sub>', kP: 'k<sub>P</sub>', kD: 'k<sub>D</sub>' },
-          check: (v) => PD().checkNumbers(v, ref(), { wn: 'ωn', kP: 'kP', kD: 'kD' }),
-          actions: [{
-            label: 'Use my gains',
-            run: (v) => {
-              const kP = PD().num(v.kP), kD = PD().num(v.kD);
-              if (kP === null || kD === null) return { ok: false, msg: 'Enter kP and kD first.' };
-              ctx.app.setMode('work'); Object.assign(ctx.st, { kP, kD }); ctx.update(); return null;
-            },
-          }],
-          solution: () => { const r = ref(); return [{ tex: `\\omega_n = ${tex(r.wn)},\\quad k_P = ${tex(r.kP)},\\quad k_D = ${tex(r.kD)}` }]; },
-        },
-        {
-          id: 'c2', title: '(c) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
-          inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
-          check: (v) => PD().checkNumbers(v, { a: 0.09 / 0.11, b: 2 / 0.11 }, {}),
-          solution: () => [{ tex: '\\frac{0.09}{0.11} = 0.8182,\\quad \\frac{2}{0.11} = 18.18' }],
-        },
-        {
-          id: 'c3', title: '(c) Tune k<sub>I</sub> to remove the steady-state error',
-          html: 'Checks the current simulation (with the plant mismatch in the left panel): the error just before the first reference switch must be under 0.1°, with no saturation-driven windup ringing.',
-          check: () => {
-            const res = ctx.app.result();
-            const tSw = WB.sim.switchTime(ctx.S);
-            const i = WB.sim.indexBefore(ctx.S, res, tSw);
-            const e = Math.abs(res.r[i] - res.y[i]) / M.DEG;
-            if (!(ctx.gains.kI > 0)) return { ok: false, msg: `kI = 0: error before the switch is ${fmt(e, 3)}°.` };
-            return e < 0.1 ? { ok: true, msg: `Error before the switch: ${fmt(e, 3)}°.` } : { ok: false, msg: `Error before the switch: ${fmt(e, 3)}°.` };
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Implement the A.8 PID with σ = 0.05; tune the integrator', seed: [`${ids.ch8.id}/b`, `${ids.ch8.id}/a2`, `${ids.ch7.id}/d`],
+          html: `Start from your A.8 controller. The check runs the ±30° square wave (0.05 Hz) on a plant that differs from the model by ${Object.entries(prob.mismatch).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}%`).join(', ')}: the error just before the first switch (t = 10 s) must be under 0.1°.`,
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0 }, tEnd: 10, mismatch: prob.mismatch });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const k = Math.round(9.95 / sc.Ts);
+            const e = Math.abs(res.r[k] - res.y[k]) / M.DEG;
+            return { ok: e < 0.1, msg: `Error before the switch: ${fmt(e, 3)}°.` };
           },
-          solution: () => [{ html: `The A.10 solution uses k<sub>I</sub> = ${prob.ki} (Listing 10.2, p. 161).` }],
-        },
+          solution: () => [
+            { code: 'class Controller:\n    def __init__(self):\n        tr = 0.6            # the book\'s A.10 tuning\n        zeta = 0.9\n        self.ki = 0.2\n        wn = 0.5 * np.pi / (tr * np.sqrt(1 - zeta**2))\n        J = P.m * P.ell**2\n        self.kp = wn**2 * J / 3\n        self.kd = (2 * zeta * wn - 3 * P.b / J) * J / 3\n        self.sigma = 0.05\n        self.beta = (2 * self.sigma - P.Ts) / (2 * self.sigma + P.Ts)\n        self.theta_dot = P.thetadot0\n        self.theta_prev = P.theta0\n        self.error_prev = 0.0\n        self.integrator = 0.0\n\n    def update(self, theta_r, y):\n        theta = y[0, 0]\n        error = theta_r - theta\n        # dirty derivative (Eq. 10.4)\n        self.theta_dot = self.beta * self.theta_dot + 2 / (2 * self.sigma + P.Ts) * (theta - self.theta_prev)\n        # anti-windup: integrate only while theta_dot is small\n        if abs(self.theta_dot) < 0.08:\n            self.integrator += P.Ts / 2 * (error + self.error_prev)\n        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta)\n        tau = tau_fl + self.kp * error + self.ki * self.integrator - self.kd * self.theta_dot\n        tau = max(-P.tau_max, min(P.tau_max, tau))\n        self.error_prev = error\n        self.theta_prev = theta\n        return tau\n' },
+            { html: `Listing 10.2 (p. 161) with the anti-windup test fixed (the listing has <code>abs(self.theta_dot < 0.08)</code>). It uses t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}, ω<sub>n</sub> = π/(2t<sub>r</sub>√(1−ζ²)) and k<sub>I</sub> = ${prob.ki}; any A.8 design with a k<sub>I</sub> that removes the error passes.` },
+          ],
+        }),
       ]);
     },
   };

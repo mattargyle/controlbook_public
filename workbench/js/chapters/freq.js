@@ -47,7 +47,7 @@ WB.chapters = WB.chapters || {};
     if (work) {
       const note = el('p', { class: 'muted small', text: `Set your A.10 gains. Buttons with the A.10 gains appear once ${ctx.sys.problems.ch10.id}(c) is solved (Ch 10 tab).` });
       sec.append(note);
-      WB.ui.addRefresher(() => { const on = shows(ctx, 'ch10', 'c1'); row.hidden = !on; note.hidden = on; });
+      WB.ui.addRefresher(() => { const on = shows(ctx, 'ch10', 'c'); row.hidden = !on; note.hidden = on; });
     }
     return sec;
   }
@@ -393,12 +393,54 @@ WB.chapters = WB.chapters || {};
     return d;
   }
 
+  // Solution for A.18(c): the repo's transferFunction (controllable canonical form, RK4).
+  const LS_SOL = `class TransferFunction:
+    def __init__(self, num, den):
+        num = np.array(num, dtype=float) / den[0]
+        den = np.array(den, dtype=float) / den[0]
+        n = len(den) - 1
+        num = np.concatenate([np.zeros(n + 1 - len(num)), num])   # pad to n + 1
+        self.A = np.zeros((n, n))
+        self.A[0, :] = -den[1:]
+        self.A[1:, :-1] = np.eye(n - 1)
+        self.B = np.zeros((n, 1))
+        self.B[0, 0] = 1.0
+        self.C = (num[1:] - num[0] * den[1:]).reshape(1, n)
+        self.D = num[0]
+        self.z = np.zeros((n, 1))
+
+    def update(self, u):
+        f = lambda z: self.A @ z + self.B * u
+        F1 = f(self.z); F2 = f(self.z + P.Ts / 2 * F1)
+        F3 = f(self.z + P.Ts / 2 * F2); F4 = f(self.z + P.Ts * F3)
+        self.z = self.z + P.Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        return (self.C @ self.z)[0, 0] + self.D * u
+
+
+class Controller:
+    def __init__(self):
+        self.C = TransferFunction(P.C_num, P.C_den)
+
+    def update(self, theta_r, y):
+        theta = y[0, 0]
+        e = theta_r - theta
+        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta)
+        tau = tau_fl + self.C.update(e)
+        return max(-P.tau_max, min(P.tau_max, tau))
+`;
+
   WB.chapters.ch18 = {
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping', pages: 'pp. 323–374',
     defaults(sys) { return { ...pidDefaults(sys), ...presetNone(), showT: true }; },
     simDefaults(sys) { return { ...sys.problems.ch18.sim, mismatch: sys.problems.ch18.mismatch }; },
     gains: pidGains,
     linearLabel: 'linear loop (no saturation, d, noise)',
+    // Work mode simulates the student's A.18(c)/(d) controller, which gets the
+    // designed C(s) = C_pid C_l as P.C_num, P.C_den (as loopShaping.py gives them).
+    implement: {
+      feed: 'y',
+      params(ctx) { const C = WB.chapters.ch18.design(ctx).C; return { C_num: C.num.slice(), C_den: C.den.slice() }; },
+    },
 
     design(ctx) {
       const st = ctx.st;
@@ -435,6 +477,7 @@ WB.chapters = WB.chapters || {};
     },
 
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') WB.myCtrl.banner(section(parent, 'Your controller'), ctx, `${ctx.sys.problems.ch18.id}(c) or (d)`);
       const pre = section(parent, 'Start from', 'p. 340–348');
       // The book and repo designs answer A.18(a): Work mode offers them once it is solved.
       const designs = [
@@ -543,17 +586,41 @@ WB.chapters = WB.chapters || {};
           solution: () => [{ html: 'Book text design (p. 341–345): lag z = 1.5, M = 40 (PM drops to 41°), lead at 40 rad/s with M = 10, then low-pass filters at 50 and 150 rad/s. Its figures give PM 59.7° at 14.2 rad/s. The printed final C also includes an unexplained (s+0.7)/(s+0.07); the figures were made without it. The repo (Listing 18.4) is a different design: try both presets.' }] },
         { id: 'b', title: '(b) Add measurement noise',
           html: 'Set noise σ in the left panel. The chapter starts with σ = 0.573° (0.01 rad).' },
-        { id: 'c', title: '(c) Implement C(s) in state-space form',
-          html: 'The simulation runs your C(s) as ż<sub>C</sub> = A<sub>C</sub>z<sub>C</sub> + B<sub>C</sub>e, u = C<sub>C</sub>z<sub>C</sub> + D<sub>C</sub>e (Eq. 18.3–18.4). In your code, <code>control.tf2ss</code> gives the matrices.' },
-        { id: 'd', title: '(d) Prefilter removes the overshoot',
-          html: 'Checks the first step of the current simulation: overshoot under 5%.',
-          check: () => {
-            const res = ctx.app.result(), S = ctx.S;
-            const i0 = Math.round(S.sim.tStep / S.sim.Ts), i1 = S.sim.type === 'square' ? Math.round((S.sim.tStep + 0.5 / S.sim.frequency) / S.sim.Ts) : res.t.length;
-            const m = M.stepMetrics(res.t, res.y, i0, Math.min(i1, res.t.length), res.y[i0], res.r[Math.min(i0 + 1, res.t.length - 1)]);
-            return { ok: m.os < 5, msg: `overshoot ${fmt(m.os, 3)}%` };
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Implement C(s) in simulation using its state-space form',
+          html: 'Your design from (a) is in <code>P.C_num</code>, <code>P.C_den</code> (coefficient lists, highest power of s first, as loopShaping.py gives them). Realize C(s) as ż<sub>C</sub> = A<sub>C</sub>z<sub>C</sub> + B<sub>C</sub>e, u = C<sub>C</sub>z<sub>C</sub> + D<sub>C</sub>e (Eq. 18.3–18.4) and use it on e = θ<sub>r</sub> − θ, with τ<sub>fl</sub>. The check runs the ±30° square wave with exact parameters and compares θ(t) with the workbench running the same C(s) (within 3%).',
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0 }, tEnd: 20 });
+            const mine = await WB.myCtrl.run(ctx, code, sc);
+            if (mine.ok === false) return mine;
+            const Cd = this.design(ctx).C, p = ctx.pModel;
+            // The repo's transferFunction updates the state, then outputs; a filter that outputs first is fine too.
+            const refFor = (make) => {
+              const f = make(Cd, sc.Ts);
+              return WB.myCtrl.reference(ctx, sc, { update: (r, x, y) => ctx.sys.feedbackLinearization([y, 0], p) + (f.update ? f.update(r - y) : f.step(r - y)) });
+            };
+            const e = Math.min(WB.myCtrl.maxDiff(mine, refFor(T.repoFilter)).e, WB.myCtrl.maxDiff(mine, refFor(T.filter)).e) / M.DEG;
+            return e <= 0.9 ? { ok: true, msg: `Your θ(t) matches C(s) run by the workbench to within ${fmt(e, 3)}°.` } : { ok: false, msg: `Your θ(t) differs from C(s) run by the workbench by ${fmt(e, 3)}°.` };
           },
-          solution: () => [{ html: 'The text uses F = 3/(s+3); the listing and Fig. 18-19 use p = 2 (p. 346). Without the prefilter the book reports about 20% overshoot.' }] },
+          solution: () => [{ code: LS_SOL }, { html: 'The repo\'s ctrlLoopshape.py / loopshape_tools.py transferFunction: controllable canonical form, one RK4 step per T<sub>s</sub>.' }],
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'd', title: '(d) Add a low-pass prefilter F(s) that removes the overshoot', seed: `${ctx.sys.problems.ch18.id}/c`,
+          html: 'Filter θ<sub>r</sub> before the error: e = F(θ<sub>r</sub>) − θ, with F implemented like C. The check runs the ±30° square wave with exact parameters: the first step may overshoot by at most 5%, and the error just before the first switch (t = 10 s) must be under 0.5°.',
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'square', amplitude: 30, frequency: 0.05, tStep: 0 }, tEnd: 10 });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const k = res.t.length - 6;
+            const m = M.stepMetrics(res.t, res.y, 0, res.t.length, res.y[0], res.r[1]);
+            const e = Math.abs(res.r[k] - res.y[k]) / M.DEG;
+            return { ok: m.os < 5 && e < 0.5, msg: `Overshoot ${fmt(m.os, 3)}%; error before the switch ${fmt(e, 3)}°.` };
+          },
+          solution: () => [
+            { code: LS_SOL.replace('        self.C = TransferFunction(P.C_num, P.C_den)\n', '        self.C = TransferFunction(P.C_num, P.C_den)\n        p = 2.0   # prefilter pole\n        self.F = TransferFunction([p], [1, p])\n').replace('e = theta_r - theta', 'e = self.F.update(theta_r) - theta') },
+            { html: 'The text uses F = 3/(s+3); the listing and Fig. 18-19 use p = 2 (p. 346). Without the prefilter the book reports about 20% overshoot.' },
+          ],
+        }),
       ]);
     },
   };

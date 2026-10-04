@@ -11,6 +11,193 @@ WB.chapters = WB.chapters || {};
   const { tex, texMat, texPole, fmt } = M;
   const PD = () => WB.pd;
 
+  // Solution controllers (the book's designs; anti-windup added in A.12 onward).
+  const SOL = {
+    ch11: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        tr = 0.489
+        zeta = 0.707
+        J = P.m * P.ell**2
+        A = np.array([[0.0, 1.0], [0.0, -3 * P.b / J]])
+        B = np.array([[0.0], [3 / J]])
+        C = np.array([[1.0, 0.0]])
+        wn = 2.2 / tr
+        poles = np.roots([1, 2 * zeta * wn, wn**2])
+        self.K = cnt.place(A, B, poles)
+        self.kr = -1.0 / (C @ np.linalg.inv(A - B @ self.K) @ B)[0, 0]
+        # dirty derivative for thetadot
+        sigma = 0.05
+        self.beta = (2 * sigma - P.Ts) / (2 * sigma + P.Ts)
+        self.gamma = 2 / (2 * sigma + P.Ts)
+        self.theta_prev = P.theta0
+        self.theta_dot = P.thetadot0
+
+    def update(self, theta_r, y):
+        theta = y[0, 0]
+        self.theta_dot = self.beta * self.theta_dot + self.gamma * (theta - self.theta_prev)
+        self.theta_prev = theta
+        x = np.array([[theta], [self.theta_dot]])
+        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta)
+        tau = tau_fl - (self.K @ x)[0, 0] + self.kr * theta_r
+        return max(-P.tau_max, min(P.tau_max, tau))
+`,
+    ch12: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        tr = 0.489
+        zeta = 0.707
+        p_I = -5.0
+        J = P.m * P.ell**2
+        A = np.array([[0.0, 1.0], [0.0, -3 * P.b / J]])
+        B = np.array([[0.0], [3 / J]])
+        C = np.array([[1.0, 0.0]])
+        A1 = np.block([[A, np.zeros((2, 1))], [-C, np.zeros((1, 1))]])
+        B1 = np.vstack([B, [[0.0]]])
+        wn = 2.2 / tr
+        poles = np.roots(np.convolve([1, 2 * zeta * wn, wn**2], [1, -p_I]))
+        K1 = cnt.place(A1, B1, poles)
+        self.K = K1[:, 0:2]
+        self.ki = K1[0, 2]
+        sigma = 0.05
+        self.beta = (2 * sigma - P.Ts) / (2 * sigma + P.Ts)
+        self.gamma = 2 / (2 * sigma + P.Ts)
+        self.theta_prev = P.theta0
+        self.theta_dot = P.thetadot0
+        self.integrator = 0.0
+        self.error_prev = 0.0
+
+    def update(self, theta_r, y):
+        theta = y[0, 0]
+        self.theta_dot = self.beta * self.theta_dot + self.gamma * (theta - self.theta_prev)
+        self.theta_prev = theta
+        x = np.array([[theta], [self.theta_dot]])
+        error = theta_r - theta
+        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta)
+        integ = self.integrator + P.Ts / 2 * (error + self.error_prev)
+        tau = tau_fl - (self.K @ x)[0, 0] - self.ki * integ
+        # anti-windup: keep the integrator still while the torque saturates
+        if abs(tau) <= P.tau_max:
+            self.integrator = integ
+        self.error_prev = error
+        tau = tau_fl - (self.K @ x)[0, 0] - self.ki * self.integrator
+        return max(-P.tau_max, min(P.tau_max, tau))
+`,
+    ch13: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        tr = 0.4
+        zeta = 0.707
+        p_I = -9.0
+        J = P.m * P.ell**2
+        self.A = np.array([[0.0, 1.0], [0.0, -3 * P.b / J]])
+        self.B = np.array([[0.0], [3 / J]])
+        self.C = np.array([[1.0, 0.0]])
+        A1 = np.block([[self.A, np.zeros((2, 1))], [-self.C, np.zeros((1, 1))]])
+        B1 = np.vstack([self.B, [[0.0]]])
+        wn = 2.2 / tr
+        K1 = cnt.place(A1, B1, np.roots(np.convolve([1, 2 * zeta * wn, wn**2], [1, -p_I])))
+        self.K = K1[:, 0:2]
+        self.ki = K1[0, 2]
+        wn_obs = 2.2 / (tr / 10)          # observer 10x faster
+        zeta_obs = 0.707
+        self.L = cnt.place(self.A.T, self.C.T, np.roots([1, 2 * zeta_obs * wn_obs, wn_obs**2])).T
+        self.x_hat = np.zeros((2, 1))
+        self.tau_prev = 0.0
+        self.integrator = 0.0
+        self.error_prev = 0.0
+
+    def update(self, theta_r, y):
+        x_hat = self.update_observer(y)
+        theta_hat = x_hat[0, 0]
+        error = theta_r - theta_hat
+        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta_hat)
+        integ = self.integrator + P.Ts / 2 * (error + self.error_prev)
+        tau = tau_fl - (self.K @ x_hat)[0, 0] - self.ki * integ
+        if abs(tau) <= P.tau_max:          # anti-windup
+            self.integrator = integ
+        self.error_prev = error
+        tau = tau_fl - (self.K @ x_hat)[0, 0] - self.ki * self.integrator
+        tau = max(-P.tau_max, min(P.tau_max, tau))
+        self.tau_prev = tau
+        return tau, x_hat
+
+    def update_observer(self, y):
+        F1 = self.observer_f(self.x_hat, y)
+        F2 = self.observer_f(self.x_hat + P.Ts / 2 * F1, y)
+        F3 = self.observer_f(self.x_hat + P.Ts / 2 * F2, y)
+        F4 = self.observer_f(self.x_hat + P.Ts * F3, y)
+        self.x_hat = self.x_hat + P.Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        return self.x_hat
+
+    def observer_f(self, x_hat, y):
+        tau_fl = P.m * P.g * P.ell / 2 * np.cos(x_hat[0, 0])
+        return self.A @ x_hat + self.B * (self.tau_prev - tau_fl) + self.L @ (y - self.C @ x_hat)
+`,
+    ch14: String.raw`import control as cnt
+
+class Controller:
+    def __init__(self):
+        tr = 0.4
+        zeta = 0.95
+        p_I = -9.0
+        J = P.m * P.ell**2
+        A = np.array([[0.0, 1.0], [0.0, -3 * P.b / J]])
+        B = np.array([[0.0], [3 / J]])
+        C = np.array([[1.0, 0.0]])
+        A1 = np.block([[A, np.zeros((2, 1))], [-C, np.zeros((1, 1))]])
+        B1 = np.vstack([B, [[0.0]]])
+        wn = 0.5 * np.pi / (tr * np.sqrt(1 - zeta**2))
+        K1 = cnt.place(A1, B1, np.roots(np.convolve([1, 2 * zeta * wn, wn**2], [1, -p_I])))
+        self.K = K1[:, 0:2]
+        self.ki = K1[0, 2]
+        # observer for x and the input disturbance d (d constant)
+        self.A2 = np.block([[A, B], [np.zeros((1, 3))]])
+        self.B2 = np.vstack([B, [[0.0]]])
+        self.C2 = np.hstack([C, [[0.0]]])
+        wn_obs = 10.0
+        zeta_obs = 0.707
+        p_d = -5.5
+        poles = np.roots(np.convolve([1, 2 * zeta_obs * wn_obs, wn_obs**2], [1, -p_d]))
+        self.L2 = cnt.place(self.A2.T, self.C2.T, poles).T
+        self.obs = np.zeros((3, 1))
+        self.tau_prev = 0.0
+        self.integrator = 0.0
+        self.error_prev = 0.0
+
+    def update(self, theta_r, y):
+        self.update_observer(y)
+        x_hat = self.obs[0:2]
+        d_hat = self.obs[2, 0]
+        theta_hat = x_hat[0, 0]
+        error = theta_r - theta_hat
+        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta_hat)
+        integ = self.integrator + P.Ts / 2 * (error + self.error_prev)
+        tau = tau_fl - (self.K @ x_hat)[0, 0] - self.ki * integ - d_hat
+        if abs(tau) <= P.tau_max:          # anti-windup
+            self.integrator = integ
+        self.error_prev = error
+        tau = tau_fl - (self.K @ x_hat)[0, 0] - self.ki * self.integrator - d_hat
+        tau = max(-P.tau_max, min(P.tau_max, tau))
+        self.tau_prev = tau
+        return tau, x_hat, d_hat
+
+    def update_observer(self, y):
+        F1 = self.observer_f(self.obs, y)
+        F2 = self.observer_f(self.obs + P.Ts / 2 * F1, y)
+        F3 = self.observer_f(self.obs + P.Ts / 2 * F2, y)
+        F4 = self.observer_f(self.obs + P.Ts * F3, y)
+        self.obs = self.obs + P.Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+
+    def observer_f(self, z, y):
+        tau_fl = P.m * P.g * P.ell / 2 * np.cos(z[0, 0])
+        return self.A2 @ z + self.B2 * (self.tau_prev - tau_fl) + self.L2 @ (y - self.C2 @ z)
+`,
+  };
+
   // --------------------------------------------------------------- design --
   function wnOf(st) { return PD().wnFromTr(st.tr, st.zeta, st.rule || '2.2'); }
   function ctrlPoles(st) { return PD().polesFromWnZeta(wnOf(st), st.zeta); }
@@ -135,12 +322,6 @@ WB.chapters = WB.chapters || {};
     if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -60, max: -0.1, step: 0.1, sig: 3, ...bind(ctx, 'pD') });
   }
 
-  const WORK_SPEC = {
-    K1: ['K<sub>1</sub>', 0, 10], K2: ['K<sub>2</sub>', 0, 1], kr: ['k<sub>r</sub>', 0, 10], ki: ['k<sub>i</sub>', -30, 0],
-    L1: ['L<sub>1</sub>', 0, 200], L2: ['L<sub>2</sub>', 0, 5000], Ld: ['L<sub>d</sub>', 0, 50],
-  };
-  const workSliders = (parent, ctx, keys) => WB.ui.gainSliders(parent, ctx, WORK_SPEC, keys, { steps: 2000 });
-
   function gainsReadout(parent, ctx, keys) {
     WB.ui.readout(parent, () => {
       const g = ctx.gains;
@@ -184,7 +365,7 @@ WB.chapters = WB.chapters || {};
   }
 
   // Each chapter's part whose answer the desired (target) poles give away.
-  const TARGETS_PART = { ch11: ['ch11', 'a'], ch12: ['ch12', 'a'], ch13: ['ch13', 'c'], ch14: ['ch14', 'b1'] };
+  const TARGETS_PART = { ch11: ['ch11', 'a'], ch12: ['ch12', 'a'], ch13: ['ch13', 'c'], ch14: ['ch14', 'b'] };
   const targetsKey = (ctx) => { const [ch, part] = TARGETS_PART[ctx.S.chapter] || ['ch11', 'a']; return PD().partKey(ctx, ch, part); };
 
   function markers(ctx) {
@@ -193,8 +374,9 @@ WB.chapters = WB.chapters || {};
     // computed from the spec, so each stays off until its part is solved.
     const mk = PD().shows(ctx, PD().partKey(ctx, 'ch7', 'a')) ? L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
     const explore = ctx.S.mode === 'explore';
-    closedLoopPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `controller pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 0 : 2) : undefined }));
-    observerPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 10 : 12) : undefined }));
+    // Work mode has no gains: the plots run the student's own controller.
+    if (explore) closedLoopPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `controller pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 0 : 2) : undefined }));
+    if (explore) observerPoles(ctx).forEach((p, i) => mk.push({ ...p, kind: 'obs', label: `observer pole ${i + 1}`, dragId: explore ? (Math.abs(p.im) > 1e-9 ? 10 : 12) : undefined }));
     if (!explore && ctx.app.isSolved(targetsKey(ctx))) {
       const d = design(ctx);
       for (const p of d.poles) mk.push({ ...p, kind: 'target', label: 'target pole (problem)' });
@@ -256,6 +438,8 @@ WB.chapters = WB.chapters || {};
       id: `ch${num}`, num, tab: `Ch ${num}`, title, pages,
       level,
       controller(ctx, o) { return makeSS(ctx, o); },
+      // Work mode simulates the student's controller (WB.myCtrl), from y only.
+      implement: { feed: 'y', linear: false },
       gains(ctx) { ctx.level = level; return gainsFor(ctx); },
       splane(ctx) { return { markers: markers(ctx), zetaRay: ctx.st.zeta < 1 ? ctx.st.zeta : null }; },
       onPoleDrag: onDrag,
@@ -267,11 +451,50 @@ WB.chapters = WB.chapters || {};
   // Work-mode starting gains: deliberately not the answers.
   const W0 = { K1: 0.2, K2: 0.05, kr: 0.2, ki: -0.5, L1: 20, L2: 200, Ld: 2 };
 
+  // Work-mode control panel: the plots show the student's controller.
+  function workBanner(parent, ctx, part) {
+    WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
+  }
+
+  // The workbench's controller at level with the problem's tuning `tune`, on a
+  // check scenario (reference for WB.myCtrl.matchCheck).
+  function refRun(ctx, sc, level, tune, st = {}) {
+    const rc = WB.myCtrl.refCtx(ctx, sc, { level });
+    rc.st = { ...ctx.st, comp: 'fl', est: 'dirty', antiwindup: 'clamp', xhat0: 0, dobs: true, ...tune, ...st };
+    const d = design(rc, rc.st, level);
+    rc.gains = { K: d.K, kr: d.kr, ki: d.ki, L: d.L, Ld: d.Ld };
+    return WB.myCtrl.reference(ctx, sc, makeSS(rc));
+  }
+
+  // A.12(a) windup test: τ_max lowered so a large step saturates for seconds.
+  const WINDUP = { tauMax: 0.76, step: 60, os: 5 };
+  const SQUARE = (amplitude) => ({ type: 'square', amplitude, frequency: 0.05, tStep: 0 });
+  const errAt = (res, t) => { const k = Math.round(t / (res.t[1] - res.t[0])); return Math.abs(res.r[k] - res.y[k]) / M.DEG; };
+  // The student's estimate must come back from update as (u, x_hat).
+  function needXhat(res) {
+    const a = res.extras.xhat0, b = res.extras.xhat1;
+    if (!a || !b || Array.prototype.some.call(a, (v) => !Number.isFinite(v))) return { ok: false, msg: 'Return (tau, x_hat) from update, with x_hat = [[theta_hat], [thetadot_hat]], so the check can see your estimate.' };
+    return null;
+  }
+  // Largest |θ − θ̂| (deg) and |θ̇ − θ̇̂| (deg/s) over the given time windows.
+  function estErr(res, windows) {
+    let e0 = 0, e1 = 0;
+    res.t.forEach((t, k) => {
+      if (!windows.some(([a, b]) => t >= a - 1e-9 && t <= b + 1e-9)) return;
+      e0 = Math.max(e0, Math.abs(res.x[k][0] - res.extras.xhat0[k]));
+      e1 = Math.max(e1, Math.abs(res.x[k][1] - res.extras.xhat1[k]));
+    });
+    return { th: e0 / M.DEG, thd: e1 / M.DEG };
+  }
+  const bias = (res, t0, t1) => WB.myCtrl.mean(res, t0, t1, (k) => res.x[k][0] - res.extras.xhat0[k]) / M.DEG;
+
+
   // ------------------------------------------------------------ Chapter 11 --
   WB.chapters.ch11 = base('sf', 11, 'Full state feedback', 'pp. 173–196', {
     defaults(sys) { const p = sys.problems.ch11; return { comp: 'fl', est: 'true', tr: p.tr, zeta: p.zeta, rule: '2.2', w: { ...W0 } }; },
     simDefaults(sys) { return sys.problems.ch11.sim; },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workBanner(parent, ctx, `${ctx.sys.problems.ch11.id}(e)`); return; }
       const sec = section(parent, 'State feedback u = −Kx + k_r r', 'p. 173 · Eq. 11.3, p. 183 · Eq. 11.38');
       compControls(sec, ctx);
       segmented(sec, {
@@ -279,8 +502,7 @@ WB.chapters = WB.chapters || {};
         options: [{ value: 'true', label: 'true state (repo)' }, { value: 'dirty', label: 'θ + dirty derivative (A.11e)' }],
         ...bind(ctx, 'est'),
       });
-      if (ctx.S.mode === 'work') workSliders(sec, ctx, ['K1', 'K2', 'kr']);
-      else { tuningSliders(sec, ctx); gainsReadout(sec, ctx, ['K1', 'K2', 'kr']); }
+      tuningSliders(sec, ctx); gainsReadout(sec, ctx, ['K1', 'K2', 'kr']);
     },
     math(ctx) {
       const d = design(ctx);
@@ -297,9 +519,9 @@ WB.chapters = WB.chapters || {};
           theory: 'k_r = \\frac{-1}{C(A - BK)^{-1}B}',
           numbers: `k_r = ${tex(d.kr)}`, spoiler: true,
           note: 'For this plant k_r = K₁: with a free integrator in the plant, unity DC gain needs the reference to enter exactly like the position feedback.' },
-        { title: 'Control law with feedback linearization', page: 'p. 183 · Eq. 11.38',
+        { title: 'Control law with feedback linearization', page: 'p. 183 · Eq. 11.38', answers: PD().partKey(ctx, 'ch11', 'e'),
           theory: '\\tau = \\tau_{fl}(\\theta) - Kx + k_r\\theta_r',
-          numbers: `\\tau = \\tau_{fl}(\\theta) - (${tex(g.K[0])}\\,\\theta + ${tex(g.K[1])}\\,\\dot\\theta) + ${tex(g.kr)}\\,\\theta_r` },
+          numbers: ctx.S.mode === 'work' ? null : `\\tau = \\tau_{fl}(\\theta) - (${tex(g.K[0])}\\,\\theta + ${tex(g.K[1])}\\,\\dot\\theta) + ${tex(g.kr)}\\,\\theta_r` },
       ];
     },
     buildProblem(parent, ctx) {
@@ -331,11 +553,6 @@ WB.chapters = WB.chapters || {};
           id: 'd', title: `(d) K and k<sub>r</sub> for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}`,
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', kr: 'k<sub>r</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], kr: r.kr }, {}); },
-          actions: [{ label: 'Use my gains', run: (v) => {
-            const vals = ['K1', 'K2', 'kr'].map((k) => PD().num(v[k]));
-            if (vals.some((x) => x === null)) return { ok: false, msg: 'Enter K1, K2 and kr.' };
-            ctx.app.setMode('work'); [ctx.st.w.K1, ctx.st.w.K2, ctx.st.w.kr] = vals; ctx.update(); return null;
-          } }],
           solution: () => {
             const r = ref();
             return [
@@ -344,10 +561,20 @@ WB.chapters = WB.chapters || {};
             ];
           },
         },
-        {
-          id: 'e', title: '(e) Implement with a digital differentiator',
-          html: 'In your controller, estimate θ̇ from θ with the dirty derivative (Eq. 10.4). The simulation here applies your K and k<sub>r</sub> from the gain sliders.',
-        },
+        WB.myCtrl.part(ctx, {
+          id: 'e', title: '(e) Implement the state-feedback controller, using a digital differentiator for θ̇',
+          seed: `${ctx.sys.problems.ch10.id}/c`,
+          html: `Your controller gets only the measured θ. The check runs the ±30° square wave with the nominal and with other parameters and compares θ(t) with the design for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta} (within 3%).`,
+          check: (code) => {
+            const tune = { tr: prob.tr, zeta: prob.zeta, rule: '2.2' };
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(30), tEnd: 12 });
+              return { sc, label: pc.label, ref: () => refRun(ctx, sc, 'sf', tune) };
+            });
+            return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * 30 * M.DEG });
+          },
+          solution: () => [{ code: SOL.ch11 }, { html: 'As the repo\'s ctrlStateFeedback.py, with θ̇ from the dirty derivative (σ = 0.05) instead of the true state.' }],
+        }),
       ]);
     },
   });
@@ -357,6 +584,7 @@ WB.chapters = WB.chapters || {};
     defaults(sys) { const p = sys.problems.ch12; return { comp: 'fl', est: 'true', tr: p.tr, zeta: p.zeta, rule: '2.2', pI: p.pI, antiwindup: 'clamp', w: { ...W0 } }; },
     simDefaults(sys) { return { ...sys.problems.ch12.sim, mismatch: sys.problems.ch12.mismatch }; },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workBanner(parent, ctx, `${ctx.sys.problems.ch12.id}(a) and (c)`); return; }
       const sec = section(parent, 'u = −Kx − k_i ∫(r − y)', 'p. 199');
       compControls(sec, ctx);
       segmented(sec, {
@@ -364,10 +592,10 @@ WB.chapters = WB.chapters || {};
         options: [{ value: 'clamp', label: 'hold integrator while saturated' }, { value: 'none', label: 'none (repo)' }],
         ...bind(ctx, 'antiwindup'),
       });
-      if (ctx.S.mode === 'work') workSliders(sec, ctx, ['K1', 'K2', 'ki']);
-      else { tuningSliders(sec, ctx, { pI: true }); gainsReadout(sec, ctx, ['K1', 'K2', 'ki']); }
+      tuningSliders(sec, ctx, { pI: true }); gainsReadout(sec, ctx, ['K1', 'K2', 'ki']);
     },
     extraPlot(ctx, res) {
+      if (ctx.S.mode === 'work') return null;  // the student's controller reports no internals
       return { opts: { title: 'integrator x_I(t)', yLabel: 'x_I [rad·s]', unit: 'rad·s' }, data: { series: [{ label: 'x_I = ∫(r − θ)', y: Array.from(res.extras.integrator || []), color: '--series-1' }] } };
     },
     math(ctx) {
@@ -394,11 +622,6 @@ WB.chapters = WB.chapters || {};
           id: 'a', title: `(a) Gains with t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}, p<sub>I</sub> = ${prob.pI}`,
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', ki: 'k<sub>I</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], ki: r.ki }, {}); },
-          actions: [{ label: 'Use my gains', run: (v) => {
-            const vals = ['K1', 'K2', 'ki'].map((k) => PD().num(v[k]));
-            if (vals.some((x) => x === null)) return { ok: false, msg: 'Enter K1, K2 and kI.' };
-            ctx.app.setMode('work'); [ctx.st.w.K1, ctx.st.w.K2, ctx.st.w.ki] = vals; ctx.update(); return null;
-          } }],
           solution: () => {
             const r = ref();
             return [
@@ -407,6 +630,26 @@ WB.chapters = WB.chapters || {};
             ];
           },
         },
+        WB.myCtrl.part(ctx, {
+          id: 'a2', title: '(a) Add the integrator with anti-windup to your A.11 controller', seed: `${ctx.sys.problems.ch11.id}/e`,
+          html: `Use the gains from above. The check (1) runs a ±10° square wave with the nominal and with other parameters and compares θ(t) with the design (within 3%), then (2) lowers τ<sub>max</sub> to ${WINDUP.tauMax} N·m and steps θ<sub>r</sub> to ${WINDUP.step}°, so τ saturates for seconds: θ may overshoot by at most ${WINDUP.os}°.`,
+          check: async (code) => {
+            const tune = { tr: prob.tr, zeta: prob.zeta, pI: prob.pI, rule: '2.2' };
+            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(10), tEnd: 20 });
+              return { sc, label: pc.label, ref: () => refRun(ctx, sc, 'sfi', tune) };
+            });
+            const m = await WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * 10 * M.DEG });
+            if (!m.ok) return m;
+            const sc = WB.myCtrl.scenario(ctx, { params: { ...ctx.pModel, tau_max: WINDUP.tauMax }, ref: { type: 'step', amplitude: WINDUP.step, tStep: 0 }, tEnd: 15 });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const os = Math.max(...res.y) / M.DEG - WINDUP.step;
+            if (!(os <= WINDUP.os)) return { ok: false, msg: `Tracking matches, but with τ_max = ${WINDUP.tauMax} N·m the ${WINDUP.step}° step overshoots by ${fmt(os, 3)}°: the integrator winds up while τ is saturated.` };
+            return { ok: true, msg: `${m.msg} Saturated ${WINDUP.step}° step: overshoot ${fmt(Math.max(0, os), 3)}°.` };
+          },
+          solution: () => [{ code: SOL.ch12 }, { html: 'Anti-windup here holds the integrator while τ is saturated. Integrating only while |θ̇| is small (Listing 10.2) or unwinding by (τ<sub>sat</sub> − τ<sub>unsat</sub>)/k<sub>I</sub> pass too. The repo\'s ctrlStateFeedbackIntegrator.py has none.' }],
+        }),
         {
           id: 'b', title: '(b) Disturbance and 20% uncertainty',
           html: 'Set an input disturbance d and the true-plant mismatch in the left panel (the chapter starts with d = 0.25 N·m and a 20% draw).',
@@ -415,17 +658,18 @@ WB.chapters = WB.chapters || {};
             return Math.abs(S.sim.dist) > 0 && mis ? { ok: true, msg: `d = ${fmt(S.sim.dist, 3)} N·m with plant mismatch.` } : { ok: false, msg: 'Set both d ≠ 0 and a plant mismatch.' };
           },
         },
-        {
-          id: 'c', title: '(c) Tune for good tracking',
-          html: 'Passes when the error just before the first reference switch is under 0.1° with the current disturbance and mismatch.',
-          check: () => {
-            const res = ctx.app.result(), S = ctx.S;
-            const tSw = WB.sim.switchTime(S);
-            const i = WB.sim.indexBefore(S, res, tSw);
-            const e = Math.abs(res.r[i] - res.y[i]) / M.DEG;
-            return { ok: e < 0.1, msg: `Error before the switch: ${fmt(e, 3)}° (d = ${fmt(S.sim.dist, 3)} N·m).` };
+        WB.myCtrl.part(ctx, {
+          id: 'c', title: '(c) Tune the integrator pole (and other gains if needed) for good tracking', seed: [`${ctx.sys.problems.ch12.id}/a2`],
+          html: `The check runs the ±30° square wave with d = ${prob.sim.dist} N·m and the plant off by ${Object.entries(prob.mismatch).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}%`).join(', ')}: the error just before the first switch (t = 10 s) must be under 0.1°.`,
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(30), tEnd: 10, dist: prob.sim.dist, mismatch: prob.mismatch });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const e = errAt(res, 9.95);
+            return { ok: e < 0.1, msg: `Error before the switch: ${fmt(e, 3)}°.` };
           },
-        },
+          solution: () => [{ code: SOL.ch12 }, { html: `The design from (a) (p<sub>I</sub> = ${prob.pI}) already passes.` }],
+        }),
       ]);
     },
   });
@@ -449,13 +693,12 @@ WB.chapters = WB.chapters || {};
       };
     },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workBanner(parent, ctx, `${ctx.sys.problems.ch13.id}(c)`); return; }
       const sec = section(parent, 'Controller (uses x̂)', 'p. 222 · Fig. 13-3');
       compControls(sec, ctx);
-      if (ctx.S.mode === 'work') workSliders(sec, ctx, ['K1', 'K2', 'ki']);
-      else tuningSliders(sec, ctx, { pI: true });
+      tuningSliders(sec, ctx, { pI: true });
       const ob = section(parent, 'Observer', 'p. 216 · Eq. 13.3');
-      if (ctx.S.mode === 'work') workSliders(ob, ctx, ['L1', 'L2']);
-      else { obsSliders(ob, ctx, false); gainsReadout(ob, ctx, ['K1', 'K2', 'ki', 'L1', 'L2']); }
+      obsSliders(ob, ctx, false); gainsReadout(ob, ctx, ['K1', 'K2', 'ki', 'L1', 'L2']);
       slider(ob, { label: 'θ̂(0)', unit: '°', min: -60, max: 60, step: 1, sig: 3, hint: 'initial estimate (true θ starts at the left panel value)', ...bind(ctx, 'xhat0') });
     },
     math(ctx) {
@@ -464,7 +707,7 @@ WB.chapters = WB.chapters || {};
       const O = L.obsv(A, C);
       return [
         ssCard(ctx),
-        { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224',
+        { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224', answers: PD().partKey(ctx, 'ch13', 'c2'),
           theory: '\\dot{\\hat x} = A\\hat x + B(u - \\tau_{fl}(\\hat\\theta)) + L(y - C\\hat x),\\quad \\dot e = (A - LC)e' },
         { title: 'Observability', page: 'p. 221', answers: PD().partKey(ctx, 'ch13', 'b'),
           theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ \\vdots \\\\ CA^{n-1}\\end{bmatrix},\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = n',
@@ -499,19 +742,41 @@ WB.chapters = WB.chapters || {};
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { L1: r.L[0], L2: r.L[1] }, {}); },
           solution: () => { const r = ref(); return [{ tex: `L = ${texMat(r.L)},\\quad K = ${texMat([r.K])},\\; k_I = ${tex(r.ki)}` }]; },
         },
+        WB.myCtrl.part(ctx, {
+          id: 'c2', title: '(c) Add the observer and use x̂ in your A.12 controller; tune', seed: [`${ctx.sys.problems.ch12.id}/c`, `${ctx.sys.problems.ch12.id}/a2`],
+          html: 'Return <code>(tau, x_hat)</code> from <code>update</code>. The check starts the arm at 10° (your estimate starts wherever you start it) and runs the ±30° square wave with exact parameters: before each switch, |θ − θ̂| must be under 0.01° and |θ̇ − θ̇̂| under 0.1°/s, and the error just before the first switch under 0.1°.',
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(30), tEnd: 20, y0: 10 });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const nx = needXhat(res);
+            if (nx) return nx;
+            const ee = estErr(res, [[8, 9.95], [18, 20]]);
+            const e = errAt(res, 9.95);
+            const msg = `Before the switches: |θ − θ̂| ≤ ${fmt(ee.th, 3)}°, |θ̇ − θ̇̂| ≤ ${fmt(ee.thd, 3)}°/s; error before the first switch ${fmt(e, 3)}°.`;
+            return { ok: ee.th < 0.01 && ee.thd < 0.1 && e < 0.1, msg };
+          },
+          solution: () => [{ code: SOL.ch13 }, { html: 'As the repo\'s ctrlObserver.py (observer 10× faster than the controller, RK4 with the previous saturated τ), plus the A.12 anti-windup.' }],
+        }),
         {
           id: 'd', title: '(d) Plot the state and the estimate',
-          html: 'The θ plot shows the estimate θ̂ with the true θ; the extra plot shows θ̇ and its estimate.',
+          html: 'Run your controller: the θ plot shows your θ̂ with the true θ, and the extra plot your θ̇̂ with the true θ̇.',
         },
         {
           id: 'e', title: '(e) Add d = 0.01 N·m',
-          html: 'Set d = 0.01 in the left panel. The integrator acts on r − θ̂, and θ̂ is biased by the unmodeled d, so θ settles away from r. Chapter 14 removes the bias.',
-          check: () => {
-            const res = ctx.app.result();
-            if (!(Math.abs(ctx.S.sim.dist) > 0)) return { ok: false, msg: 'Set d ≠ 0 first.' };
-            const n = res.t.length - 1;
-            const bias = (res.y[n] - (res.extras.xhat0 || [])[n]) / M.DEG;
-            return { ok: true, msg: `At t_end: θ − θ̂ = ${fmt(bias, 3)}°.` };
+          html: 'Runs your controller from (c) with d = 0.01 N·m and exact parameters. Your observer has no model of d, so x̂ is biased, and an integrator acting on θ̂ leaves θ off r. Passes when the run shows the bias (Chapter 14 removes it).',
+          check: async () => {
+            const code = WB.myCtrl.savedCode(ctx, `${prob.id}/c2`);
+            if (!code) return { ok: false, msg: 'Write your controller in (c) first.' };
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(30), tEnd: 20, dist: 0.01 });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const nx = needXhat(res);
+            if (nx) return nx;
+            const b = bias(res, 18, 20), e = WB.myCtrl.mean(res, 18, 20, (k) => res.y[k] - res.r[k]) / M.DEG;
+            const msg = `With d = 0.01 N·m: θ − θ̂ = ${fmt(b, 3)}° and θ − θ_r = ${fmt(e, 3)}° at the end.`;
+            if (Math.abs(b) < 1e-3) return { ok: false, msg: `${msg} θ̂ follows θ exactly: is x̂ coming from an observer of the model?` };
+            return { ok: true, msg };
           },
         },
       ]);
@@ -537,6 +802,7 @@ WB.chapters = WB.chapters || {};
       };
     },
     buildControls(parent, ctx) {
+      if (ctx.S.mode === 'work') { workBanner(parent, ctx, `${ctx.sys.problems.ch14.id}(b)`); return; }
       const sec = section(parent, 'Controller (uses x̂, subtracts d̂)', 'p. 245');
       compControls(sec, ctx);
       segmented(sec, {
@@ -544,11 +810,9 @@ WB.chapters = WB.chapters || {};
         options: [{ value: true, label: 'on' }, { value: false, label: 'off (A.14a)' }],
         ...bind(ctx, 'dobs'),
       });
-      if (ctx.S.mode === 'work') workSliders(sec, ctx, ['K1', 'K2', 'ki']);
-      else tuningSliders(sec, ctx, { pI: true, rule: true });
+      tuningSliders(sec, ctx, { pI: true, rule: true });
       const ob = section(parent, 'Observer', 'p. 241');
-      if (ctx.S.mode === 'work') workSliders(ob, ctx, ['L1', 'L2', 'Ld']);
-      else { obsSliders(ob, ctx, true); gainsReadout(ob, ctx, ['K1', 'K2', 'ki', 'L1', 'L2', 'Ld']); }
+      obsSliders(ob, ctx, true); gainsReadout(ob, ctx, ['K1', 'K2', 'ki', 'L1', 'L2', 'Ld']);
     },
     math(ctx) {
       const d = design(ctx);
@@ -559,9 +823,9 @@ WB.chapters = WB.chapters || {};
         { title: 'Augmented model (ḋ = 0)', page: 'p. 240', answers: PD().partKey(ctx, 'ch6', 'a'),
           theory: 'A_2 = \\begin{bmatrix}A & B\\\\ 0 & 0\\end{bmatrix},\\quad C_2 = \\begin{bmatrix}C & 0\\end{bmatrix}',
           numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` },
-        { title: 'Disturbance observer', page: 'p. 241',
+        { title: 'Disturbance observer', page: 'p. 241', answers: PD().partKey(ctx, 'ch14', 'b'),
           theory: '\\dot{\\hat x} = A\\hat x + B(u + \\hat d) + L(y - C\\hat x),\\quad \\dot{\\hat d} = L_d(y - C\\hat x),\\quad u = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
-        { title: 'Observer gains', page: 'p. 241', answers: PD().partKey(ctx, 'ch14', 'b1'),
+        { title: 'Observer gains', page: 'p. 241', answers: PD().partKey(ctx, 'ch14', 'b'),
           theory: '\\begin{bmatrix}L\\\\ L_d\\end{bmatrix} = \\text{place}(A_2^\\top, C_2^\\top, q)^\\top',
           numbers: `q = ${d.obsPoles.map((p) => texPole(p)).join(',\\;')},\\quad L = ${texMat(d.L)},\\; L_d = ${tex(d.Ld)}`, spoiler: true,
           note: 'The A.14 solution\'s observer (|q| ≈ 5.5–10) is slower than its controller (ω_n ≈ 12.6), the opposite of the usual "observer 5–10× faster" rule.' },
@@ -570,30 +834,37 @@ WB.chapters = WB.chapters || {};
     },
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch14;
-      const ref = () => design(ctx, { ...ctx.st, tr: prob.tr, zeta: prob.zeta, rule: 'tp', pI: prob.pI, wnObs: prob.wnObs, zetaObs: prob.zetaObs, pD: prob.pD }, 'dobs');
+      const a13 = `${ctx.sys.problems.ch13.id}/c2`;
+      const mis = Object.entries(prob.mismatch).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}%`).join(', ');
+      const noise = prob.sim.noise * M.DEG;  // display ° -> rad
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Large disturbance, noise, 20% uncertainty',
-          html: 'The chapter starts with α = 0.2, d = 0.5 N·m and noise σ = 0.001 rad (0.0573°). Turn the disturbance observer off to see the controller fail to reject d.',
+          html: `The chapter starts with the plant off by ${mis}, d = ${prob.sim.dist} N·m and noise σ = ${fmt(noise, 3)} rad (${prob.sim.noise}°). Run your A.13 controller here to see the bias it leaves.`,
+          actions: [{ label: 'Run my A.13 controller', run: () => {
+            const code = WB.myCtrl.savedCode(ctx, a13);
+            if (!code) return { ok: false, msg: `Write your controller in ${a13.replace('/', '(')}) first (Ch 13 tab).` };
+            return WB.myCtrl.use(ctx, code, 'a');
+          } }],
         },
-        {
-          id: 'b1', title: `(b) Observer gains for ω<sub>n,obs</sub> = ${prob.wnObs}, ζ<sub>obs</sub> = ${prob.zetaObs}, p<sub>d</sub> = ${prob.pD}`,
-          inputs: { L1: 'L<sub>1</sub>', L2: 'L<sub>2</sub>', Ld: 'L<sub>d</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { L1: r.L[0], L2: r.L[1], Ld: r.Ld }, {}); },
-          solution: () => { const r = ref(); return [{ tex: `L = ${texMat(r.L)},\\; L_d = ${tex(r.Ld)};\\quad K = ${texMat([r.K])},\\; k_I = ${tex(r.ki)}` }]; },
-        },
-        {
-          id: 'b2', title: '(b) Estimator bias removed',
-          html: 'Passes when the observer bias |θ − θ̂| at t<sub>end</sub> is under 0.05°. Compare with the observer switched off.',
-          check: () => {
-            const res = ctx.app.result(), S = ctx.S, n = res.t.length - 1;
-            if (!ctx.st.dobs) return { ok: false, msg: 'Turn the disturbance observer on.' };
-            const dh = (res.extras.dhat || [])[n], bias = Math.abs(res.y[n] - res.extras.xhat0[n]) / M.DEG;
-            const ok = bias < 0.05;
-            return { ok, msg: `d̂ = ${fmt(dh, 3)} vs d = ${fmt(S.sim.dist, 3)}; |θ − θ̂| = ${fmt(bias, 3)}°.` };
+        WB.myCtrl.part(ctx, {
+          id: 'b', title: '(b) Add a disturbance observer, verify the estimator\'s steady-state error is removed, and tune', seed: [a13],
+          html: `Return <code>(tau, x_hat)</code> (or <code>(tau, x_hat, d_hat)</code> to plot your d̂). The check runs the ±30° square wave with the plant off by ${mis}, d = ${prob.sim.dist} N·m and noise σ = ${fmt(noise, 3)} rad: the mean of θ − θ̂ over the last 2 s must be under 0.05°, and the mean error over the 0.5 s before the first switch under 0.1°.`,
+          check: async (code) => {
+            const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(30), tEnd: 20, dist: prob.sim.dist, mismatch: prob.mismatch, noise, seed: 1 });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            const nx = needXhat(res);
+            if (nx) return nx;
+            const b = bias(res, 18, 20);
+            const e = WB.myCtrl.mean(res, 9.45, 9.95, (k) => res.r[k] - res.y[k]) / M.DEG;
+            return { ok: Math.abs(b) < 0.05 && Math.abs(e) < 0.1, msg: `Mean θ − θ̂ over the last 2 s: ${fmt(b, 3)}°; mean error before the first switch: ${fmt(e, 3)}°.` };
           },
-          solution: () => [{ html: 'd̂ estimates the input disturbance plus any torque the model gets wrong (mismatch, gravity residual), so it settles near d but not exactly on it.' }],
-        },
+          solution: () => [
+            { code: SOL.ch14 },
+            { html: `As the repo's ctrlDisturbanceObserver.py (ω<sub>n,obs</sub> = ${prob.wnObs}, ζ<sub>obs</sub> = ${prob.zetaObs}, disturbance pole ${prob.pD}), plus anti-windup. d̂ estimates the input disturbance plus any torque the model gets wrong (mismatch, gravity residual), so it settles near d but not exactly on it.` },
+          ],
+        }),
       ]);
     },
   });

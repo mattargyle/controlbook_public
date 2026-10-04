@@ -172,11 +172,164 @@ def _simulate(a):
             return {'error': f'The state became inf/NaN at t = {(k + 1) * Ts:.3g} s', 'where': ''}
     return {'x': xs}
 
+# Student controllers (Ch 7-18). The student's class runs with 'params' (the
+# controller's model); the workbench's plant 'f' and output 'h' run in their own
+# namespace with 'plantParams' (the true plant). Each step, as hwNN_*Sim.py:
+# y_m = h(x) + noise[k], out = ctrl.update(r[k], y_m or x), u = sat(out),
+# u_applied = sat(u + d[k]), then RK4 over Ts with u_applied held. update may
+# return u, or a tuple (u, x_hat) or (u, x_hat, d_hat), which are recorded.
+def _make_ctrl(a):
+    code = _compile(a['code'])
+    ns = _namespace(code, a['params'])
+    name = a.get('cls', 'Controller')
+    cls = ns.get(name)
+    if not isinstance(cls, type):
+        return None, {'error': f'NameError: define a class named {name}', 'where': ''}
+    try:
+        ctrl = cls()
+    except Exception as e:
+        return None, _err(e, f' (in {name}())')
+    if not callable(getattr(ctrl, 'update', None)):
+        return None, {'error': f'AttributeError: {name} has no update(self, r, y) method', 'where': ''}
+    return ctrl, None
+
+def _split(ret, m, t):
+    # (u, x_hat, d_hat) from what update returned; raises with a message for the student
+    extra = []
+    if isinstance(ret, tuple):
+        if not ret:
+            raise TypeError('update returned an empty tuple')
+        ret, extra = ret[0], list(ret[1:3])
+    if ret is None:
+        raise TypeError(f'update returned None at t = {t:.3g} s (missing return?)')
+    try:
+        u = np.asarray(ret, dtype=float).flatten()
+    except Exception:
+        raise TypeError(f'update returned a {type(ret).__name__}, not a number')
+    if u.size != m:
+        raise ValueError(f'update returned {u.size} input values at t = {t:.3g} s; expected {m}')
+    if not np.all(np.isfinite(u)):
+        raise ValueError(f'update returned inf/NaN at t = {t:.3g} s')
+    vecs = []
+    for v in extra:
+        try:
+            w = np.asarray(v, dtype=float).flatten()
+        except Exception:
+            raise TypeError(f'update returned a {type(v).__name__} after u, not a number or array')
+        if not np.all(np.isfinite(w)):
+            raise ValueError(f'update returned an inf/NaN estimate at t = {t:.3g} s')
+        vecs.append(w.tolist())
+    return u.tolist(), vecs
+
+def _closed_loop(a):
+    ctrl, e = _make_ctrl(a)
+    if e:
+        return e
+    pns = _namespace(compile(a['plant'], '<workbench plant>', 'exec'), a['plantParams'])
+    f, h = pns['f'], pns['h']
+    lims, Ts, feed = a['uLimit'], a['Ts'], a.get('feed', 'y')
+    m = len(lims)
+    rs, ds, nz = a['r'], a.get('d'), a.get('noise')
+    x = np.array(a['x0'], dtype=float).reshape(-1, 1)
+    n = x.shape[0]
+    out = {k: [] for k in ('x', 'y', 'ym', 'uD', 'u', 'ua', 'xhat', 'dhat')}
+    def F(xx, u):
+        return np.asarray(f(xx, u), dtype=float).reshape(n, 1)
+    for k in range(len(rs)):
+        t = k * Ts
+        y = [float(v) for v in np.asarray(h(x), dtype=float).flatten()]
+        ym = [v + (nz[k][i] if nz else 0.0) for i, v in enumerate(y)]
+        r = rs[k] if not isinstance(rs[k], list) else np.array(rs[k], dtype=float).reshape(-1, 1)
+        arg = x.copy() if feed == 'state' else np.array(ym, dtype=float).reshape(-1, 1)
+        try:
+            ret = ctrl.update(r, arg)
+        except Exception as e:
+            return _err(e, f' (in update, at t = {t:.3g} s)')
+        try:
+            uD, ext = _split(ret, m, t)
+        except Exception as e:
+            return {'error': f'{type(e).__name__}: {e}', 'where': ''}
+        us = [min(max(v, lo), hi) for v, (lo, hi) in zip(uD, lims)]
+        d = ds[k] if ds else [0.0] * m
+        ua = [min(max(v + d[i], lims[i][0]), lims[i][1]) for i, v in enumerate(us)]
+        out['x'].append(x[:, 0].tolist()); out['y'].append(y); out['ym'].append(ym)
+        out['uD'].append(uD); out['u'].append(us); out['ua'].append(ua)
+        out['xhat'].append(ext[0] if len(ext) > 0 else None)
+        out['dhat'].append(ext[1] if len(ext) > 1 else None)
+        if k == len(rs) - 1:
+            break
+        uh = ua[0] if m == 1 else np.array(ua, dtype=float).reshape(-1, 1)
+        F1 = F(x, uh); F2 = F(x + Ts / 2 * F1, uh); F3 = F(x + Ts / 2 * F2, uh); F4 = F(x + Ts * F3, uh)
+        x = x + Ts / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        if not np.all(np.isfinite(x)):
+            return {'error': f'The state became inf/NaN at t = {(k + 1) * Ts:.3g} s', 'where': ''}
+    return out
+
+# Open-loop probe: a fresh controller fed a fixed sequence of (r, y) pairs; returns u.
+def _probe(a):
+    ctrl, e = _make_ctrl(a)
+    if e:
+        return e
+    us = []
+    for k, (r, y) in enumerate(a['calls']):
+        r = r if not isinstance(r, list) else np.array(r, dtype=float).reshape(-1, 1)
+        try:
+            u, _ = _split(ctrl.update(r, np.array(y, dtype=float).reshape(-1, 1)), a['m'], k * a['Ts'])
+        except Exception as e:
+            return _err(e, ' (in update)')
+        us.append(u)
+    return {'u': us}
+
 def wb_evaluate(payload):
     return _run(_evaluate, payload)
 
 def wb_simulate(payload):
     return _run(_simulate, payload)
+
+def wb_closed_loop(payload):
+    return _run(_closed_loop, payload)
+
+def wb_probe(payload):
+    return _run(_probe, payload)
+
+# A small stand-in for python-control (python-control itself needs scipy):
+# ctrb, obsv, and place for one input (Ackermann, Eq. 11.32). For an observer,
+# place(A.T, C.T, poles).T as in the book.
+def _install_control():
+    def _m(A):
+        return np.atleast_2d(np.asarray(A, dtype=float))
+    def ctrb(A, B):
+        A, B = _m(A), _m(B)
+        if B.shape[0] != A.shape[0]:
+            B = B.T
+        cols = [B]
+        for _ in range(A.shape[0] - 1):
+            cols.append(A @ cols[-1])
+        return np.hstack(cols)
+    def obsv(A, C):
+        return ctrb(_m(A).T, _m(C).T).T
+    def place(A, B, p):
+        A, B = _m(A), _m(B)
+        n = A.shape[0]
+        if B.shape[0] != n:
+            B = B.T
+        if B.shape[1] != 1:
+            raise NotImplementedError('the workbench control.place handles one input (B with one column)')
+        p = np.atleast_1d(np.asarray(p, dtype=complex))
+        if p.size != n:
+            raise ValueError(f'place needs {n} poles, got {p.size}')
+        Cab = ctrb(A, B)
+        if np.linalg.matrix_rank(Cab) < n:
+            raise ValueError('place: (A, B) is not controllable')
+        a = np.real(np.poly(p))
+        phi = sum(a[i] * np.linalg.matrix_power(A, n - i) for i in range(n + 1))
+        e = np.zeros((1, n)); e[0, -1] = 1.0
+        return e @ np.linalg.solve(Cab, phi)
+    mod = types.ModuleType('control')
+    mod.ctrb, mod.obsv, mod.place, mod.acker = ctrb, obsv, place, place
+    sys.modules['control'] = mod
+
+_install_control()
 `;
 
   // Runs inside the worker (stringified; it can't see this file's closure).
@@ -298,6 +451,10 @@ def wb_simulate(payload):
 
   const evaluate = (code, samples, timeoutMs = 5000) => call('evaluate', { code, samples }, timeoutMs);
   const simulate = (code, opts, timeoutMs = 15000) => call('simulate', { code, ...opts }, timeoutMs);
+  // A student's class Controller in closed loop with the workbench's plant (see
+  // _closed_loop above; WB.myCtrl builds the payload), and an open-loop probe.
+  const closedLoop = (code, opts, timeoutMs = 30000) => call('closed_loop', { code, ...opts }, timeoutMs);
+  const probe = (code, opts, timeoutMs = 10000) => call('probe', { code, ...opts }, timeoutMs);
 
   // ------------------------------------------------------------ checking --
   // Deterministic pseudo-random numbers, so a failing case repeats.
@@ -481,5 +638,5 @@ def wb_simulate(payload):
     poly: (c, s) => c.reduce((acc, ci) => cx.add(cx.mul(acc, s), ci), { re: 0, im: 0 }),
   };
 
-  return { start, stop, evaluate, simulate, check, paramSets, cx, status: () => state, onStatus: (fn) => listeners.add(fn), BASE, VERSION };
+  return { start, stop, evaluate, simulate, closedLoop, probe, check, paramSets, cx, status: () => state, onStatus: (fn) => listeners.add(fn), BASE, VERSION };
 })();

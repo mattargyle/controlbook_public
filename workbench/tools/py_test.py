@@ -5,8 +5,8 @@ For every chapter tab of the given studies that has Python parts, in Work mode:
   - the starting template must fail its Check,
   - the code in "Show solution" must pass it,
   - every locked live-math card must unlock once all of the chapter's parts are solved,
-plus targeted wrong answers (hard-coded numbers, a sign error, an infinite loop) and
-"Simulate my f". Needs google-chrome and network access to cdn.jsdelivr.net.
+plus targeted wrong answers (hard-coded numbers, a sign error, an infinite loop),
+"Simulate my f", and "Run my controller" (student controllers, Ch 7-18). Needs google-chrome and network access to cdn.jsdelivr.net.
 
     python3 workbench/tools/py_test.py            # study A
     python3 workbench/tools/py_test.py --study A --chapters ch3,ch4
@@ -82,7 +82,7 @@ window.__t = {
 return true;
 """
 
-from py_targets import TARGETED  # noqa: E402
+from py_targets import TARGETED, CODE_CHECKS  # noqa: E402
 
 
 def main():
@@ -130,6 +130,9 @@ def main():
                 c.js(f"__t.setCode({part}, {json.dumps(sol)}); return 1")
                 r = c.js(f"return await __t.press({part}, 'Check')")
                 report(r["good"], f"{args.study} {ch} {title}: solution passes", r["text"])
+                if c.js(f"return !!__t.button({part}, 'Run my controller')"):
+                    r = c.js(f"return await __t.press({part}, 'Run my controller')")
+                    report(not r["bad"] and "drives" in r["text"], f"{args.study} {ch} {title}: Run my controller drives the plots", r["text"])
                 if c.js(f"return !!__t.button({part}, 'Simulate my f')"):
                     r = c.js(f"return await __t.press({part}, 'Simulate my f')")
                     report(r["good"], f"{args.study} {ch} {title}: Simulate my f overlaps the arm", r["text"])
@@ -143,6 +146,13 @@ def main():
                     devs = c.js("return new Promise((r) => setTimeout(() => r(__t.yourDeviations()), 300))")
                     bad = [d for d in devs if not (d["dev"] is not None and d["dev"] < 1e-3)]
                     report(bool(devs) and not bad, f"{args.study} {ch} {title}: {label} with the solution lies on the workbench's model", json.dumps(devs))
+            # Check-only parts that run the student's saved code (they pass once the code parts are solved).
+            for (tch, prefix) in CODE_CHECKS.get(args.study, []):
+                if tch != ch:
+                    continue
+                part = f"__t.parts().find((p) => __t.title(p).startsWith({json.dumps(prefix)}))"
+                r = c.js(f"return await __t.press({part}, 'Check')")
+                report(r["good"], f"{args.study} {ch} {prefix}: passes with the solved code parts", r["text"])
             # Non-Python parts of this chapter that unlock cards: solve them from their solutions is
             # not generic, so only require that Python parts unlocked something when cards were locked.
             locked1 = c.js("return __t.locked()")

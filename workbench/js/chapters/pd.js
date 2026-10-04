@@ -418,10 +418,40 @@ WB.chapters = WB.chapters || {};
 
   const useGainsAction = (ctx) => WB.design.useGains(ctx, ['kP', 'kD'], { target: () => ctx.st, msg: 'Enter kP and kD first.' });
 
+  // Work mode: the gain sliders only move the closed-loop poles in the s-plane; the
+  // time plots show the student's own controller (WB.myCtrl), named by `part`.
+  function workControls(parent, ctx, part) {
+    const sec = WB.ui.section(parent, 'PD gains (s-plane)', 'p. 99');
+    workGainSliders(sec, ctx);
+    sec.append(el('p', { class: 'muted small', text: 'These place the closed-loop × in the s-plane. They do not drive the simulation.' }));
+    const mine = WB.ui.section(parent, 'Your controller');
+    WB.myCtrl.banner(mine, ctx, part);
+  }
+
+  // A student's PD controller against the workbench's (feedback linearization,
+  // derivative on the output, saturation) for a step, with the nominal and a second
+  // parameter set. gainsFor(model) gives the design's kP, kD.
+  function pdMatch(ctx, code, gainsFor, stepDeg, tEnd) {
+    const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
+      const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: { type: 'step', amplitude: stepDeg, tStep: 0 }, tEnd, feed: 'state' });
+      return {
+        sc, label: pc.label,
+        ref: () => {
+          const rc = WB.myCtrl.refCtx(ctx, sc);
+          rc.gains = gainsFor(rc.model);
+          rc.st = { ...ctx.st, arch: 'output', comp: 'fl' };
+          return WB.myCtrl.reference(ctx, sc, makeController(rc));
+        },
+      };
+    });
+    return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.02 * stepDeg * M.DEG, what: 'the design' });
+  }
+
   // ------------------------------------------------------------- Chapter 7 --
   WB.chapters.ch7 = {
     id: 'ch7', num: 7, tab: 'Ch 7', title: 'Pole placement (PD)', pages: 'pp. 99–106',
     controller: (ctx, o) => makeController(ctx, o),
+    implement: { feed: 'state' },  // Work mode simulates the student's A.7(d) controller
 
     defaults(sys) {
       const prob = sys.problems.ch7;
@@ -448,13 +478,12 @@ WB.chapters = WB.chapters || {};
     },
 
     buildControls(parent, ctx) {
-      const sec = WB.ui.section(parent, 'PD controller', 'p. 99');
-      sharedControls(sec, ctx);
       if (ctx.S.mode === 'work') {
-        workGainSliders(sec, ctx);
-        sec.append(el('p', { class: 'muted small', text: 'Target poles from the problem are drawn as dashed rings in the s-plane.' }));
+        workControls(parent, ctx, `${ctx.sys.problems.ch7.id}(d)`);
         return;
       }
+      const sec = WB.ui.section(parent, 'PD controller', 'p. 99');
+      sharedControls(sec, ctx);
       const des = WB.ui.section(parent, 'Desired closed-loop poles', 'p. 100');
       segmented(des, {
         label: 'Pole pair',
@@ -553,25 +582,26 @@ WB.chapters = WB.chapters || {};
             return [{ tex: `\\Delta^d_{cl} = s^2 + ${tex(alpha1)}s + ${tex(alpha0)} \\Rightarrow k_P = ${tex(g.kP)},\\; k_D = ${tex(g.kD)}` }];
           },
         },
-        {
-          id: 'd', title: '(d) Simulate',
-          html: 'Click <em>Use my gains</em> in (c), then compare the closed-loop × with the dashed target rings and look at the step response. The dashed orange trace is the linear design model, so any gap between it and θ comes from saturation, gravity, or plant mismatch.',
-          check: () => {
-            const cl = clPoles(ctx.model, ctx.st.kP, ctx.st.kD);
-            if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
-            return M.polesMatch(cl, prob.desiredPoles, 0.02, 0.02)
-              ? { ok: true, msg: 'The simulated closed loop has the target poles.' }
-              : { ok: false, msg: `Current closed-loop poles: ${cl.map((p) => fmtPole(p)).join(', ')}.` };
-          },
-        },
+        WB.myCtrl.part(ctx, {
+          id: 'd', title: '(d) Implement the PD control and plot the step response',
+          html: 'Write the controller with the gains from (c). <code>update</code> gets the reference and the state x, as in the Ch 7 code. <em>Run my controller</em> drives the time plots; the check simulates a 30° step with the nominal and with other parameters and compares θ(t) with the design.',
+          check: (code) => pdMatch(ctx, code, (m) => gainsFromPoles(m, prob.desiredPoles), 30, 3),
+          solution: () => [
+            { code: 'class Controller:\n    def __init__(self):\n        b0 = 3 / (P.m * P.ell**2)\n        a1 = 3 * P.b / (P.m * P.ell**2)\n        # Delta_cl^d = (s + 3)(s + 4) = s^2 + 7 s + 12\n        self.kp = 12 / b0\n        self.kd = (7 - a1) / b0\n\n    def update(self, theta_r, x):\n        theta = x[0, 0]\n        thetadot = x[1, 0]\n        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta)   # A.4(c)\n        tau = tau_fl + self.kp * (theta_r - theta) - self.kd * thetadot\n        return max(-P.tau_max, min(P.tau_max, tau))\n' },
+            { html: 'Listing 7.1 (p. 104) and the repo\'s ctrlPDhw7.py: PD on the feedback-linearized arm, derivative on the output (Fig. 7-2), output saturated at τ<sub>max</sub>.' },
+          ],
+        }),
       ]);
     },
   };
 
   // ------------------------------------------------------------- Chapter 8 --
+  // Solution code for A.8 (rise-time design), with the given tr line.
+  const PD_SOL = (trLine) => `class Controller:\n    def __init__(self):\n        ${trLine}\n        zeta = 0.707\n        wn = 2.2 / tr\n        b0 = 3 / (P.m * P.ell**2)\n        a1 = 3 * P.b / (P.m * P.ell**2)\n        self.kp = wn**2 / b0\n        self.kd = (2 * zeta * wn - a1) / b0\n\n    def update(self, theta_r, x):\n        theta = x[0, 0]\n        thetadot = x[1, 0]\n        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta)\n        tau = tau_fl + self.kp * (theta_r - theta) - self.kd * thetadot\n        return max(-P.tau_max, min(P.tau_max, tau))\n`;
   WB.chapters.ch8 = {
     id: 'ch8', num: 8, tab: 'Ch 8', title: 'Second-order design', pages: 'pp. 107–136',
     controller: (ctx, o) => makeController(ctx, o),
+    implement: { feed: 'state' },  // Work mode simulates the student's A.8 controller
     targets: (ctx) => ({ tr: ctx.st.tr, zeta: ctx.st.zeta }),
 
     defaults(sys) {
@@ -580,7 +610,7 @@ WB.chapters = WB.chapters || {};
     },
     simDefaults(sys) { return sys.problems.ch8.sim; },
 
-    wn(ctx) { return wnFromTr(ctx.st.tr, ctx.st.zeta, ctx.st.rule); },
+    wn(ctx) { return wnFromTr(ctx.st.tr, ctx.st.zeta, ctx.S.mode === 'work' ? '2.2' : ctx.st.rule); },
     designPoles(ctx) { return polesFromWnZeta(this.wn(ctx), ctx.st.zeta); },
 
     gains(ctx) {
@@ -601,13 +631,13 @@ WB.chapters = WB.chapters || {};
     },
 
     buildControls(parent, ctx) {
-      const sec = WB.ui.section(parent, 'PD controller', 'p. 111 · Fig. 8-12');
-      sharedControls(sec, ctx);
-      if (ctx.S.mode === 'work') workGainSliders(sec, ctx);
-      const spec = WB.ui.section(parent, ctx.S.mode === 'work' ? 'Specs (targets)' : 'Design knobs', 'p. 113 · Eq. 8.5');
+      const work = ctx.S.mode === 'work';
+      if (work) workControls(parent, ctx, `${ctx.sys.problems.ch8.id}(a) and (b)`);
+      else sharedControls(WB.ui.section(parent, 'PD controller', 'p. 111 · Fig. 8-12'), ctx);
+      const spec = WB.ui.section(parent, work ? 'Specs (targets)' : 'Design knobs', 'p. 113 · Eq. 8.5');
       slider(spec, { label: 't<sub>r</sub>', unit: 's', min: 0.1, max: 3, step: 0.005, ...bind(ctx, 'tr') });
       slider(spec, { label: 'ζ', min: 0.1, max: 2, step: 0.005, ...bind(ctx, 'zeta') });
-      segmented(spec, {
+      if (!work) segmented(spec, {
         label: 'ω<sub>n</sub> from t<sub>r</sub>',
         options: [
           { value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5, exact for ζ = 0.707' },
@@ -678,23 +708,6 @@ WB.chapters = WB.chapters || {};
         const wn = 2.2 / prob.tr;
         return { wn, alpha1: 2 * prob.zeta * wn, alpha0: wn * wn, ...gainsFromPoles(model(), polesFromWnZeta(wn, prob.zeta)) };
       };
-      // Peak demanded input for a satStepDeg step from rest, using gains designed from tr.
-      const peakFor = (tr) => {
-        const wn = 2.2 / tr;
-        const g = gainsFromPoles(model(), polesFromWnZeta(wn, prob.zeta));
-        // Explore semantics: the check always adds τ_fl, whatever the Work-mode gating.
-        const fake = { ...ctx, gains: g, st: { ...ctx.st, comp: 'fl', arch: 'output' }, S: { ...ctx.S, mode: 'explore' } };
-        const p = ctx.pModel;
-        const out = WB.sim.simulate({
-          plant: { f: (x, u) => ctx.sys.f(x, u, p), h: ctx.sys.h, uLimit: ctx.sys.uLimit(p) },
-          controller: makeController(fake),
-          reference: WB.sim.makeReference({ type: 'step', amplitude: prob.satStepDeg * M.DEG, tStep: 0 }),
-          disturbance: () => 0, x0: ctx.sys.x0(0), Ts: ctx.S.sim.Ts, tEnd: 3,
-        });
-        let peak = 0;
-        for (const u of out.uDemand) peak = Math.max(peak, Math.abs(u));
-        return peak / ctx.sys.uLimit(p);
-      };
       problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: `(a) t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,
@@ -714,40 +727,41 @@ WB.chapters = WB.chapters || {};
             ];
           },
         },
-        {
-          id: 'b', title: `(b) Fastest t<sub>r</sub> that just saturates on a ${prob.satStepDeg}° step`,
-          inputs: { tr: 't<sub>r</sub> [s]' },
-          html: `Checked by simulation: a ${prob.satStepDeg}° step from rest with ζ = ${prob.zeta}, ω<sub>n</sub> = 2.2/t<sub>r</sub>, feedback linearization on. The peak demanded |τ| should land between 95% and 100% of τ<sub>max</sub>.`,
-          check: (v) => {
-            const tr = num(v.tr);
-            if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-            const pk = peakFor(tr);
-            const pct = (100 * pk).toFixed(1);
-            if (pk > 1.0005) return { ok: false, msg: `Peak demand is ${pct}% of τmax, so it saturates. Slow it down.` };
-            if (pk < 0.95) return { ok: false, msg: `Peak demand is ${pct}% of τmax. You can go faster.` };
-            return { ok: true, msg: `Peak demand is ${pct}% of τmax.` };
+        WB.myCtrl.part(ctx, {
+          id: 'a2', title: '(a) Verify the step response', seed: `${ctx.sys.problems.ch7.id}/d`,
+          html: `Change your A.7 controller to the gains for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}. The check simulates a ${prob.satStepDeg}° step with the nominal and with other parameters and compares θ(t) with the design.`,
+          check: (code) => pdMatch(ctx, code, (m) => gainsFromPoles(m, polesFromWnZeta(2.2 / prob.tr, prob.zeta)), prob.satStepDeg, 4),
+          solution: () => [{ code: PD_SOL(`tr = ${prob.tr}`) }],
+        }),
+        WB.myCtrl.part(ctx, {
+          id: 'b', title: `(b) Saturate the input; tune t<sub>r</sub> so a ${prob.satStepDeg}° step just saturates`, seed: [`${ctx.sys.problems.ch8.id}/a2`, `${ctx.sys.problems.ch7.id}/d`],
+          html: `Keep ζ = ${prob.zeta}. The check gives your controller a large error (its output must stay within ±τ<sub>max</sub>), then simulates a ${prob.satStepDeg}° step from rest: your peak |τ| must reach 95% of τ<sub>max</sub>, and τ may sit at the limit for at most 2 samples.`,
+          check: async (code) => {
+            const tmax = ctx.sys.uLimit(ctx.pModel);
+            const pr = await WB.myCtrl.probe(ctx, code, [[Math.PI, [0, 0]]]);
+            if (pr.ok === false) return pr;
+            const u0 = pr.u[0][0];
+            if (Math.abs(u0) > tmax * (1 + 1e-9)) return { ok: false, msg: `For θ_r = 180° from rest your controller returns τ = ${fmt(u0, 4)} N·m. Saturate its output at ±τ_max (P.tau_max).` };
+            const sc = WB.myCtrl.scenario(ctx, { ref: { type: 'step', amplitude: prob.satStepDeg, tStep: 0 }, tEnd: 3, feed: 'state' });
+            const res = await WB.myCtrl.run(ctx, code, sc);
+            if (res.ok === false) return res;
+            let peak = 0, nAt = 0;
+            for (const u of res.uDemand) { peak = Math.max(peak, Math.abs(u)); if (Math.abs(u) >= tmax * (1 - 1e-6)) nAt++; }
+            const pct = (100 * peak / tmax).toFixed(1);
+            if (nAt > 2) return { ok: false, msg: `τ sits at the limit for ${nAt} samples, so the input saturates. Slow it down.` };
+            if (peak < 0.95 * tmax) return { ok: false, msg: `Peak |τ| is ${pct}% of τmax. You can go faster.` };
+            return { ok: true, msg: `Peak |τ| is ${pct}% of τmax${nAt ? `, at the limit for ${nAt} sample${nAt > 1 ? 's' : ''}` : ''}.` };
           },
-          actions: [{
-            label: 'Try it',
-            run: (v) => {
-              const tr = num(v.tr);
-              if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
-              ctx.app.setMode('explore');
-              Object.assign(ctx.st, { tr, zeta: prob.zeta, rule: '2.2', comp: 'fl', arch: 'output' });
-              Object.assign(ctx.S.sim, { type: 'step', amplitude: prob.satStepDeg, y0: 0 });
-              ctx.update();
-              return null;
-            },
-          }],
           solution: () => {
             const sb = self.satBound({ ...ctx, st: { ...ctx.st, comp: 'fl' }, S: { ...ctx.S, sim: { ...ctx.S.sim, y0: 0, amplitude: prob.satStepDeg } } });
             return [
               { html: 'The largest demand is right after the step, when θ̇ = 0 and θ = 0, so τ = τ<sub>fl</sub>(0) + k<sub>P</sub>e<sub>max</sub> ≤ τ<sub>max</sub> (Eq. 8.8 and Fig. 8-13):' },
               { tex: `k_P \\le \\frac{${tex(sb.umax)} - ${tex(sb.ue)}}{${tex(sb.eMax)}} \\Rightarrow \\omega_n \\le ${tex(sb.wnMax)} \\Rightarrow t_r \\ge ${tex(sb.trMin)}\\,\\text{s}` },
-              { html: `The book's solution uses t<sub>r</sub> = ${prob.bookTr} s, tuned on the ±50° square wave. With that value the first 0→50° step demands ${(100 * peakFor(prob.bookTr)).toFixed(0)}% of τ<sub>max</sub>, so it saturates briefly.` },
+              { code: PD_SOL(`tr = ${M.fmt(sb.trMin * 1.02, 3)}   # just above t_r,min`) },
+              { html: `The book's solution uses t<sub>r</sub> = ${prob.bookTr} s, tuned on the ±50° square wave, so its first 0→50° step saturates briefly.` },
             ];
           },
-        },
+        }),
       ]);
     },
   };

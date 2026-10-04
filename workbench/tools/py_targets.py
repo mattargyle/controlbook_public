@@ -17,6 +17,13 @@ TARGETED = {
         ('ch9', '(a) PD', 'system_type = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return P.b / kP\n\ndef e_parab(kP, kD):\n    return 1e9\n', 'expected ∞', False),
         ('ch9', '(a) PD', 'system_type = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return P.b / 0.1134\n\ndef e_parab(kP, kD):\n    return float("inf")\n', 'expected', False),
         ('ch16', '(b)', 'def e_ss(kP, kI, kD):\n    return 5 * P.b / kI\n', 'L{5t²}', False),
+
+        ('ch7', '(d)', 'class Controller:\n    def __init__(self):\n        b0 = 3 / (P.m * P.ell**2)\n        a1 = 3 * P.b / (P.m * P.ell**2)\n        self.kp = 12 / b0\n        self.kd = (7 - a1) / b0\n\n    def update(self, theta_r, x):\n        theta = x[0, 0]\n        thetadot = x[1, 0]\n        tau = self.kp * (theta_r - theta) - self.kd * thetadot\n        return max(-P.tau_max, min(P.tau_max, tau + 0))\n', 'differs from the design', False),
+        ('ch7', '(d)', 'class Controller:\n    def __init__(self):\n        b0 = 3 / (P.m * P.ell**2)\n        a1 = 3 * P.b / (P.m * P.ell**2)\n        self.kp = 0.18\n        self.kd = 0.095\n\n    def update(self, theta_r, x):\n        theta = x[0, 0]\n        thetadot = x[1, 0]\n        tau = self.kp * (theta_r - theta) - self.kd * thetadot\n        return max(-P.tau_max, min(P.tau_max, tau + P.m * P.g * P.ell / 2 * np.cos(theta)))\n', 'but not with', False),
+        ('ch7', '(d)', 'class Controller:\n    def update(self, theta_r, x):\n        return x[5, 0]\n', 'IndexError', False),
+        ('ch8', '(b)', 'class Controller:\n    def __init__(self):\n        b0 = 3 / (P.m * P.ell**2)\n        a1 = 3 * P.b / (P.m * P.ell**2)\n        self.kp = 12 / b0\n        self.kd = (7 - a1) / b0\n\n    def update(self, theta_r, x):\n        theta = x[0, 0]\n        thetadot = x[1, 0]\n        tau = self.kp * (theta_r - theta) - self.kd * thetadot\n        return tau + P.m * P.g * P.ell / 2 * np.cos(theta)\n', 'Saturate its output', False),
+        ('ch12', '(a) Add', 'import control as cnt\n\nclass Controller:\n    def __init__(self):\n        tr = 0.489\n        zeta = 0.707\n        p_I = -5.0\n        J = P.m * P.ell**2\n        A = np.array([[0.0, 1.0], [0.0, -3 * P.b / J]])\n        B = np.array([[0.0], [3 / J]])\n        C = np.array([[1.0, 0.0]])\n        A1 = np.block([[A, np.zeros((2, 1))], [-C, np.zeros((1, 1))]])\n        B1 = np.vstack([B, [[0.0]]])\n        wn = 2.2 / tr\n        poles = np.roots(np.convolve([1, 2 * zeta * wn, wn**2], [1, -p_I]))\n        K1 = cnt.place(A1, B1, poles)\n        self.K = K1[:, 0:2]\n        self.ki = K1[0, 2]\n        sigma = 0.05\n        self.beta = (2 * sigma - P.Ts) / (2 * sigma + P.Ts)\n        self.gamma = 2 / (2 * sigma + P.Ts)\n        self.theta_prev = P.theta0\n        self.theta_dot = P.thetadot0\n        self.integrator = 0.0\n        self.error_prev = 0.0\n\n    def update(self, theta_r, y):\n        theta = y[0, 0]\n        self.theta_dot = self.beta * self.theta_dot + self.gamma * (theta - self.theta_prev)\n        self.theta_prev = theta\n        x = np.array([[theta], [self.theta_dot]])\n        error = theta_r - theta\n        tau_fl = P.m * P.g * P.ell / 2 * np.cos(theta)\n        integ = self.integrator + P.Ts / 2 * (error + self.error_prev)\n        tau = tau_fl - (self.K @ x)[0, 0] - self.ki * integ\n        # anti-windup: keep the integrator still while the torque saturates\n        if True:\n            self.integrator = integ\n        self.error_prev = error\n        tau = tau_fl - (self.K @ x)[0, 0] - self.ki * self.integrator\n        return max(-P.tau_max, min(P.tau_max, tau))\n', 'winds up', False),
+        ('ch13', '(c) Add', 'class Controller:\n    def update(self, theta_r, y):\n        return 0.0\n', 'Return (tau, x_hat)', False),
     ],
     'B': [
         ('ch3', '(a)', 'def potential(z, theta):\n    return 1.225 * (np.cos(theta) - 1)\n', 'rather than numbers', False),
@@ -111,4 +118,10 @@ TARGETED = {
         ('ch9', '(c) Outer', 'type_pd = 1\ntype_pid = 2\ndist_type_pd = 0\ndist_type_pid = 1\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return np.inf\n\ndef e_parab(kP, kI, kD):\n    return np.inf\n', 'expected', False),
         ('ch16', '(a)', 'def e_ss(kP, kI, kD):\n    return 5 * kD / kI\n', 'implemented loop', False),
     ],
+}
+
+# Parts with a Check but no code that run the student's saved code from another
+# part (chapter, part title prefix); they must pass once the code parts are solved.
+CODE_CHECKS = {
+    'A': [('ch13', '(e)')],
 }

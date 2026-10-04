@@ -28,6 +28,16 @@ WB.systems.A = {
   x0(y0) { return [y0, 0]; },
   stateLabels: ['θ', 'θ̇'],
 
+  // The plant for student controllers (WB.myCtrl), as Python: f(state, u) and the
+  // measured output h(state). Python names for the controller template.
+  plantPy: 'def f(state, tau):\n    theta = state[0][0]\n    thetadot = state[1][0]\n    return np.array([[thetadot], [3 / (P.m * P.ell**2) * (tau - P.b * thetadot - P.m * P.g * P.ell / 2 * np.cos(theta))]])\n\ndef h(state):\n    return [state[0][0]]\n',
+  py: { r: 'theta_r', y: ['theta'], x: ['theta', 'thetadot'], u: 'tau' },
+  // A second parameter set for controller checks (gains must come from P, not
+  // numbers); gravity stays well inside τ_max.
+  altParams(p) { return { ...p, m: p.m * 1.3, ell: p.ell * 0.75, b: p.b * 1.5 }; },
+  // Entries of P beyond the parameters (as in armParam.py): the initial state.
+  pyParams(x0) { return { theta0: x0[0], thetadot0: x0[1] }; },
+
   f(x, tau, p) {
     const [theta, thetadot] = x;
     const thetaddot = (3 / (p.m * p.ell ** 2)) * (tau - p.b * thetadot - p.m * p.g * (p.ell / 2) * Math.cos(theta));

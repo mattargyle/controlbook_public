@@ -184,16 +184,19 @@ window.WB = window.WB || {};
     if (chapter().reference) common.reference = chapter().reference(ctx, sigs.reference);
 
     const plantTrue = { f: (x, u) => s.f(x, u, ctx.pTrue), h: (x) => s.h(x, ctx.pTrue), uLimit: s.uLimit(ctx.pTrue) };
-    result = chapter().simulate
-      ? chapter().simulate(ctx, common, plantTrue)
-      : WB.sim.simulate({ ...common, plant: plantTrue, controller: chapter().controller(ctx) });
+    // Work mode in a chapter with an implementation part runs the student's own
+    // Python controller (WB.myCtrl), or the plant with zero input until they run one.
+    if (S.mode === 'work' && chapter().implement) result = WB.myCtrl.simulate(ctx, common, plantTrue);
+    else if (chapter().simulate) result = chapter().simulate(ctx, common, plantTrue);
+    else result = WB.sim.simulate({ ...common, plant: plantTrue, controller: chapter().controller(ctx) });
 
     result = WB.sim.normalize(result);
 
     // Linear design model: the same controller (without its feedforward term) on
     // xdot = A x + B u with nominal parameters, no saturation, no disturbance and
     // no noise. Single-channel systems get it by default; others via linearSim.
-    if (chapter().linear === false) {
+    const imp = chapter().implement;
+    if (chapter().linear === false || (S.mode === 'work' && imp && imp.linear === false)) {
       linResult = null;
     } else if (chapter().linearSim) {
       linResult = chapter().linearSim(ctx, common);
@@ -357,6 +360,7 @@ window.WB = window.WB || {};
     p('Python answers run in your browser (Python 3.14 + numpy, loaded on the first Check).');
     p(`<code>np</code> (numpy) and <code>math</code> are imported, and <code>P</code> holds the study's parameters (see the Parameters tab), for example <code>P.${sys().params[0].key}</code>.`);
     p('Write answers with these, not numbers: they are checked with other parameter values too.');
+    if (chapter().implement && sys().py) p(WB.myCtrl.helpHtml(ctx));
   }
 
   function buildParamsHelp(root) {
