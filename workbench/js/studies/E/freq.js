@@ -85,6 +85,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const marginMarks = (mg, color, tag) => WB.freq.marginMarks(mg, { color, tag, gm: false });
 
   // ------------------------------------------------------------ Chapter 15 --
+  // E.15(a) and (b) are drawn by hand: in Work mode each plant's Bode plot (and its
+  // poles) appears once that part is done.
+  const drawnKey = (ctx, inner) => `${ctx.sys.problems.ch15.id}/${inner ? 'a' : 'b'}`;
+  const drawn = (ctx, inner) => ctx.S.mode === 'explore' || ctx.app.isSolved(drawnKey(ctx, inner));
+  const fullShown = (ctx) => ctx.S.mode === 'explore' || ctx.app.isSolved(`${ctx.sys.problems.ch5.id}/b`);
   CH.ch15 = {
     id: 'ch15', num: 15, tab: 'Ch 15', title: 'Frequency response (inner & outer plants)', pages: 'pp. 261–282',
     defaults() { return freqDefaults({ w0: 2, full: true }); },
@@ -98,52 +103,63 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       loopToggle(sec, ctx, 'Plant');
       slider(sec, { label: 'ω<sub>0</sub>', unit: 'rad/s', min: 0.05, max: 100, log: true, sig: 3, ...bind(ctx, 'w0') });
       segmented(sec, { label: 'Inner plant: also show the full E.5(b) model', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'full') });
-      sec.append(el('p', { class: 'muted small', text: 'Sketch the straight-line approximation by hand first, then compare. The time plots show the E.8 nested loop for reference.' }));
+      sec.append(el('p', { class: 'muted small', text: 'Sketch the straight-line approximation by hand first. In Work mode each plant’s Bode plot appears when you mark that part drawn. The time plots show the E.8 nested loop for reference.' }));
     },
 
     bode(ctx) {
       const inner = ctx.st.loop === 'in';
+      if (!drawn(ctx, inner)) return null;
       const P = inner ? Pin(ctx) : Pout(ctx);
       const lines = [{ label: inner ? 'P_in(jω) (E.5c)' : 'P_out(jω)', ...T.bode(P, W), color: '--series-1' }];
-      if (inner && ctx.st.full) lines.push({ label: 'full Θ̃/F̃ (E.5b)', ...T.bode(PinFull(ctx), W), color: '--text-muted', dash: [5, 4], width: 1.5 });
+      if (inner && ctx.st.full && fullShown(ctx)) lines.push({ label: 'full Θ̃/F̃ (E.5b)', ...T.bode(PinFull(ctx), W), color: '--text-muted', dash: [5, 4], width: 1.5 });
       const g = T.at(P, ctx.st.w0);
       const show = WB.ui.shown(ctx, 'E:ch15:w0');
       return { title: inner ? 'Bode: inner plant F̃ → θ̃' : 'Bode: outer plant θ̃ → z̃', w: W, lines,
         marks: [{ w: ctx.st.w0, label: show ? `ω₀: ${fmt(db(L.C.abs(g)), 3)} dB` : 'ω₀', color: '--series-3' }] };
     },
     splane(ctx) {
-      const mk = [{ re: 0, im: 0, kind: 'ol', label: 'double pole at 0' }];
-      if (ctx.st.loop === 'in' && ctx.st.full) L.roots(PinFull(ctx).den).forEach((q) => mk.push({ ...q, kind: 'olzero', label: 'pole of the full model' }));
+      const inner = ctx.st.loop === 'in';
+      const mk = drawn(ctx, inner) ? [{ re: 0, im: 0, kind: 'ol', label: 'double pole at 0' }] : [];
+      if (inner && ctx.st.full && fullShown(ctx)) L.roots(PinFull(ctx).den).forEach((q) => mk.push({ ...q, kind: 'olzero', label: 'pole of the full model' }));
       return { markers: mk, fitR: 1 };
     },
 
     math(ctx) {
-      const b0 = ctx.sys.linear(ctx.pModel).b0, g = ctx.pModel.g;
+      const b0 = ctx.sys.linear(ctx.pModel).b0, g = ctx.pModel.g, id = ctx.sys.problems.ch15.id;
       return [
         { title: 'Frequency response', page: 'p. 264 · Eq. 15.4',
           theory: 'u = A\\sin\\omega_0 t \\Rightarrow y_{ss} = A|P(j\\omega_0)|\\sin(\\omega_0 t + \\angle P(j\\omega_0))' },
-        { title: 'Inner plant', page: 'p. 266–267, p. 390 · E.15(a)',
-          theory: '\\frac{k}{(j\\omega)^n}:\\; 20\\log k \\text{ at } \\omega = 1,\\; -20n\\,\\text{dB/dec},\\; \\angle = -90^\\circ n \\;(\\text{plus } 180^\\circ \\text{ if } k < 0)',
-          symbolic: 'P_{in}(j\\omega) = \\frac{b_0}{(j\\omega)^2}:\\; 20\\log|P_{in}| = 20\\log b_0 - 40\\log\\omega,\\; \\angle P_{in} = -180^\\circ',
-          numbers: `20\\log b_0 = ${tex(db(b0))}\\,\\text{dB at } \\omega = 1,\\quad 0\\,\\text{dB at } \\omega = \\sqrt{b_0} = ${tex(Math.sqrt(b0))}`, spoiler: true },
-        { title: 'Outer plant', page: 'p. 391 · E.15(b)',
-          theory: '\\text{same building blocks: gain and integrators}',
-          symbolic: 'P_{out}(j\\omega) = \\frac{-g}{(j\\omega)^2} = \\frac{g}{\\omega^2}:\\; -40\\,\\text{dB/dec},\\; \\angle P_{out} = 0^\\circ \\;(\\equiv -360^\\circ;\\text{ the minus sign adds } \\pm180^\\circ)',
-          numbers: `20\\log g = ${tex(db(g))}\\,\\text{dB at } \\omega = 1,\\quad 0\\,\\text{dB at } \\omega = \\sqrt g = ${tex(Math.sqrt(g))}`, spoiler: true },
-        { title: 'Full inner model (E.5b)', page: 'p. 387',
-          theory: '\\text{compare with the full model from E.5(b) (dashed in the Bode plot)}',
-          symbolic: '\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{b s^2}{s^4 - a}:\\; +40\\,\\text{dB/dec below } \\lambda = a^{1/4},\\; \\to b/s^2 \\text{ above}',
-          numbers: `\\lambda = ${tex(Math.pow(ctx.pModel.m1 * g * g / ctx.sys.linear(ctx.pModel).De, 0.25))}\\,\\text{rad/s}`, spoiler: true },
+        { title: 'Bode canonical form', page: 'p. 266 · Eq. 15.5–15.7',
+          theory: 'P(j\\omega) = K\\,\\frac{\\prod (1 + j\\omega/z_i)}{(j\\omega)^q \\prod (1 + j\\omega/p_i)}:\\quad 20\\log|P| = 20\\log K + \\textstyle\\sum 20\\log|1 + j\\omega/z_i| - 20q\\log\\omega - \\sum 20\\log|1 + j\\omega/p_i|' },
+        { title: 'Gain and integrators', page: 'p. 266–267',
+          theory: '\\frac{k}{(j\\omega)^n}:\\; 20\\log |k| \\text{ at } \\omega = 1,\\; -20n\\,\\text{dB/dec},\\; \\angle = -90^\\circ n \\;(\\text{plus } 180^\\circ \\text{ if } k < 0)' },
+        { title: 'Inner plant of the block and beam', page: 'p. 390 · E.15(a)', answers: `${id}/a`,
+          theory: 'P_{in}(j\\omega) = \\frac{b_0}{(j\\omega)^2}:\\; 20\\log|P_{in}| = 20\\log b_0 - 40\\log\\omega,\\; \\angle P_{in} = -180^\\circ',
+          numbers: `20\\log b_0 = ${tex(db(b0))}\\,\\text{dB at } \\omega = 1,\\quad 0\\,\\text{dB at } \\omega = \\sqrt{b_0} = ${tex(Math.sqrt(b0))}` },
+        { title: 'Outer plant of the block and beam', page: 'p. 391 · E.15(b)', answers: `${id}/b`,
+          theory: 'P_{out}(j\\omega) = \\frac{-g}{(j\\omega)^2} = \\frac{g}{\\omega^2}:\\; -40\\,\\text{dB/dec},\\; \\angle P_{out} = 0^\\circ \\;(\\equiv -360^\\circ;\\text{ the minus sign adds } \\pm180^\\circ)',
+          numbers: `20\\log g = ${tex(db(g))}\\,\\text{dB at } \\omega = 1,\\quad 0\\,\\text{dB at } \\omega = \\sqrt g = ${tex(Math.sqrt(g))}` },
+        { title: 'Full inner model (E.5b)', page: 'p. 387', answers: `${ctx.sys.problems.ch5.id}/b`,
+          theory: '\\frac{\\tilde\\Theta}{\\tilde F} = \\frac{b s^2}{s^4 - a}:\\; +40\\,\\text{dB/dec below } \\lambda = a^{1/4},\\; \\to b/s^2 \\text{ above}',
+          numbers: `\\lambda = ${tex(Math.pow(ctx.pModel.m1 * g * g / ctx.sys.linear(ctx.pModel).De, 0.25))}\\,\\text{rad/s}`,
+          note: 'Dashed in the Bode plot of the inner plant.' },
       ];
     },
 
     buildProblem(parent, ctx) {
       const b0 = () => ctx.sys.linear(ctx.pModel).b0, g = () => ctx.pModel.g;
       const phaseOk = (v, truths) => { const x = PD().num(v); return x !== null && truths.some((t) => Math.abs(x - t) < 1); };
+      const cmpInputs = { m1: '|P(j1)| [dB]', slope: 'slope [dB/dec]', ph: 'phase [°]', wc: '0 dB at ω [rad/s]' };
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch15, [
         {
-          id: 'a', title: '(a) Inner plant F̃ → θ̃',
-          inputs: { m1: '|P(j1)| [dB]', slope: 'slope [dB/dec]', ph: 'phase [°]', wc: '0 dB at ω [rad/s]' },
+          id: 'a', title: '(a) Draw by hand the Bode plot of the inner loop transfer function from F̃ to θ̃',
+          html: 'On paper: use the transfer function from E.5 (the simplified one E.8 designs with), put it in Bode canonical form, and sketch the straight-line magnitude and phase. Then click the button to compare with the workbench’s Bode plot (Plant: inner).',
+          done: 'I have drawn it: next',
+          solution: () => [{ tex: `P_{in} = \\frac{${tex(b0())}}{s^2}:\\; ${tex(db(b0()))}\\,\\text{dB at 1 rad/s},\\; -40\\,\\text{dB/dec},\\; -180^\\circ` }],
+        },
+        {
+          id: 'a2', title: '(a) Compare with bode', after: 'a',
+          inputs: cmpInputs,
           check: (v) => {
             if (!phaseOk(v.ph, [-180, 180])) return { ok: false, msg: 'Check the phase.' };
             return PD().checkNumbers({ m1: v.m1, slope: v.slope, wc: v.wc }, { m1: db(b0()), slope: -40, wc: Math.sqrt(b0()) }, { m1: '|P(j1)|', slope: 'slope', wc: 'crossing' });
@@ -151,10 +167,16 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           solution: () => [{ tex: `P_{in} = \\frac{${tex(b0())}}{s^2}:\\; ${tex(db(b0()))}\\,\\text{dB at 1 rad/s},\\; -40\\,\\text{dB/dec},\\; -180^\\circ,\\; 0\\,\\text{dB at } ${tex(Math.sqrt(b0()))}\\,\\text{rad/s}` }],
         },
         {
-          id: 'b', title: '(b) Outer plant θ̃ → z̃',
-          inputs: { m1: '|P(j1)| [dB]', slope: 'slope [dB/dec]', ph: 'phase [°]', wc: '0 dB at ω [rad/s]' },
+          id: 'b', title: '(b) Draw by hand the Bode plot of the outer loop transfer function from θ̃ to z̃',
+          html: 'On paper, as in (a). Then click the button to compare (Plant: outer).',
+          done: 'I have drawn it: next',
+          solution: () => [{ tex: `P_{out} = \\frac{-${tex(g())}}{s^2}:\\; ${tex(db(g()))}\\,\\text{dB at 1 rad/s},\\; -40\\,\\text{dB/dec},\\; 0^\\circ\\,(\\text{or } -360^\\circ)` }],
+        },
+        {
+          id: 'b2', title: '(b) Compare with bode', after: 'b',
+          inputs: cmpInputs,
           check: (v) => {
-            if (!phaseOk(v.ph, [0, -360, 360])) return { ok: false, msg: 'Check the phase: −g/s² at s = jω is g/ω², a positive real number.' };
+            if (!phaseOk(v.ph, [0, -360, 360])) return { ok: false, msg: 'Check the phase: a negative gain over (jω)² is a positive real number at every ω.' };
             return PD().checkNumbers({ m1: v.m1, slope: v.slope, wc: v.wc }, { m1: db(g()), slope: -40, wc: Math.sqrt(g()) }, { m1: '|P(j1)|', slope: 'slope', wc: 'crossing' });
           },
           solution: () => [{ tex: `P_{out} = \\frac{-${tex(g())}}{s^2} = \\frac{${tex(g())}}{\\omega^2}\\big|_{s=j\\omega}:\\; ${tex(db(g()))}\\,\\text{dB},\\; -40\\,\\text{dB/dec},\\; 0^\\circ\\,(\\text{or } -360^\\circ),\\; 0\\,\\text{dB at } ${tex(Math.sqrt(g()))}` }],
@@ -220,20 +242,23 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     splane(ctx) { return gainsShown(ctx) ? loopMarkers(ctx, ctx.st.loop === 'in' ? loopsOf(ctx).Lin : loopsOf(ctx).Lout) : null; },
 
     math(ctx) {
-      const s = this.specs(ctx), st = ctx.st;
+      const s = this.specs(ctx), st = ctx.st, id = ctx.sys.problems.ch16.id, e8 = ctx.sys.problems.ch8.id;
       return [
         { title: 'Error with every input', page: 'p. 284 · Eq. 16.2–16.3',
           theory: 'E = \\frac{1}{1+PC}R + \\frac{PC}{1+PC}N + \\frac{1}{1+PC}D_{out} + \\frac{P}{1+PC}D_{in}' },
-        { title: 'Inner loop under PD', page: 'p. 287 · Eq. 16.5, p. 291 · Eq. 16.9, p. 287 · Eq. 16.6',
-          theory: '|e| \\le \\gamma_r|r|:\\; \\gamma_r = \\frac{1}{\\min_{\\omega\\le\\omega_r}|PC|},\\quad \\gamma_{d_{in}} = \\max_{\\omega\\le\\omega_d}\\frac{1}{|C|},\\quad \\gamma_n = \\max_{\\omega\\ge\\omega_{no}}|PC|',
-          symbolic: '\\gamma_r = \\frac{1}{|L_{in}(j\\omega_r)|},\\quad \\gamma_{d_{in}} = \\frac{1}{k_{P_\\theta}}\\;(|C_{in}| \\text{ of a PD is smallest at low } \\omega),\\quad \\gamma_n = |L_{in}(j\\omega_{no})|',
-          numbers: `\\gamma_r = ${tex(s.gr)}\\;(\\text{exact } |S| = ${tex(s.grExact)}),\\quad \\gamma_{d_{in}} = ${tex(s.gdin)}\\;(1/|C(j${st.wdin})| = ${tex(s.gdinEdge)}),\\quad \\gamma_n = ${tex(s.gn)}`, spoiler: true },
-        { title: 'Outer loop under PID', page: 'p. 289 · Eq. 16.7',
-          theory: '\\gamma_{d_{out}} \\approx \\frac{1}{|L(j\\omega_{d})|},\\quad \\text{exact: } |e| = |r|\\,|S(j\\omega)| = \\frac{|r|}{|1 + L(j\\omega)|}',
-          numbers: `\\gamma_{d_{out}} = ${tex(s.gdout)}\\;(\\text{exact } |S| = ${tex(s.gdoutExact)}),\\quad |e| = ${tex(s.esin)}\\;\\text{m}\\;(A/|L| = ${tex(s.esinApprox)},\\; |L(j${st.wsin})| = ${tex(s.Lsin, 2)})`, spoiler: true },
+        { title: 'Specs from the loop gain', page: 'p. 287 · Eq. 16.5, p. 291 · Eq. 16.9, p. 287 · Eq. 16.6',
+          theory: '|e| \\le \\gamma_r|r|:\\; \\gamma_r = \\frac{1}{\\min_{\\omega\\le\\omega_r}|PC|},\\quad \\gamma_{d_{in}} = \\max_{\\omega\\le\\omega_d}\\frac{1}{|C|},\\quad \\gamma_n = \\max_{\\omega\\ge\\omega_{no}}|PC|' },
+        { title: 'Output disturbances and sinusoids', page: 'p. 289 · Eq. 16.7',
+          theory: '\\gamma_{d_{out}} \\approx \\frac{1}{|L(j\\omega_{d})|},\\quad \\text{exact: } |e| = |r|\\,|S(j\\omega)| = \\frac{|r|}{|1 + L(j\\omega)|}' },
+        { title: 'Inner loop of the block and beam under PD', page: 'p. 391 · E.16(a–c)', answers: [`${id}/a`, `${id}/b`, `${id}/c`],
+          theory: '\\gamma_r = \\frac{1}{|L_{in}(j\\omega_r)|},\\quad \\gamma_{d_{in}} = \\frac{1}{k_{P_\\theta}}\\;(|C_{in}| \\text{ of a PD is smallest at low } \\omega),\\quad \\gamma_n = |L_{in}(j\\omega_{no})|',
+          numbers: `\\gamma_r = ${tex(s.gr)}\\;(\\text{exact } |S| = ${tex(s.grExact)}),\\quad \\gamma_{d_{in}} = ${tex(s.gdin)}\\;(1/|C(j${st.wdin})| = ${tex(s.gdinEdge)}),\\quad \\gamma_n = ${tex(s.gn)}` },
+        { title: 'Outer loop of the block and beam under PID', page: 'p. 391 · E.16(d, e)', answers: [`${id}/d`, `${id}/e`],
+          theory: `\\gamma_{d_{out}} = ${tex(s.gdout)}\\;(\\text{exact } |S| = ${tex(s.gdoutExact)}),\\quad |e| = ${tex(s.esin)}\\;\\text{m}\\;(A/|L| = ${tex(s.esinApprox)},\\; |L(j${st.wsin})| = ${tex(s.Lsin, 2)})` },
         { title: 'Controllers with the dirty derivative', page: 'p. 313',
-          theory: 'C_{in} = \\frac{(k_D + \\sigma k_P)s + k_P}{\\sigma s + 1},\\quad C_{out} = \\frac{(k_D + \\sigma k_P)s^2 + (k_P + \\sigma k_I)s + k_I}{s(\\sigma s + 1)}',
-          numbers: `C_{in} = ${T.texTf(s.Cin)},\\quad C_{out} = ${T.texTf(s.Cout)}`, spoiler: true },
+          theory: 'C_{in} = \\frac{(k_D + \\sigma k_P)s + k_P}{\\sigma s + 1},\\quad C_{out} = \\frac{(k_D + \\sigma k_P)s^2 + (k_P + \\sigma k_I)s + k_I}{s(\\sigma s + 1)}' },
+        { title: 'Controllers from the gain knobs', page: 'p. 387 · E.8', answers: [`${e8}/b`, `${e8}/d`],
+          theory: `C_{in} = ${T.texTf(s.Cin)},\\quad C_{out} = ${T.texTf(s.Cout)}` },
       ];
     },
 
@@ -241,6 +266,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const s = () => this.specs(ctx);
       const pc = (v, truth, label) => PD().checkNumbers({ v }, { v: 100 * truth }, { v: label });
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
+        { id: 'in', title: 'Inner loop: Bode plots of the plant and of the plant under PD',
+          html: 'Select <em>Bode of: inner (θ)</em>. The gains come from the knobs (default: the E.8 specs), with the dirty derivative (σ). In your own code, build P<sub>in</sub> and P<sub>in</sub>C<sub>in</sub> with <code>control.tf</code> and plot both with <code>bode</code>.' },
         { id: 'a', title: '(a) Inner tracking error below 1 rad/s', inputs: { v: '%' },
           check: (v) => {
             const g = PD().num(v.v), x = s();
@@ -258,6 +285,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { id: 'c', title: '(c) Noise above 300 rad/s, % in θ', inputs: { v: '%' },
           check: (v) => pc(v.v, s().gn, 'percent'),
           solution: () => [{ tex: `|L_{in}(j300)| = ${tex(db(s().gn))}\\,\\text{dB} \\Rightarrow ${tex(100 * s().gn)}\\%` }, { html: 'Above 1/σ = 20 rad/s the dirty-derivative PD flattens at k<sub>P</sub> + k<sub>D</sub>/σ, so |L<sub>in</sub>| falls at −40 dB/dec.' }] },
+        { id: 'out', title: 'Outer loop: Bode plots of the plant and of the plant under PID',
+          html: 'Select <em>Bode of: outer (z)</em>. The book asks for the E.10 gains; the knobs default to the E.8 specs with k<sub>I<sub>z</sub></sub> = −10⁻⁴ (buttons load either). Dirty derivative as above.' },
         { id: 'd', title: '(d) Output disturbance below 0.1 rad/s, % in z', inputs: { v: '%' },
           check: (v) => {
             const g = PD().num(v.v), x = s();
@@ -329,20 +358,21 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     splane(ctx) { return gainsShown(ctx) ? loopMarkers(ctx, ctx.st.loop === 'out' ? loopsOf(ctx).Lout : loopsOf(ctx).Lin) : null; },
 
     math(ctx) {
-      const l = this.loops(ctx);
+      const l = this.loops(ctx), id = ctx.sys.problems.ch17.id;
       return [
         { title: 'Phase and gain margin', page: 'p. 303–306',
-          theory: '|L(j\\omega_{co})| = 1,\\; PM = 180^\\circ + \\angle L(j\\omega_{co}),\\quad GM = 1/|L(j\\omega_{180})|',
-          numbers: `PM_{in} = ${tex(l.mi.pm)}^\\circ\\;(\\omega_{co} = ${tex(l.mi.wc)}),\\quad PM_{out} = ${tex(l.mo.pm)}^\\circ\\;(\\omega_{co} = ${tex(l.mo.wc)})`, spoiler: true },
+          theory: '|L(j\\omega_{co})| = 1,\\; PM = 180^\\circ + \\angle L(j\\omega_{co}),\\quad GM = 1/|L(j\\omega_{180})|' },
         { title: 'Closed-loop bandwidth', page: 'p. 306–307',
-          theory: 'T = \\frac{L}{1 + L},\\quad \\omega_{bw}: |T(j\\omega_{bw})| = -3\\,\\text{dB} \\;(\\approx \\omega_{co} \\text{ for } PM \\approx 60^\\circ)',
-          numbers: `\\omega_{bw,in} = ${tex(l.bwIn)},\\quad \\omega_{bw,out} = ${tex(l.bwOut)}`, spoiler: true },
+          theory: 'T = \\frac{L}{1 + L},\\quad \\omega_{bw}: |T(j\\omega_{bw})| = -3\\,\\text{dB} \\;(\\approx \\omega_{co} \\text{ for } PM \\approx 60^\\circ)' },
         { title: 'Bandwidth separation', page: 'pp. 315–317 (B.17c)',
-          theory: '\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} \\gtrsim 5\\text{–}10 \\;\\Rightarrow\\; \\text{the outer loop sees the inner loop as its DC gain}',
-          numbers: `\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} = ${tex(l.bwIn / l.bwOut, 3)}`, spoiler: true },
+          theory: '\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} \\gtrsim 5\\text{–}10 \\;\\Rightarrow\\; \\text{the outer loop sees the inner loop as its DC gain}' },
         { title: 'Multiple phase crossings', page: 'p. 303–305',
-          theory: '\\text{if the phase crosses } -180^\\circ \\text{ more than once, list every gain-margin crossing (cf. A.18, p. 345)}',
-          symbolic: 'L_{out} \\sim \\frac{-gk_I}{s^3} \\text{ at low } \\omega:\\; \\angle L_{out} \\to -270^\\circ \\Rightarrow \\text{a low-frequency crossing with GM} < 0\\,\\text{dB (conditionally stable)}', spoiler: true },
+          theory: '\\text{if the phase crosses } -180^\\circ \\text{ more than once, list every gain-margin crossing (cf. A.18, p. 345)}' },
+        { title: 'Margins and bandwidth of both loops', page: 'p. 391–392 · E.17(a, b)', answers: [`${id}/a`, `${id}/b`],
+          theory: `PM_{in} = ${tex(l.mi.pm)}^\\circ\\;(\\omega_{co} = ${tex(l.mi.wc)}),\\quad PM_{out} = ${tex(l.mo.pm)}^\\circ\\;(\\omega_{co} = ${tex(l.mo.wc)}),\\quad \\omega_{bw,in} = ${tex(l.bwIn)},\\quad \\omega_{bw,out} = ${tex(l.bwOut)}`,
+          note: 'With k_I in the outer loop, L_out ~ −g k_I / s³ at low ω, so its phase heads to −270° and there is a low-frequency crossing with GM < 0 dB (conditionally stable).' },
+        { title: 'Bandwidth separation of this design', page: 'p. 392 · E.17(c)', answers: `${id}/c`,
+          theory: `\\frac{\\omega_{bw,in}}{\\omega_{bw,out}} = ${tex(l.bwIn / l.bwOut, 3)}` },
       ];
     },
 

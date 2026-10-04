@@ -14,6 +14,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const E = WB.E;
   const PD = () => WB.pd;
   const CH = WB.studies.E.chapters;
+  const showsAnswer = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isSolved(key);
+  const pid = (ctx, ch) => ctx.sys.problems[ch].id;
 
   const knobsOf = (st) => ({ trTh: st.trTh, zetaTh: st.zetaTh, trZ: st.trZ, zetaZ: st.zetaZ, pI: st.pI, obsFactor: st.obsFactor, zetaObs: st.zetaObs, pD: st.pD, comp: st.comp, obsMode: st.obsMode });
   // Work-mode starting gains: a sluggish, underdamped design (ζ = 0.6 breaks the E.11(a) rule).
@@ -107,7 +109,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   function markers(ctx, level) {
     const { A } = ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp });
     const explore = ctx.S.mode === 'explore';
-    const mk = L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}` }));
+    // eig(A) comes from the E.6 model: in Work mode it waits for E.6.
+    const mk = showsAnswer(ctx, `${ctx.sys.problems.ch6.id}/a`) ? L.eig(A).map((q, i) => ({ ...q, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
     const d = E.ssDesign(ctx.pModel, knobsOf(ctx.st), level);
     const near = (q, list) => list.reduce((b, c, j) => (Math.hypot(c.re - q.re, c.im - q.im) < Math.hypot(list[b].re - q.re, list[b].im - q.im) ? j : b), 0);
     clPoles(ctx, level).forEach((q, i) => {
@@ -136,12 +139,13 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     const { A, B } = ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp });
     return {
       title: `State-space model (${ctx.st.comp === 'fl' ? 'F_fl(z), A₄₁ = 0' : 'Jacobian, F_e'})`, page: 'p. 387 · E.6, p. 183',
+      answers: ctx.st.comp === 'fl' ? [`${pid(ctx, 'ch6')}/a`, `${pid(ctx, 'ch4')}/c`] : `${pid(ctx, 'ch6')}/a`,
       theory: '\\dot{\\tilde x} = A\\tilde x + B\\tilde F,\\quad \\tilde x = x - x_e,\\; x_e = (\\tfrac{\\ell}{2}, 0, 0, 0),\\quad \\tilde F = F - F_{ff}',
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
-      spoiler: true,
     };
   }
-  const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page, { matrix: false, det: true });
+  // `answers`: the problem part whose rank/det this card gives away (if any).
+  const ctrbCard = (A, B, title, page, answers) => ({ ...WB.ss.ctrbCard(A, B, title, page, { matrix: false, det: true }), answers });
   function polesCard(ctx, d, level) {
     return {
       title: 'Desired closed-loop poles', page: 'p. 190 (B.11), p. 113 · Eq. 8.5',
@@ -251,13 +255,13 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const { A, B } = ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp });
       const g = ctx.gains;
       return [
-        ssCard(ctx), ctrbCard(A, B, 'Controllability', 'p. 180 · Eq. 11.29'), polesCard(ctx, d, 'sf'),
+        ssCard(ctx), ctrbCard(A, B, 'Controllability', 'p. 180 · Eq. 11.29', `${pid(ctx, 'ch11')}/c`), polesCard(ctx, d, 'sf'),
         { title: 'Pole placement (Ackermann)', page: 'p. 182 · Eq. 11.32',
-          theory: 'K = (\\alpha - a_A)\\,\\mathcal{A}_A^{-1}\\,\\mathcal{C}_{A,B}^{-1},\\quad \\Delta_{ol}(s) = \\det(sI - A)',
-          numbers: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))},\\quad K = ${texMat([d.K])}`, spoiler: true },
+          theory: 'K = (\\alpha - a_A)\\,\\mathcal{A}_A^{-1}\\,\\mathcal{C}_{A,B}^{-1},\\quad \\Delta_{ol}(s) = \\det(sI - A)' },
         { title: 'Reference gain', page: 'p. 182 · Eq. 11.35',
-          theory: 'k_r = \\frac{-1}{C_r(A - BK)^{-1}B},\\quad C_r = \\begin{bmatrix}1 & 0 & 0 & 0\\end{bmatrix}',
-          numbers: `k_r = ${tex(d.kr)}`, spoiler: true },
+          theory: 'k_r = \\frac{-1}{C_r(A - BK)^{-1}B},\\quad C_r = \\begin{bmatrix}1 & 0 & 0 & 0\\end{bmatrix}' },
+        { title: 'Gains for the pole knobs', page: 'p. 389 · E.11(d)', answers: `${pid(ctx, 'ch11')}/d`,
+          theory: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))},\\quad K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}` },
         { title: 'Control law', page: 'p. 183 · Eq. 11.38',
           theory: 'F = F_{ff} - K(x - x_e) + k_r(z_r - z_e)',
           numbers: `F = F_{ff} - ${texMat([g.K])}\\tilde x + ${tex(g.kr)}\\,\\tilde z_r` },
@@ -275,7 +279,11 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           solution: () => [{ html: 'Many answers work. One choice, in the spirit of B.11 (p. 190): a fast pair from t<sub>r</sub> = 0.5 s and a slow pair from t<sub>r</sub> = 1.5 s, both with ζ = 0.8: −3.52 ± 2.64j and −1.173 ± 0.88j (the Explore defaults). Faster poles need more force: watch the F plot as you move them.' }],
         },
         {
-          id: 'c', title: '(c) Controllability (A, B from E.6)',
+          id: 'b', title: '(b) State-space matrices from E.6',
+          html: 'Add your A, B, C, D from E.6 (the Ch 6 tab) to your param file. The model card in the live math unlocks once E.6 is solved.',
+        },
+        {
+          id: 'c', title: '(c) Controllability',
           inputs: { rank: 'rank 𝒞<sub>A,B</sub>', det: 'det 𝒞<sub>A,B</sub>' },
           check: (v) => { const Cm = L.ctrb(jac().A, jac().B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: L.det(Cm) }, { det: 'det' }); },
           solution: () => {
@@ -346,13 +354,13 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       return [
         ssCard(ctx),
         { title: 'Augmented system', page: 'p. 198 · Eq. 12.1',
-          theory: '\\dot x_I = z_r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix}',
-          numbers: `A_1 = ${texMat(A1)}`, spoiler: true },
+          theory: '\\dot x_I = z_r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix}' },
         ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'),
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 199–201',
-          theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad F = F_{ff} - K\\tilde x - k_I\\textstyle\\int_0^t (z_r - z)\\,d\\tau',
-          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
+          theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad F = F_{ff} - K\\tilde x - k_I\\textstyle\\int_0^t (z_r - z)\\,d\\tau' },
+        { title: 'Gains for the pole knobs', page: 'p. 389 · E.12(a)', answers: `${pid(ctx, 'ch12')}/a`,
+          theory: `A_1 = ${texMat(A1)},\\quad K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}` },
       ];
     },
     buildProblem(parent, ctx) {
@@ -383,7 +391,15 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           },
         },
         {
-          id: 'c', title: '(b, c) Tracking with d = 1 N and 20% parameter error',
+          id: 'b', title: '(b) Input disturbance of 1 N and 20% parameter variation',
+          html: 'Set the input disturbance d and the true-plant mismatch in the left panel (the chapter starts with d = 1 N and a fixed 20% draw).',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            return Math.abs(S.sim.dist) > 0 && mis ? { ok: true, msg: `d = ${fmt(S.sim.dist, 3)} N with plant mismatch.` } : { ok: false, msg: 'Set both d ≠ 0 and a plant mismatch.' };
+          },
+        },
+        {
+          id: 'c', title: '(c) Tune for good tracking',
           html: 'Passes when the block stays on the beam (0 ≤ z ≤ ℓ of the true plant) for the whole run and |z<sub>r</sub> − z| just before the first switch is under 2 mm, with the current disturbance and mismatch.',
           check: () => {
             const { e, t, res } = errorBefore(ctx), S = ctx.S;
@@ -433,13 +449,15 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224',
           theory: '\\dot{\\hat x} = A\\hat x + B(u - F_{ff}) + L(\\tilde y - C\\hat x),\\quad \\dot e = (A - LC)e' },
         { title: 'Observability', page: 'p. 221',
-          theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ CA^2 \\\\ CA^3\\end{bmatrix}\\;(8\\times4),\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = 4',
-          numbers: `\\operatorname{rank}\\mathcal{O} = ${L.rank(O)}`, spoiler: true },
-        { title: 'Decoupled observer gain (two outputs)', page: 'p. 225 (B.13 uses place(Aᵀ, Cᵀ)ᵀ)',
-          theory: '\\text{with two outputs } L \\text{ is } 4\\times2 \\text{ and not unique: any } L \\text{ with the desired eig}(A - LC) \\text{ works}',
-          symbolic: 'L = \\begin{bmatrix}\\beta_{z1} & 0\\\\ 0 & \\beta_{\\theta1}\\\\ \\beta_{z0} & a_{32}\\\\ a_{41} & \\beta_{\\theta0}\\end{bmatrix} \\Rightarrow A - LC = \\text{blockdiag}\\left(\\begin{bmatrix}-\\beta_{z1} & 1\\\\ -\\beta_{z0} & 0\\end{bmatrix}, \\begin{bmatrix}-\\beta_{\\theta1} & 1\\\\ -\\beta_{\\theta0} & 0\\end{bmatrix}\\right)',
-          numbers: `q = ${d.obsPoles.map((q) => texPole(q)).join(',\\;')},\\quad L = ${texMat(d.L)}`, spoiler: true,
-          note: 'With two outputs L is not unique: python\'s place gives a different, dense L with the same eigenvalues. Any L with the right eig(A − LC) answers (c).' },
+          theory: '\\mathcal{O}_{A,C} = \\begin{bmatrix} C \\\\ CA \\\\ CA^2 \\\\ CA^3\\end{bmatrix}\\;(8\\times4),\\quad \\text{observable} \\iff \\operatorname{rank}\\mathcal{O}_{A,C} = 4' },
+        { title: 'Observability of the block and beam', page: 'p. 390 · E.13(b)', answers: `${pid(ctx, 'ch13')}/b`,
+          theory: `\\operatorname{rank}\\mathcal{O}_{A,C} = ${L.rank(O)}` },
+        { title: 'Observer gain with two outputs', page: 'p. 225',
+          theory: '\\text{with two outputs } L \\text{ is } 4\\times2 \\text{ and not unique: any } L \\text{ with the desired eig}(A - LC) \\text{ works}' },
+        { title: 'Decoupled observer gain for the block and beam', page: 'p. 225 (B.13 uses place(Aᵀ, Cᵀ)ᵀ)', answers: `${pid(ctx, 'ch13')}/c`,
+          theory: 'L =\\begin{bmatrix}\\beta_{z1} & 0\\\\ 0 & \\beta_{\\theta1}\\\\ \\beta_{z0} & a_{32}\\\\ a_{41} & \\beta_{\\theta0}\\end{bmatrix} \\Rightarrow A - LC = \\text{blockdiag}\\left(\\begin{bmatrix}-\\beta_{z1} & 1\\\\ -\\beta_{z0} & 0\\end{bmatrix}, \\begin{bmatrix}-\\beta_{\\theta1} & 1\\\\ -\\beta_{\\theta0} & 0\\end{bmatrix}\\right)',
+          numbers: `q = ${d.obsPoles.map((q) => texPole(q)).join(',\\;')},\\quad L = ${texMat(d.L)}`,
+          note:'With two outputs L is not unique: python\'s place gives a different, dense L with the same eigenvalues. Any L with the right eig(A − LC) answers (c).' },
         { title: 'Separation principle', page: 'p. 222–223',
           theory: '\\text{eig} = \\text{eig}(A_1 - B_1K_1) \\cup \\text{eig}(A - LC)',
           note: 'Holds for the linear model only; saturation, mismatch and the nonlinear plant break it.' },
@@ -451,13 +469,21 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const jac = () => ctx.sys.linear(ctx.pModel, { comp: ctx.st.comp });
       PD().problemPanel(parent, ctx, prob, [
         {
+          id: 'a', title: '(a) Exact parameters, no input disturbance',
+          html: 'The chapter starts with α = 0 and d = 0. <em>Exact model</em> in the left panel restores them.',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            return !mis && !(Math.abs(S.sim.dist) > 0) ? { ok: true, msg: 'Exact parameters, no disturbance.' } : { ok: false, msg: 'Set the true plant equal to the model and d = 0.' };
+          },
+        },
+        {
           id: 'b', title: '(b) Observability',
           inputs: { rank: 'rank 𝒪<sub>A,C</sub>' },
           check: (v) => PD().checkNumbers(v, { rank: L.rank(L.obsv(jac().A, jac().C)) }, {}),
           solution: () => [{ html: 'C picks z̃ and θ̃; CA adds z̃̇ and θ̃̇, so the first four rows of 𝒪 are already the 4×4 identity: rank 4. (z alone would also do: z, ż, z̈ = −gθ, z⃛ = −gθ̇.)' }],
         },
         {
-          id: 'c', title: '(c) Your observer gain L (4×2)',
+          id: 'c', title: '(c) Add an observer: your observer gain L (4×2)',
           html: 'Passes when eig(A − LC) are stable and the slowest observer pole is at least 2× faster (real part) than the slowest controller pole of the current gains. Uses the model selected in the controls.',
           inputs: Linputs(4),
           check: (v) => {
@@ -477,6 +503,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               { html: 'L<sub>32</sub> = a<sub>32</sub> = −g and L<sub>41</sub> = a<sub>41</sub> cancel the cross-couplings; the remaining entries are the coefficients of each block\'s desired polynomial.' },
             ];
           },
+        },
+        {
+          id: 'd', title: '(d) Output u and x̂; plot the state and its estimate',
+          html: 'The z and θ plots show the estimates ẑ and θ̂ (dotted) with the true states; the extra plot shows ż and its estimate. In your own code the controller returns both u and x̂, and a plotting routine draws each state with its estimate.',
         },
         {
           id: 'e', title: '(e) Add a 0.5 N input disturbance',
@@ -535,16 +565,24 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           numbers: `\\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` },
         { title: 'Disturbance observer', page: 'p. 241',
           theory: '\\dot{\\hat x} = A\\hat x + B(u - F_{ff} + \\hat d) + L(\\tilde y - C\\hat x),\\quad \\dot{\\hat d} = L_d(\\tilde y - C\\hat x),\\quad \\tilde F = -K\\hat x - k_I\\textstyle\\int e - \\hat d' },
-        { title: 'Decoupled gains: a z block and a θ–d block', page: 'p. 241',
-          theory: '\\text{decoupled design: a } z \\text{ block and a } \\theta\\text{–}d \\text{ block}',
-          symbolic: '\\theta\\text{–}d \\text{ block: } s^3 + \\beta_2 s^2 + \\beta_1 s + b_0 L_d = (s^2 + 2\\zeta\\omega s + \\omega^2)(s - p_d)',
-          numbers: `L_2 = ${texMat(d.L)}`, spoiler: true },
+        { title: 'Decoupled gains: a z block and a θ–d block', page: 'p. 241', answers: `${pid(ctx, 'ch14')}/b1`,
+          theory: '\\theta\\text{–}d \\text{ block: } s^3 + \\beta_2 s^2 + \\beta_1 s + b_0 L_d = (s^2 + 2\\zeta\\omega s + \\omega^2)(s - p_d)',
+          numbers: `L_2 = ${texMat(d.L)}` },
         polesCard(ctx, d, 'dobs'),
       ];
     },
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch14;
       PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a', title: '(a) α = 0.2, input disturbance 0.5, noise σ = 0.001 on z<sub>m</sub> and θ<sub>m</sub>',
+          html: 'The chapter starts with a fixed 20% draw, d = 0.5 N and noise of 0.001 m on z and 0.001 rad (0.0573°) on θ. Turn the disturbance observer off to see the plain observer of E.13 under these conditions.',
+          check: () => {
+            const S = ctx.S, mis = Object.values(S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            const noisy = S.sim.noise > 0 && (S.sim.noises || [])[0] > 0;
+            return mis && Math.abs(S.sim.dist) > 0 && noisy ? { ok: true, msg: `d = ${fmt(S.sim.dist, 3)} N, noise on z and θ, plant mismatch.` } : { ok: false, msg: 'Set a plant mismatch, d ≠ 0 and noise on both outputs.' };
+          },
+        },
         {
           id: 'b1', title: '(b) Your disturbance-observer gain L<sub>2</sub> (5×2; last row is L<sub>d</sub>)',
           html: 'Passes when eig(A<sub>2</sub> − L<sub>2</sub>C<sub>2</sub>) are all stable.',
