@@ -557,10 +557,16 @@ class Controller:
             const r = ref();
             return [
               { tex: `\\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(r.poles))},\\quad K = ${texMat([r.K])},\\quad k_r = ${tex(r.kr)}` },
-              { html: 'Why K = (k<sub>P</sub>, k<sub>D</sub>) for the same poles: with x = (θ, θ̇), −Kx is −k<sub>P</sub>θ − k<sub>D</sub>θ̇, and k<sub>r</sub>θ<sub>r</sub> = k<sub>P</sub>θ<sub>r</sub>. That is exactly PD with the derivative on the output (Fig. 7-2). Book: p. 187.' },
             ];
           },
         },
+        whyPart(ctx, {
+          id: 'd2', title: '(d) Why is K = (k<sub>P</sub>, k<sub>D</sub>) when the poles match A.8?',
+          html: 'Answer with two functions of the gains: the closed-loop characteristic polynomial under τ̃ = −Kx + k<sub>r</sub>θ<sub>r</sub>, and the k<sub>r</sub> that makes the DC gain one. Then compare them with your A.7(b) PD loop. Any nonzero multiple of the polynomial is accepted.',
+          ranges: { K1: [0.02, 2], K2: [0.01, 0.5] },
+          explain: 'Same polynomial as the PD loop of A.7(b) with k<sub>P</sub> = K<sub>1</sub>, k<sub>D</sub> = K<sub>2</sub>, and k<sub>r</sub> = K<sub>1</sub>: with x = (θ, θ̇), −Kx + k<sub>r</sub>θ<sub>r</sub> = k<sub>P</sub>(θ<sub>r</sub> − θ) − k<sub>D</sub>θ̇, which is exactly PD with the derivative on the output (Fig. 7-2). Book: p. 187.',
+          code: 'b0 = 3 / (P.m * P.ell**2)\na1 = 3 * P.b / (P.m * P.ell**2)\n\ndef char_poly(s, K1, K2):\n    return s**2 + (a1 + b0 * K2) * s + b0 * K1\n\ndef k_r(K1, K2):\n    return K1     # -1 / (C (A - B K)^-1 B)',
+        }),
         WB.myCtrl.part(ctx, {
           id: 'e', title: '(e) Implement the state-feedback controller, using a digital differentiator for θ̇',
           seed: `${ctx.sys.problems.ch10.id}/c`,
@@ -869,5 +875,31 @@ class Controller:
     },
   });
 
-  WB.ss = { makeSS, design, ctrbCard };
+  // X.11(d)'s "why is K = (k_P, k_D)?" (A and D): the closed-loop characteristic
+  // polynomial under u = −Kx + k_r r and the unit-DC-gain k_r, as Python functions
+  // of K, checked at random gains. Comparing them with the X.7(b) PD loop is the why.
+  // o: { id, title, html, ranges: {K1: [lo, hi], K2: [lo, hi]}, explain (html), code }
+  function whyPart(ctx, o) {
+    const cx = WB.py.cx;
+    const AB = (p, a) => { const { A, B, C } = ctx.sys.stateSpace(p); return { A, B, C, K: [a.K1, a.K2] }; };
+    return {
+      id: o.id, title: o.title, html: o.html,
+      code: {
+        template: 'def char_poly(s, K1, K2):\n    # det(sI - (A - B K)) with K = [K1, K2]\n    return ...\n\ndef k_r(K1, K2):\n    return ...\n',
+        check: async (code) => {
+          const r = await WB.py.check(ctx, {
+            args: { s: { label: 's', complex: true, re: [-6, 3], im: [0.3, 12] }, K1: { label: 'K1', lo: o.ranges.K1[0], hi: o.ranges.K1[1] }, K2: { label: 'K2', lo: o.ranges.K2[0], hi: o.ranges.K2[1] } },
+            items: [
+              { fn: 'char_poly', args: ['s', 'K1', 'K2'], compare: 'scale', truth: (p, a) => { const m = AB(p, a); return cx.poly(L.charPoly(L.sub(m.A, L.mul(m.B, [m.K]))), a.s); } },
+              { fn: 'k_r', args: ['K1', 'K2'], truth: (p, a) => { const m = AB(p, a); return WB.design.refGain(m.A, m.B, m.C, m.K); } },
+            ],
+          }, code);
+          return r.ok ? { ...r, msg: `${r.msg} ${o.explain}` } : r;
+        },
+      },
+      solution: () => [{ code: o.code }, { html: o.explain }],
+    };
+  }
+
+  WB.ss = { makeSS, design, ctrbCard, whyPart };
 })();

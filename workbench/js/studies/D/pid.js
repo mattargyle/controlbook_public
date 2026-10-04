@@ -651,11 +651,12 @@
               { var: 'system_type', truth: () => 1 },
               { fn: 'e_step', args: ['kP', 'kI', 'kD'], truth: () => 0 },
               { fn: 'e_ramp', args: ['kP', 'kI', 'kD'], truth: (p, a) => p.k / a.kI },
+              { fn: 'e_parab', args: ['kP', 'kI', 'kD'], truth: () => Infinity },
             ],
-          }, 'system_type = ...\n\ndef e_step(kP, kI, kD):\n    return ...\n\ndef e_ramp(kP, kI, kD):\n    return ...\n'),
+          }, 'system_type = ...\n\ndef e_step(kP, kI, kD):\n    return ...\n\ndef e_ramp(kP, kI, kD):\n    return ...\n\ndef e_parab(kP, kI, kD):\n    return ...\n'),
           solution: () => [
             { tex: `PC = \\frac{(k_D s^2 + k_P s + k_I)/m}{s(s^2 + \\frac bm s + \\frac km)} \\Rightarrow \\text{type 1},\; e_{step} = 0,\; e_{ramp} = \\frac{k}{k_I},\; e_{parab} = \\infty` },
-            { code: 'system_type = 1\n\ndef e_step(kP, kI, kD):\n    return 0.0\n\ndef e_ramp(kP, kI, kD):\n    return P.k / kI    # 1/M_v, M_v = kI/k' },
+            { code: 'system_type = 1\n\ndef e_step(kP, kI, kD):\n    return 0.0\n\ndef e_ramp(kP, kI, kD):\n    return P.k / kI    # 1/M_v, M_v = kI/k\n\ndef e_parab(kP, kI, kD):\n    return np.inf' },
           ],
         },
         {

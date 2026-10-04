@@ -512,8 +512,7 @@ class Controller:
           solution: () => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return [{ tex: `\\mathcal{C}_{A,B} = \\begin{bmatrix}0 & \\frac1m\\\\ \\frac1m & -\\frac{b}{m^2}\\end{bmatrix} = ${texMat(Cm)},\\; \\det = -\\frac{1}{m^2} = ${tex(Cm[0][0] * Cm[1][1] - Cm[0][1] * Cm[1][0])} \\ne 0` }]; },
         },
         {
-          id: 'd', title: `(d) K and k<sub>r</sub> for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}. Why is K = (k<sub>P</sub>, k<sub>D</sub>)?`,
-          html: 'Enter K and k<sub>r</sub>; the solution explains the "why".',
+          id: 'd', title: `(d) K and k<sub>r</sub> for t<sub>r</sub> = ${prob.tr}, ζ = ${prob.zeta}`,
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', kr: 'k<sub>r</sub>' },
           check: (v) => { const r = ref(); return lib.check(v, { K1: r.K[0], K2: r.K[1], kr: r.kr }, {}); },
           solution: () => {
@@ -521,10 +520,16 @@ class Controller:
             return [
               { tex: '\\det(sI - A + BK) = s^2 + \\frac{b + K_2}{m}s + \\frac{k + K_1}{m} \\;\\Rightarrow\\; K_1 = m\\omega_n^2 - k,\\; K_2 = 2m\\zeta\\omega_n - b' },
               { tex: `K = ${texMat([r.K])},\\quad k_r = \\frac{-1}{C(A-BK)^{-1}B} = m\\omega_n^2 = k + K_1 = ${tex(r.kr)}` },
-              { html: 'Why K = (k<sub>P</sub>, k<sub>D</sub>): −Kx = −K<sub>1</sub>z − K<sub>2</sub>ż is the D.8 PD law with the derivative on the output, and the same characteristic polynomial forces the same coefficients. The difference is k<sub>r</sub>: it equals k<sub>P</sub> + k, i.e. PD plus the spring feedforward F<sub>e</sub> = kz<sub>r</sub>, which is what makes the DC gain one.' },
             ];
           },
         },
+        WB.ss.whyPart(ctx, {
+          id: 'd2', title: '(d) Why is K = (k<sub>P</sub>, k<sub>D</sub>) when the poles match D.8?',
+          html: 'Answer with two functions of the gains: the closed-loop characteristic polynomial under F = −Kx + k<sub>r</sub>z<sub>r</sub>, and the k<sub>r</sub> that makes the DC gain one. Then compare them with your D.7(b) PD loop. Any nonzero multiple of the polynomial is accepted.',
+          ranges: { K1: [0.5, 10], K2: [0.5, 10] },
+          explain: 'Same polynomial as the PD loop of D.7(b) with k<sub>P</sub> = K<sub>1</sub>, k<sub>D</sub> = K<sub>2</sub>: −Kx = −K<sub>1</sub>z − K<sub>2</sub>ż is PD with the derivative on the output (Fig. 7-2). The difference is k<sub>r</sub> = k + K<sub>1</sub>, i.e. k<sub>P</sub> plus the spring feedforward F<sub>e</sub> = kz<sub>r</sub>, which is what makes the DC gain one.',
+          code: 'def char_poly(s, K1, K2):\n    return P.m * s**2 + (P.b + K2) * s + P.k + K1\n\ndef k_r(K1, K2):\n    return P.k + K1     # -1 / (C (A - B K)^-1 B)',
+        }),
         WB.myCtrl.part(ctx, {
           id: 'e', title: '(e) Implement the state-feedback controller, using a digital differentiator to estimate ż',
           seed: 'D.10/c',

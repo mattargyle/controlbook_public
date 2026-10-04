@@ -786,29 +786,43 @@
         },
         {
           id: 'b1', title: '(b) Outer loop with PD (k<sub>I<sub>φ</sub></sub> = 0)',
-          html: 'Inner loop replaced by its DC gain. Set <code>system_type</code> and write the unit-step error as a function of the outer-loop gains.',
+          html: 'Inner loop replaced by its DC gain (Fig. 9-12). Set <code>system_type</code> and write the errors for a unit step, ramp and parabola in φ<sub>r</sub> (rad; <code>np.inf</code> if unbounded), then the disturbance type <code>dist_type</code> and <code>e_dist</code>, the error magnitude for a unit step d<sub>2</sub>. All as functions of the outer-loop gains.',
           code: {
-            template: 'system_type = ...\n\ndef e_step(kP, kD):\n    return ...\n',
+            template: 'system_type = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kD):\n    return ...\n\ndist_type = ...\n\ndef e_dist(kP, kD):\n    return ...\n',
             check: (code) => WB.py.check(ctx, {
               args: { kP: PYARGS.kPout, kD: PYARGS.kDout },
-              items: [{ var: 'system_type', truth: () => 0 }, { fn: 'e_step', args: ['kP', 'kD'], truth: (p, x) => 1 / (1 + x.kP) }],
+              items: [
+                { var: 'system_type', truth: () => 0 },
+                { fn: 'e_step', args: ['kP', 'kD'], truth: (p, x) => 1 / (1 + x.kP) },
+                { fn: 'e_ramp', args: ['kP', 'kD'], truth: () => Infinity },
+                { fn: 'e_parab', args: ['kP', 'kD'], truth: () => Infinity },
+                { var: 'dist_type', truth: () => 0 },
+                { fn: 'e_dist', args: ['kP', 'kD'], truth: (p, x) => 1 / (1 + x.kP) },
+              ],
             }, code),
           },
           solution: () => [{ tex: `\\text{type 0}:\; e_{step} = \\frac{1}{1 + k_{P_\\phi}} = ${tex(1 / (1 + ctx.gains.kPphi))},\; e_{ramp} = \\infty;\; \\text{disturbance: type 0, } \\frac{1}{1 + k_{P_\\phi}}` }, { html: 'Book: p. 152. Try it: feedforward off, step input, k<sub>I<sub>φ</sub></sub> = 0.' },
-            { code: 'system_type = 0\n\ndef e_step(kP, kD):\n    return 1 / (1 + kP)      # M_p = lim PC = kP (P_out(0) = 1)' }],
+            { code: 'system_type = 0\n\ndef e_step(kP, kD):\n    return 1 / (1 + kP)      # M_p = lim PC = kP (P_out(0) = 1)\n\ndef e_ramp(kP, kD):\n    return np.inf\n\ndef e_parab(kP, kD):\n    return np.inf\n\ndist_type = 0\n\ndef e_dist(kP, kD):\n    return 1 / (1 + kP)      # lim P/(1 + PC), P_out(0) = 1' }],
         },
         {
           id: 'b2', title: '(b) Outer loop with an integrator (k<sub>I<sub>φ</sub></sub> > 0)',
-          html: 'Same, with PID: <code>system_type</code> and the unit-ramp error as a function of the gains.',
+          html: 'Same, with PID: <code>system_type</code>, the unit step, ramp and parabola errors, then <code>dist_type</code> and <code>e_dist</code>, the error magnitude for a unit <em>ramp</em> d<sub>2</sub>.',
           code: {
-            template: 'system_type = ...\n\ndef e_ramp(kP, kI, kD):\n    return ...\n',
+            template: 'system_type = ...\n\ndef e_step(kP, kI, kD):\n    return ...\n\ndef e_ramp(kP, kI, kD):\n    return ...\n\ndef e_parab(kP, kI, kD):\n    return ...\n\ndist_type = ...\n\ndef e_dist(kP, kI, kD):\n    return ...\n',
             check: (code) => WB.py.check(ctx, {
               args: { kP: PYARGS.kPout, kI: PYARGS.kIout, kD: PYARGS.kDout },
-              items: [{ var: 'system_type', truth: () => 1 }, { fn: 'e_ramp', args: ['kP', 'kI', 'kD'], truth: (p, x) => 1 / x.kI }],
+              items: [
+                { var: 'system_type', truth: () => 1 },
+                { fn: 'e_step', args: ['kP', 'kI', 'kD'], truth: () => 0 },
+                { fn: 'e_ramp', args: ['kP', 'kI', 'kD'], truth: (p, x) => 1 / x.kI },
+                { fn: 'e_parab', args: ['kP', 'kI', 'kD'], truth: () => Infinity },
+                { var: 'dist_type', truth: () => 1 },
+                { fn: 'e_dist', args: ['kP', 'kI', 'kD'], truth: (p, x) => 1 / x.kI },
+              ],
             }, code),
           },
           solution: () => [{ tex: `\\text{type 1}:\; e_{step} = 0,\; e_{ramp} = \\frac{1}{k_{I_\\phi}};\; \\text{disturbance: type 1, ramp error } \\frac{1}{k_{I_\\phi}}` }, { html: 'Book: p. 152–153. Try a ramp input with k<sub>I<sub>φ</sub></sub> > 0.' },
-            { code: 'system_type = 1\n\ndef e_ramp(kP, kI, kD):\n    return 1 / kI            # M_v = lim s PC = kI' }],
+            { code: 'system_type = 1\n\ndef e_step(kP, kI, kD):\n    return 0.0\n\ndef e_ramp(kP, kI, kD):\n    return 1 / kI            # M_v = lim s PC = kI\n\ndef e_parab(kP, kI, kD):\n    return np.inf\n\ndist_type = 1\n\ndef e_dist(kP, kI, kD):\n    return 1 / kI            # unit ramp d2: lim s P/(1 + PC) / s^2' }],
         },
       ]);
     },

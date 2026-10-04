@@ -646,29 +646,32 @@ ${gate ? '        # anti-windup: integrate only while the block is nearly still\
         },
         {
           id: 'b1', title: '(b) Outer loop under PD (k<sub>I<sub>z</sub></sub> = 0)',
-          html: 'As in (a), for the outer loop with the inner loop as its DC gain, as functions of the outer PD gains (negative). Unit parabola, in m.',
+          html: 'As in (a), for the outer loop with the inner loop as its DC gain: the errors for a unit step, ramp and parabola in z<sub>r</sub> (m), as functions of the outer PD gains (negative).',
           code: {
-            template: 'system_type = ...\n\ndef e_parab(kP, kD):\n    return ...\n',
+            template: 'system_type = ...\n\ndef e_step(kP, kD):\n    return ...\n\ndef e_ramp(kP, kD):\n    return ...\n\ndef e_parab(kP, kD):\n    return ...\n',
             check: (code) => check(code, OUT, [
               { var: 'system_type', truth: () => 2 },
+              { fn: 'e_step', args: ['kP', 'kD'], truth: () => 0 },
+              { fn: 'e_ramp', args: ['kP', 'kD'], truth: () => 0 },
               { fn: 'e_parab', args: ['kP', 'kD'], truth: (p, x) => -1 / (p.g * x.kP) },
             ], { explain: signHint }),
           },
           solution: () => [
             { tex: `P_{out}C_{out} = \\frac{-g(k_{D_z}s + k_{P_z})}{s^2} \\Rightarrow \\text{type 2},\\quad e_{parab} = \\frac{1}{M_a} = -\\frac{1}{gk_{P_z}}` },
             { html: 'Step and ramp errors are zero.' },
-            { code: 'system_type = 2\n\ndef e_parab(kP, kD):\n    return -1 / (P.g * kP)   # M_a = -g kP > 0' },
+            { code: 'system_type = 2\n\ndef e_step(kP, kD):\n    return 0.0\n\ndef e_ramp(kP, kD):\n    return 0.0\n\ndef e_parab(kP, kD):\n    return -1 / (P.g * kP)   # M_a = -g kP > 0' },
           ],
         },
         {
           id: 'b2', title: '(b) Outer loop with an integrator (k<sub>I<sub>z</sub></sub> ≠ 0)',
+          html: '<code>system_type</code> and the unit-parabola error (m) as a function of the outer PID gains.',
           code: {
-            template: 'system_type = ...\n',
-            check: (code) => check(code, {}, [{ var: 'system_type', truth: () => 3 }]),
+            template: 'system_type = ...\n\ndef e_parab(kP, kI, kD):\n    return ...\n',
+            check: (code) => check(code, OUT, [{ var: 'system_type', truth: () => 3 }, { fn: 'e_parab', args: ['kP', 'kI', 'kD'], truth: () => 0 }]),
           },
           solution: () => [
             { tex: 'P_{out}C_{out} = \\frac{-g(k_Ds^2 + k_Ps + k_I)}{s^3} \\Rightarrow \\text{type 3: zero error to steps, ramps and parabolas}' },
-            { code: 'system_type = 3' },
+            { code: 'system_type = 3\n\ndef e_parab(kP, kI, kD):\n    return 0.0' },
           ],
         },
         {
