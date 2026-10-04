@@ -90,3 +90,9 @@ Smaller notation issues:
 | Work mode (no give-aways) | Every implementation part (B.8(e), B.10(c), B.11(e), B.12(a), (c), B.13(c), B.14(b), the B.18 realization and prefilter) is a Python `class Controller` run against the true plant (`WB.myCtrl`); Work mode plots the student's controller or the zero-input plant, never the workbench's. Every derivation in B.2–B.6, the B.8 closed loops, filter and DC gain, the B.9 error formulas, the B.P.6 Evans form, and the B.12/B.14 augmented models is a Python answer, checked against `system.js` (f, linearize, stateSpace, inner) at random arguments and parameter sets. Cards stating the pendulum's results stay locked until the part that derives them is solved. |
 | B.P.6 Evans form | The Python check uses the filtered outer loop (the one B.8(d) designs and the code closes), not Fig. 6-9's k_DC-only loop, which is unstable with the B.10 gains. |
 | B.4(a) equilibria | Asked as θ_e(k) = kπ and F_e(z_e, θ_e) = 0; the check calls F_e only at θ_e = kπ. |
+
+## Open decisions (instructor)
+
+| Item | Current behaviour | Alternative | Where to change it |
+| --- | --- | --- | --- |
+| B.17 outer-loop model for the answers | The B.17 outer-loop answers (PM, ω_co, GM, ω_bw, the ratio) and the separation question (c) use the loop the B.10 code closes, C_out·F·T_in·P_out ("as implemented"), with the fixed B.10 gains. The reason: with the B.10 gains the book's P_out·C_out never drops below 0 dB (it tends to (k_Dz + σk_Pz)/σ · 2ℓ/3 ≈ 4.5), so it has no crossover, PM or bandwidth. The part text says why. The Bode view defaults to the book's model. | Ask with the book's P_out·C_out. The outer answers would then be "inf/none" (no crossover), and the separation question (c) could not be asked, because ω_bw,out is undefined. | `js/studies/B/freq.js`, ch17 `buildProblem`: `const fixed = () => this.loops(ctx, g, 'impl');` (use `'book'`), then the (b) and (c) parts and the `outerNote` text. |

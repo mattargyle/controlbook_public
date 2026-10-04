@@ -58,3 +58,9 @@ None found in the D templates beyond the lead-filter scaling above. `testDynamic
 | Design choices | No tuning value the book doesn't give is shown as part of a problem in Work mode (D.17's fixed D.10 loop is the stated exception). D.12(a) is a function of p_I; D.12–D.14 controller parts check behaviour, so your own poles are fine. |
 | Implementation parts | D.7(d), D.8(a)/(b), D.10(c), D.11(e), D.12(a)/(c), D.13(c), D.14(b) and the D.18 implementation and prefilter are Python `class Controller` answers run in closed loop against the true plant (js/core/myctrl.js). Work mode plots the student's controller (or the plant with zero input until they run one) and has no gain sliders except s-plane-only PD/PID gains on D.7, D.8 and D.10. D.13(e) runs the saved D.13(c) code. D.18's C(s) is given as coefficient lists, and Work mode hides the block menu (whose blocks mirror the solution). |
 | D.16(b), D.17 | Accept both the book's approximation and the exact value / either bandwidth definition. |
+
+## Open decisions (instructor)
+
+| Item | Current behaviour | Alternative | Where to change it |
+| --- | --- | --- | --- |
+| D.17 which bandwidth counts | D.17(c) accepts either −3 dB crossing of \|T\| for the fixed D.10 loop, each with its matching ratio: the first one, 0.148 rad/s (ratio 0.083), and the final roll-off, 2.142 rad/s (ratio 1.196). The first crossing comes from the notch the complex PID zeros put in \|C\| (see "D.17 bandwidth" above), not from crossover; it is what a plain `bandwidth` call returns. The final roll-off is the one that relates to crossover (PM ≈ 75°, no peaking, so ω_bw lands just above ω_co). | Accept only the final roll-off, so the "how does it relate to crossover" answer is the meaningful one (and say so in the part text). | `js/studies/D/freq.js`, ch17 `buildProblem`, part `c`: `const cand = [x.bw, x.bwLast]` (keep only `x.bwLast`) and the part html. |
