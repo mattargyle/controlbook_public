@@ -1,29 +1,24 @@
-// Pole placement for Design Study B, ported from scipy.signal.place_poles
-// (method 'YT', rtol 1e-3, maxiter 30), which is what control.place calls.
+// Pole placement ported from scipy.signal.place_poles (method 'YT', rtol 1e-3,
+// maxiter 30), which is what python-control's place() calls.
 //
-// Why a port: the B.13 and B.14 observers have two measured outputs, so the
-// observer gain L (4x2 or 5x2) is not unique. Any L that puts eig(A - LC) at the
+// Why a port: with more than one input (or, for an observer, more than one
+// measured output) the gain is not unique. Any K that puts eig(A - BK) at the
 // requested poles is "correct", but the repo's ctrlObserver.py and
 // ctrlDisturbanceObserver.py get theirs from scipy's YT iteration. To match those
-// controllers to machine precision the workbench has to land on the same L, which
-// means reproducing the same iteration from the same starting point. The starting
-// point comes from LAPACK Householder QR factorizations, so the QR below follows
-// LAPACK's dgeqr2/dorg2r (zgeqr2/zung2r for complex poles) step by step.
+// controllers to machine precision the workbench has to land on the same gain,
+// which means reproducing the same iteration from the same starting point. The
+// starting point comes from LAPACK Householder QR factorizations, so the QR below
+// follows LAPACK's zgeqr2/zung2r step by step.
 //
-// Single-input designs (B.11, B.12) have a unique gain; they go through the same
-// code so every B gain is computed one way.
+// Single-input designs have a unique gain, and WB.design.place (Ackermann) gives
+// the same answer; use this file where a Python ctrl*.py has to be matched.
 window.WB = window.WB || {};
-WB.studies = WB.studies || {};
-WB.studies.B = WB.studies.B || { chapters: {} };
 
-(function () {
+WB.yt = (function () {
+  const L = WB.la;
   // ------------------------------------------------------- complex scalars --
-  const cx = (re, im = 0) => ({ re, im });
-  const cadd = (a, b) => cx(a.re + b.re, a.im + b.im);
-  const csub = (a, b) => cx(a.re - b.re, a.im - b.im);
-  const cmul = (a, b) => cx(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+  const cx = L.C.of, cadd = L.C.add, csub = L.C.sub, cmul = L.C.mul, cabs = L.C.abs;
   const cconj = (a) => cx(a.re, -a.im);
-  const cabs = (a) => Math.hypot(a.re, a.im);
   const cscale = (a, k) => cx(a.re * k, a.im * k);
   function cdiv(a, b) {
     // Smith's algorithm, as zladiv does, to avoid overflow
@@ -113,23 +108,7 @@ WB.studies.B = WB.studies.B || { chapters: {} };
   const re = (M) => M.map((r) => r.map((c) => c.re));
 
   // ---------------------------------------------------- small dense helpers --
-  // |det| by LU with partial pivoting (real)
-  function absDet(Min) {
-    const A = Min.map((r) => r.slice()), n = A.length;
-    let d = 1;
-    for (let c = 0; c < n; c++) {
-      let p = c;
-      for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
-      if (A[p][c] === 0) return 0;
-      [A[c], A[p]] = [A[p], A[c]];
-      d *= A[c][c];
-      for (let r = c + 1; r < n; r++) {
-        const l = A[r][c] / A[c][c];
-        for (let j = c; j < n; j++) A[r][j] -= l * A[c][j];
-      }
-    }
-    return Math.abs(d);
-  }
+  const absDet = (M) => Math.abs(L.det(M));
   // Solve A X = B for complex A (n x n) and B (n x k), partial pivoting.
   function csolve(Ain, Bin) {
     const n = Ain.length;
@@ -335,16 +314,30 @@ WB.studies.B = WB.studies.B || { chapters: {} };
   }
 
   // ----------------------------------------------------------- place_poles --
-  // A (n x n), B (n x m) real arrays; poles [{re, im}]. Returns the gain K (m x n)
-  // with eig(A - B K) = poles, or null if they can't be placed.
-  function placeYT(A, B, polesIn) {
+  // A (n x n), B (n x m) real arrays with B of full column rank; poles [{re, im}].
+  // Returns the gain K (m x n) with eig(A - B K) = poles, or null if they can't be
+  // placed.
+  function place(A, B, polesIn) {
+    try { return placePoles(A, B, polesIn); } catch (e) { return null; }
+  }
+
+  function placePoles(A, B, polesIn) {
     const n = A.length, m = B[0].length;
-    const poles = orderPoles(polesIn);
+    const poles = orderPoles(polesIn.map((p) => cx(p.re, p.im || 0)));
+    if (L.rank(B) < m) throw new Error('B must have full column rank');
+    if (n === m) {
+      // square B: K = B^{-1} (A - D) with D the real block-diagonal form of the poles
+      const D = L.zeros(n, n);
+      for (let i = 0; i < n; i++) {
+        D[i][i] = poles[i].re;
+        if (!isReal(poles[i])) { D[i][i + 1] = -poles[i].im; D[i + 1][i + 1] = poles[i].re; D[i + 1][i] = poles[i].im; i++; }
+      }
+      return L.mul(L.inv(B), L.sub(A, D));
+    }
+    const rankB = m;
     const { Q: U, R } = qrFull(toC(B));
-    const rankB = m;  // B has full column rank in every B design
     const u0 = re(U).map((r) => r.slice(0, rankB)), u1 = re(U).map((r) => r.slice(rankB));
     const z = re(R).slice(0, rankB);
-    if (n === rankB) throw new Error('square B not used here');
     const ker = [];
     let X = null, skip = false;
     for (let j = 0; j < n; j++) {
@@ -388,30 +381,24 @@ WB.studies.B = WB.studies.B || { chapters: {} };
         idx++;
       }
     }
-    try {
-      const XT = Xc[0].map((_, j) => Xc.map((r) => r[j]));
-      const DXT = XT.map((row, i) => row.map((c) => cmul(poles[i], c)));
-      const Mt = csolve(XT, DXT);                       // m^T
-      const Mm = Mt[0].map((_, j) => Mt.map((r) => r[j]));
-      const rhs = u0[0].map((_, a) => Mm[0].map((__, c) => {  // u0^T (m - A)
-        let s = cx(0);
-        for (let k = 0; k < n; k++) s = cadd(s, cscale(csub(Mm[k][c], cx(A[k][c])), u0[k][a]));
-        return s;
-      }));
-      const G = csolve(z, rhs);
-      return G.map((r) => r.map((c) => -c.re));
-    } catch (e) {
-      return null;
-    }
+    const XT = Xc[0].map((_, j) => Xc.map((r) => r[j]));
+    const DXT = XT.map((row, i) => row.map((c) => cmul(poles[i], c)));
+    const Mt = csolve(XT, DXT);                       // m^T
+    const Mm = Mt[0].map((_, j) => Mt.map((r) => r[j]));
+    const rhs = u0[0].map((_, a) => Mm[0].map((__, c) => {  // u0^T (m - A)
+      let s = cx(0);
+      for (let k = 0; k < n; k++) s = cadd(s, cscale(csub(Mm[k][c], cx(A[k][c])), u0[k][a]));
+      return s;
+    }));
+    const G = csolve(z, rhs);
+    return G.map((r) => r.map((c) => -c.re));
   }
 
   // Observer gain L (n x p) with eig(A - L C) = poles: place(A^T, C^T)^T.
-  function observerYT(A, C, poles) {
-    const AT = A[0].map((_, j) => A.map((r) => r[j]));
-    const CT = C[0].map((_, j) => C.map((r) => r[j]));
-    const Lt = placeYT(AT, CT, poles);
-    return Lt ? Lt[0].map((_, i) => Lt.map((r) => r[i])) : null;
+  function observer(A, C, poles) {
+    const Lt = place(L.T(A), L.T(C), poles);
+    return Lt ? L.T(Lt) : null;
   }
 
-  WB.studies.B.place = { placeYT, observerYT, qrFull, orderPoles };
+  return { place, observer, qrFull, orderPoles };
 })();

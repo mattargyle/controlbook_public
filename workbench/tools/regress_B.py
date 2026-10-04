@@ -33,7 +33,7 @@ TH0 = 5.0                                            # initial angle [deg] for t
 XS = [[0.1, 0.2, -0.3, 0.4], [-0.5, 1.2, 0.7, -2.0], [2.0, -2.9, 0.0, 3.0], [0.0, 3.1, 1.5, 0.5]]
 
 JS = r"""
-const sys = WB.systems.B, lib = WB.studies.B.lib, P = WB.studies.B.place;
+const sys = WB.systems.B, lib = WB.studies.B.lib;
 const p = {m1:.25, m2:1, ell:1, b:.05, F_max:5, g:9.8};
 const mis = (m) => ({...p, m1: p.m1*(1+m.m1/100), m2: p.m2*(1+m.m2/100), ell: p.ell*(1+m.ell/100), b: p.b*(1+m.b/100)});
 const ss = sys.stateSpace(p), Ts = 0.01;
@@ -64,8 +64,8 @@ const repo = (M) => ({trTh: 0.5, zetaTh: 0.9, M, zetaZ: 0.9, rule: 'tp', pI: -2,
 { const d = lib.ssDesign(ss, 'obs', {...repo(3), obsRule: 'tp'}); out.gains.obs = [...d.K, d.ki]; out.gains.L = d.L;
   run('obs', lib.obsCtrl({Aobs: ss.A, Bobs: ss.B, Cobs: ss.C, L: d.L, K: d.K, ki: d.ki, Ts, uLim: 5}), {dist: 0.05}); }
 { const d = lib.ssDesign(ss, 'dobs', {...repo(3), obsRule: '2.2', pD: -1}); out.gains.dobs = [...d.K, d.ki]; out.gains.L2 = d.L2;
-  const {A2, C2, B1} = lib.augD(ss);
-  run('dobs', lib.obsCtrl({Aobs: A2, Bobs: B1, Cobs: C2, L: d.L2, K: d.K, ki: d.ki, Ts, uLim: 5, dist: true}), {dist: 0.5, ptrue: mis(%(MIS)s)}); }
+  const {A2, C2, B2} = lib.augD(ss);
+  run('dobs', lib.obsCtrl({Aobs: A2, Bobs: B2, Cobs: C2, L: d.L2, K: d.K, ki: d.ki, Ts, uLim: 5, dist: true}), {dist: 0.5, ptrue: mis(%(MIS)s)}); }
 // Ch 18: ctrlLoopshape with loopShapingInner/Outer.py, both implementations
 { const T = WB.tf, bl = lib.blocks;
   const Cin = T.mul(bl.prop(-1), bl.prop(800), bl.lead(40, 15));

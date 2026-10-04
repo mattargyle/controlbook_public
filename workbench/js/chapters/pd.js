@@ -168,10 +168,7 @@ WB.chapters = WB.chapters || {};
     };
   }
 
-  function gainsFromPoles(model, poles) {
-    const { alpha1, alpha0 } = M.polyFromPoles(poles[0], poles[1]);
-    return { kP: (alpha0 - model.a0) / model.b0, kD: (alpha1 - model.a1) / model.b0 };
-  }
+  const gainsFromPoles = WB.design.pdGains;
 
   function wnFromTr(tr, zeta, rule) {
     if (rule === 'tp') return Math.PI / (2 * tr * Math.sqrt(Math.max(1e-6, 1 - zeta * zeta)));

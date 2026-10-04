@@ -12,6 +12,7 @@
   const { el, slider, segmented, section } = WB.ui;
   const M = WB.math;
   const L = WB.la;
+  const T = WB.tf;
   const { tex, texPole, fmt, fmtPole } = M;
   const lib = WB.studies.D.lib;
   const ans = WB.systems.D.answers;
@@ -43,7 +44,7 @@
     const { kP, kI, kD } = ctx.gains;
     const st = ctx.st, p = ctx.pModel, Ts = ctx.S.sim.Ts;
     const sigma = st.sigma ?? 0.05;
-    const beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     const lim = p.Fmax;
     let I = 0, ePrev = 0, yPrev = null, ydot = 0;
     return {
@@ -440,13 +441,6 @@
   };
 
   // -------------------------------------------------------------- D.9 --
-  function shapedReference(ctx, base) {
-    const A = ctx.S.sim.amplitude, t0 = ctx.S.sim.tStep, y0 = ctx.S.sim.y0;
-    if (ctx.st.input === 'ramp') return (t) => (t < t0 ? y0 : y0 + A * (t - t0));
-    if (ctx.st.input === 'parabola') return (t) => (t < t0 ? y0 : y0 + A * (t - t0) ** 2);
-    return base;
-  }
-
   CH.ch9 = {
     id: 'ch9', num: 9, tab: 'D.9', title: 'System type & integrators', pages: 'pp. 137–154, p. 380',
     defaults() { return { comp: 'none', deriv: 'state', antiwindup: 'none', kP: 1, kD: 1, kI: 0, tr: 2, zeta: 0.7, kIx: 0.5, input: 'step' }; },
@@ -454,7 +448,7 @@
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD } : designed(ctx); },
     controller: (ctx, o) => makePID(ctx, o),
     linearSim: (ctx, c) => lib.linearSim(ctx, c, makePID),
-    reference: shapedReference,
+    reference: (ctx, base) => WB.pid.shapedReference(ctx, base),
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'PID controller', 'p. 142');
@@ -574,28 +568,6 @@
   };
 
   // ------------------------------------------------------------- D.P.6 --
-  // Branch-tracked root locus of Delta(s) + k n(s) = 0 for k in [0, kMax].
-  function rootLocus(den, num, kMax, steps = 300) {
-    const branches = [];
-    let prev = null;
-    for (let i = 0; i <= steps; i++) {
-      const k = kMax * Math.pow(i / steps, 2);
-      let r = L.roots(L.polyAdd(den, L.polyScale(num, k)));
-      if (prev) {
-        const used = new Set(), ordered = [];
-        for (const p of prev) {
-          let best = -1, bd = Infinity;
-          r.forEach((q, j) => { if (!used.has(j)) { const d = Math.hypot(q.re - p.re, q.im - p.im); if (d < bd) { bd = d; best = j; } } });
-          used.add(best); ordered.push(r[best]);
-        }
-        r = ordered;
-      } else r.forEach(() => branches.push([]));
-      r.forEach((q, j) => branches[j].push(q));
-      prev = r;
-    }
-    return branches;
-  }
-
   CH.p6 = {
     id: 'p6', num: 10.5, tab: 'D.P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474, p. 380',
     defaults(sys) { const pr = sys.problems.p6; return { comp: 'none', deriv: 'state', antiwindup: 'none', kP: 1, kD: 1, tr: pr.tr, zeta: pr.zeta, kIx: 0.1, kMaxFactor: 1 }; },
@@ -620,7 +592,7 @@
       const mk = L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
       L.roots(pidCharPoly(ctx.model, g)).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole at kI = ${fmt(g.kI, 3)}`, dragId: i }));
       const fitR = Math.max(...L.roots(ev.den).map((p) => Math.hypot(p.re, p.im))) * 1.6;
-      return { markers: mk, loci: rootLocus(ev.den, ev.num, kMax), fitR };
+      return { markers: mk, loci: T.rootLocus(ev.den, ev.num, kMax), fitR };
     },
     onPoleDrag(ctx, id, re, im) {
       const ev = ans.evans(ctx.pModel, ctx.gains);
@@ -762,7 +734,7 @@
 
     math(ctx) {
       const st = ctx.st, Ts = ctx.S.sim.Ts;
-      const beta = (2 * st.sigma - Ts) / (2 * st.sigma + Ts), gamma = 2 / (2 * st.sigma + Ts);
+      const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       const d = designed(ctx);
       return [
         { title: 'PID from the measured output', page: 'p. 155',

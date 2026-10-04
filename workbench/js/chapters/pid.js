@@ -20,7 +20,7 @@ WB.chapters = WB.chapters || {};
     const st = ctx.st;
     const { kP, kI, kD } = ctx.gains;
     const Ts = S.sim.Ts, sigma = st.sigma ?? 0.05;
-    const beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     const uLim = sys.uLimit(pModel);
     let I = 0, ePrev = null, yPrev = null, ydot = 0, rPrev = null;
     return {
@@ -71,11 +71,12 @@ WB.chapters = WB.chapters || {};
     return markers;
   }
 
-  // Reference shapes for Ch 9: step, ramp, parabola. amplitude is the step size [deg],
-  // ramp slope [deg/s], or parabola coefficient [deg/s^2] (r = A t^2).
-  function shapedReference(ctx, base) {
-    const { S } = ctx;
-    const A = S.sim.amplitude * M.DEG, t0 = S.sim.tStep, y0 = S.sim.y0 * M.DEG;
+  // Reference shapes for Ch 9: step, ramp, parabola. amplitude is the step size,
+  // ramp slope, or parabola coefficient (r = A t²) in display units; scale converts
+  // them to SI (π/180 for the arm's degrees) and y0 is the starting value in SI.
+  // Studies B–F use this too.
+  function shapedReference(ctx, base, scale = 1, y0 = ctx.S.sim.y0 * scale) {
+    const A = ctx.S.sim.amplitude * scale, t0 = ctx.S.sim.tStep;
     if (ctx.st.input === 'ramp') return (t) => (t < t0 ? y0 : y0 + A * (t - t0));
     if (ctx.st.input === 'parabola') return (t) => (t < t0 ? y0 : y0 + A * (t - t0) ** 2);
     return base;
@@ -125,7 +126,7 @@ WB.chapters = WB.chapters || {};
     simDefaults(sys) { return sys.problems.ch9.sim; },
     gains(ctx) { return ctx.S.mode === 'work' ? { kP: ctx.st.kP, kI: ctx.st.kI, kD: ctx.st.kD } : designedGains(ctx); },
     controller: (ctx, o) => makePID(ctx, o),
-    reference: shapedReference,
+    reference: (ctx, base) => shapedReference(ctx, base, M.DEG),
 
     buildControls(parent, ctx) {
       const sec = section(parent, 'PID controller', 'p. 142');
@@ -316,7 +317,7 @@ WB.chapters = WB.chapters || {};
 
     math(ctx) {
       const st = ctx.st, Ts = ctx.S.sim.Ts;
-      const beta = (2 * st.sigma - Ts) / (2 * st.sigma + Ts), gamma = 2 / (2 * st.sigma + Ts);
+      const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       const dg = designedGains(ctx);
       return [
         { title: 'PID from measured output', page: 'p. 155',
@@ -385,32 +386,6 @@ WB.chapters = WB.chapters || {};
   };
 
   // ---------------------------------------------------- Appendix P.6 (root locus) --
-  // Branch-tracked root locus of Delta(s) + k * n(s) = 0 for k in [0, kMax].
-  function rootLocus(den, num, kMax, steps = 300) {
-    const branches = [];
-    let prev = null;
-    for (let i = 0; i <= steps; i++) {
-      const k = kMax * Math.pow(i / steps, 2);
-      const poly = L.polyAdd(den, L.polyScale(num, k));
-      let r = L.roots(poly);
-      if (prev) {
-        // greedy match each previous root to its nearest new root
-        const used = new Set(), ordered = [];
-        for (const p of prev) {
-          let best = -1, bd = Infinity;
-          r.forEach((q, j) => { if (!used.has(j)) { const d = Math.hypot(q.re - p.re, q.im - p.im); if (d < bd) { bd = d; best = j; } } });
-          used.add(best); ordered.push(r[best]);
-        }
-        r = ordered;
-      } else {
-        r.forEach(() => branches.push([]));
-      }
-      r.forEach((q, j) => branches[j].push(q));
-      prev = r;
-    }
-    return branches;
-  }
-
   WB.chapters.p6 = {
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I', pages: 'pp. 465–474',
 
@@ -441,7 +416,7 @@ WB.chapters = WB.chapters || {};
     splane(ctx) {
       const ev = this.evans(ctx);
       const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, ctx.st.kIx * 1.2, 1e-3);
-      const loci = rootLocus(ev.den, ev.num, kMax);
+      const loci = WB.tf.rootLocus(ev.den, ev.num, kMax);
       const markers = L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
       L.roots(pidCharPoly(ctx.model, ev.g)).forEach((p, i) => markers.push({ ...p, kind: 'cl', label: `closed-loop pole at kI = ${fmt(ev.g.kI, 3)}`, dragId: i }));
       const fitR = Math.max(...L.roots(ev.den).map((p) => Math.hypot(p.re, p.im))) * 1.6;
@@ -518,5 +493,5 @@ WB.chapters = WB.chapters || {};
     },
   };
 
-  WB.pid = { makePID, pidCharPoly };
+  WB.pid = { makePID, pidCharPoly, shapedReference };
 })();

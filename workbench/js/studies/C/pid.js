@@ -29,7 +29,7 @@
     const { sys, pModel, S } = ctx;
     const st = ctx.st, g = ctx.gains;
     const Ts = S.sim.Ts, sigma = st.sigma ?? 0.05;
-    const beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     const thMax = (st.thetaMaxDeg ?? 30) * DEG;
     const dirty = st.deriv === 'dirty';
     let I = 0, ePrev = 0, thPrev = null, phPrev = null, thd = 0, phd = 0;
@@ -105,7 +105,7 @@
   }
 
   // Dragging an inner pole sets (t_rθ, ζ_θ); an outer pole sets (M, ζ_φ).
-  function invRule(wn, zeta, rule) { return rule === 'tp' ? 0.5 * Math.PI / (wn * Math.sqrt(Math.max(1e-6, 1 - zeta * zeta))) : 2.2 / wn; }
+  const invRule = WB.design.trFromWn;
   function onCascadeDrag(ctx, id, re, im) {
     const st = ctx.st;
     re = Math.min(-0.002, re);
@@ -453,18 +453,11 @@
 
   // ------------------------------------------------------------- C.9 --
   // Reference shapes on φ_r: step, ramp, parabola (amplitude = size, slope, coefficient).
-  function shapedReference(ctx, base) {
-    const S = ctx.S;
-    const A = S.sim.amplitude * DEG, t0 = S.sim.tStep, y0 = (S.sim.init.phi0 ?? 0) * DEG;
-    if (ctx.st.input === 'ramp') return (t) => (t < t0 ? y0 : y0 + A * (t - t0));
-    if (ctx.st.input === 'parabola') return (t) => (t < t0 ? y0 : y0 + A * (t - t0) ** 2);
-    return base;
-  }
 
   CH.ch9 = {
     id: 'ch9', num: 9, tab: 'Ch 9', title: 'System type & integrators', pages: 'pp. 150–153',
     controller: (ctx) => makeCascade(ctx),
-    reference: shapedReference,
+    reference: (ctx, base) => WB.pid.shapedReference(ctx, base, DEG, (ctx.S.sim.init.phi0 ?? 0) * DEG),
     defaults(sys) {
       const pr = sys.problems.ch8;
       return {
@@ -619,27 +612,6 @@
   };
 
   // ---------------------------------------------------- Appendix C.P.6 --
-  function rootLocus(den, num, kMax, steps = 300) {
-    const branches = [];
-    let prev = null;
-    for (let i = 0; i <= steps; i++) {
-      const k = kMax * Math.pow(i / steps, 2);
-      let r = L.roots(L.polyAdd(den, L.polyScale(num, k)));
-      if (prev) {
-        const used = new Set(), ordered = [];
-        for (const q0 of prev) {
-          let best = -1, bd = Infinity;
-          r.forEach((q, j) => { if (!used.has(j)) { const d = Math.hypot(q.re - q0.re, q.im - q0.im); if (d < bd) { bd = d; best = j; } } });
-          used.add(best); ordered.push(r[best]);
-        }
-        r = ordered;
-      } else r.forEach(() => branches.push([]));
-      r.forEach((q, j) => branches[j].push(q));
-      prev = r;
-    }
-    return branches;
-  }
-
   CH.p6 = {
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_Iφ', pages: 'pp. 472–473',
     controller: (ctx) => makeCascade(ctx),
@@ -683,7 +655,7 @@
     splane(ctx) {
       const ev = this.evans(ctx);
       const kMax = Math.max(isFinite(ev.kCrit) ? ev.kCrit * ctx.st.kMaxFactor : 2 * ctx.st.kMaxFactor, (ev.g.kIphi || 0) * 1.2, 1e-3);
-      const loci = rootLocus(ev.den, ev.num, kMax);
+      const loci = T.rootLocus(ev.den, ev.num, kMax);
       const base = cascadeMarkers(ctx, { drag: false });
       const markers = base.markers.filter((m) => m.kind !== 'cl');
       L.roots(ev.den).forEach((q, i) => markers.push({ ...q, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
@@ -820,7 +792,7 @@
 
     math(ctx) {
       const st = ctx.st, Ts = ctx.S.sim.Ts;
-      const beta = (2 * st.sigma - Ts) / (2 * st.sigma + Ts), gamma = 2 / (2 * st.sigma + Ts);
+      const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       const g = ctx.gains, d = ctx.S.mode === 'work' ? this.spec(ctx) : designOf(ctx);
       return [
         innerCards(ctx, g), outerCard(ctx, { ...g, kIphi: 0 }), ...designCards(ctx, d),

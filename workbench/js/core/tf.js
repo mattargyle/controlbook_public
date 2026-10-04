@@ -58,17 +58,20 @@ WB.tf = (function () {
 
   // Gain/phase margins of a loop gain L(s), matching control.margin: PM at the
   // gain crossover (|L| = 1), GM at the phase crossover (phase = -180 deg).
-  function margins(Lg, wlo = -4, whi = 5) {
-    const ws = logspace(wlo, whi, 4000);
+  // gcs lists every gain crossover {w, pm} (a loop can cross |L| = 1 more than once).
+  function margins(Lg, wlo = -4, whi = 5, n = 4000) {
+    const ws = logspace(wlo, whi, n);
     const { mag, phase } = bode(Lg, ws);
     let wc = NaN, pm = Infinity, w180 = NaN, gm = Infinity;
     const crossings = [];  // every phase crossing of -180 (+k·360): conditionally stable loops have several
+    const gcs = [];
     for (let i = 1; i < ws.length; i++) {
-      if (isNaN(wc) && (mag[i - 1] - 1) * (mag[i] - 1) <= 0) {
+      if ((mag[i - 1] - 1) * (mag[i] - 1) <= 0 && mag[i - 1] !== mag[i]) {
         const t = Math.log(mag[i - 1]) / (Math.log(mag[i - 1]) - Math.log(mag[i]));
-        wc = Math.exp(Math.log(ws[i - 1]) + t * (Math.log(ws[i]) - Math.log(ws[i - 1])));
+        const w = Math.exp(Math.log(ws[i - 1]) + t * (Math.log(ws[i]) - Math.log(ws[i - 1])));
         const ph = phase[i - 1] + t * (phase[i] - phase[i - 1]);
-        pm = ((180 + ph) % 360 + 540) % 360 - 180;  // wrap into [-180, 180)
+        gcs.push({ w, pm: ((180 + ph) % 360 + 540) % 360 - 180 });  // wrap into [-180, 180)
+        if (isNaN(wc)) { wc = w; pm = gcs[0].pm; }
       }
       const a = (phase[i - 1] + 180) / 360, b = (phase[i] + 180) / 360;
       if (Math.floor(a) !== Math.floor(b)) {
@@ -79,8 +82,72 @@ WB.tf = (function () {
         if (isNaN(w180)) { w180 = w; gm = crossings[0].gm; }
       }
     }
-    return { pm, wc, gm, w180, crossings };
+    return { pm, wc, gm, w180, crossings, gcs };
   }
+
+  const mag = (G, w) => C.abs(at(G, w));
+  const db = (m) => 20 * Math.log10(m);
+
+  // Downward crossings of |G(jω)| through `level` on the grid ws, each refined
+  // by bisection in log ω.
+  function crossDown(G, ws, level) {
+    const out = [];
+    let prev = mag(G, ws[0]);
+    for (let i = 1; i < ws.length; i++) {
+      const m = mag(G, ws[i]);
+      if (prev >= level && m < level) {
+        let lo = Math.log(ws[i - 1]), hi = Math.log(ws[i]);
+        for (let k = 0; k < 60; k++) { const mid = 0.5 * (lo + hi); if (mag(G, Math.exp(mid)) < level) hi = mid; else lo = mid; }
+        out.push(Math.exp(0.5 * (lo + hi)));
+      }
+      prev = m;
+    }
+    return out;
+  }
+
+  // Closed-loop bandwidth: the first frequency where |T| drops below `level`.
+  // The default, 3 dB below the DC gain, is what control.bandwidth uses.
+  function bandwidth(Tc, ws, level = Math.abs(dcgain(Tc)) * 10 ** (-3 / 20)) {
+    const c = crossDown(Tc, ws, level);
+    return c.length ? c[0] : NaN;
+  }
+
+  // Root-locus branches of den(s) + k num(s) = 0 for k in [0, kMax] (quadratic
+  // spacing in k), each new root matched greedily to the nearest previous one.
+  function rootLocus(den, num, kMax, steps = 300) {
+    const branches = [];
+    let prev = null;
+    for (let i = 0; i <= steps; i++) {
+      const k = kMax * Math.pow(i / steps, 2);
+      let r = L.roots(L.polyAdd(den, L.polyScale(num, k)));
+      if (prev) {
+        const used = new Set(), ordered = [];
+        for (const p of prev) {
+          let best = -1, bd = Infinity;
+          r.forEach((q, j) => { if (!used.has(j)) { const d = Math.hypot(q.re - p.re, q.im - p.im); if (d < bd) { bd = d; best = j; } } });
+          used.add(best); ordered.push(r[best]);
+        }
+        r = ordered;
+      } else {
+        r.forEach(() => branches.push([]));
+      }
+      r.forEach((q, j) => branches[j].push(q));
+      prev = r;
+    }
+    return branches;
+  }
+
+  // Compensators. PID with a dirty derivative (p. 313): k_P + k_I/s + k_D s/(σs + 1),
+  // i.e. ((k_D + σk_P)s² + (k_P + σk_I)s + k_I) / (s(σs + 1)); the PD form when k_I = 0.
+  function pid({ kP, kI = 0, kD = 0, sigma }) {
+    return kI ? tf([kD + sigma * kP, kP + sigma * kI, kI], [sigma, 1, 0]) : tf([kD + sigma * kP, kP], [sigma, 1]);
+  }
+  // Loopshaping blocks: lead M(s + ω/√M)/(s + ω√M) (Eq. 18.2), lag (s + z)/(s + z/M)
+  // (Eq. 18.1), low-pass p/(s + p), and PI (s + z)/s (§18.1).
+  const lead = (M, w) => tf([M, M * w / Math.sqrt(M)], [1, w * Math.sqrt(M)]);
+  const lag = (z, M) => tf([1, z], [1, z / M]);
+  const lpf = (p) => tf([p], [1, p]);
+  const pi = (z) => tf([1, z], [1, 0]);
 
   const poles = (G) => L.roots(G.den);
   const zeros = (G) => (G.num.length > 1 ? L.roots(G.num) : []);
@@ -126,6 +193,31 @@ WB.tf = (function () {
     };
   }
 
+  // The repo's transferFunction class (loopshape_tools.py): controllable canonical
+  // form with the first state on top, one RK4 step per Ts, and the output taken
+  // after the state update (with the repo's indexing bug for strictly proper
+  // numerators fixed; see studies/C/ISSUES.md). Use this, not filter(), to match
+  // a ctrlLoopshape.py.
+  function repoFilter(G, Ts) {
+    let num = G.num.slice(), den = G.den.slice();
+    if (den[0] !== 1) { const k = den[0]; num = num.map((v) => v / k); den = den.map((v) => v / k); }
+    const n = den.length - 1, pad = n + 1 - num.length;
+    const A = L.zeros(n, n), B = new Array(n).fill(0), Cv = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) A[0][i] = -den[i + 1];
+    for (let i = 1; i < n; i++) A[i][i - 1] = 1;
+    if (n) B[0] = 1;
+    const D = pad ? 0 : num[0];
+    for (let i = 0; i < n; i++) Cv[i] = pad ? (i + 1 >= pad ? num[i + 1 - pad] : 0) : num[i + 1] - num[0] * den[i + 1];
+    let x = new Array(n).fill(0);
+    const f = (xx, u) => xx.map((_, i) => A[i].reduce((s, a, j) => s + a * xx[j], 0) + B[i] * u);
+    return {
+      update(u) {
+        if (n) x = WB.math.rk4Step(f, x, u, Ts);
+        return Cv.reduce((s, c, j) => s + c * x[j], 0) + D * u;
+      },
+    };
+  }
+
   // LaTeX for a polynomial and a transfer function.
   function polyTex(p, v = 's', sig = 4) {
     const n = p.length - 1;
@@ -143,5 +235,8 @@ WB.tf = (function () {
   }
   const texTf = (G, sig = 4) => `\\frac{${polyTex(G.num, 's', sig)}}{${polyTex(G.den, 's', sig)}}`;
 
-  return { tf, mul, add, gain, feedback, at, bode, logspace, margins, poles, zeros, dcgain, ss, filter, polyTex, texTf };
+  return {
+    tf, mul, add, gain, feedback, at, mag, db, bode, logspace, margins, crossDown, bandwidth, rootLocus,
+    pid, lead, lag, lpf, pi, poles, zeros, dcgain, ss, filter, repoFilter, polyTex, texTf,
+  };
 })();

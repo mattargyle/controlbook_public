@@ -12,9 +12,8 @@
   const CH = WB.studies.C.chapters;
   const R2D = 180 / Math.PI;
   const W = T.logspace(-4, 4, 800);
-  const db = (m) => 20 * Math.log10(m);
-  const magAt = (G, w) => L.C.abs(T.at(G, w));
-  const gmText = (mg) => (mg.crossings && mg.crossings.length ? mg.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)}`).join(', ') : '∞');
+  const { db, mag: magAt } = T;
+  const gmText = (mg) => WB.freq.gmText(mg);
 
   // Loop plants (C.15, p. 280): inner τ → θ with (Js+Jp)/Js ≈ 1, outer θ → φ.
   const pIn = (p) => T.tf([1], [p.Js + p.Jp, 0, 0]);
@@ -27,8 +26,8 @@
   }
   // C_PD and C_PID with the dirty derivative (hw16.py):
   //   C_in = ((kD + σkP)s + kP)/(σs + 1),  C_out = ((kD + σkP)s² + (kP + σkI)s + kI)/(σs² + s)
-  const cIn = (g, s) => T.tf([g.kDth + s * g.kPth, g.kPth], [s, 1]);
-  const cOut = (g, s) => T.tf([g.kDphi + g.kPphi * s, g.kPphi + g.kIphi * s, g.kIphi], [s, 1, 0]);
+  const cIn = (g, s) => T.pid({ kP: g.kPth, kD: g.kDth, sigma: s });
+  const cOut = (g, s) => T.pid({ kP: g.kPphi, kI: g.kIphi, kD: g.kDphi, sigma: s });
 
   // C.10 gains (repo, hw16.py) and the gains the book's C.16/C.17 figures were made with (C.8 loops, k_I = 0.15).
   function c10(sys, p) {
@@ -44,24 +43,13 @@
 
   // Closed-loop bandwidth: the highest frequency where |T| is still above −3 dB
   // (the outer loop's |T| dips below −3 dB near 0.08 rad/s, below the panel resonance
-  // at √(k/Jp) ≈ 0.32 rad/s, and recovers).
+  // at √(k/Jp) ≈ 0.32 rad/s, and recovers). −3 dB is relative to the DC gain, as
+  // in control.bandwidth.
   function bandwidth(Tc) {
-    const { mag } = T.bode(Tc, W);
-    const lvl = Math.SQRT1_2 * magAt(Tc, 1e-6);           // −3 dB below the DC gain, as control.bandwidth
-    let i = -1;
-    for (let k = 0; k < W.length; k++) if (mag[k] >= lvl) i = k;
-    if (i < 0 || i >= W.length - 1) return NaN;
-    // refine the downward crossing between W[i] and W[i+1] by bisection in log ω
-    let lo = Math.log(W[i]), hi = Math.log(W[i + 1]);
-    for (let k = 0; k < 60; k++) { const m = 0.5 * (lo + hi); if (magAt(Tc, Math.exp(m)) >= lvl) lo = m; else hi = m; }
-    return Math.exp(0.5 * (lo + hi));
+    const c = T.crossDown(Tc, W, Math.SQRT1_2 * magAt(Tc, 1e-6));
+    return c.length ? c[c.length - 1] : NaN;
   }
-  function marginMarks(mg) {
-    const marks = [];
-    if (isFinite(mg.wc)) marks.push({ w: mg.wc, label: `ω_co = ${fmt(mg.wc, 3)}, PM = ${fmt(mg.pm, 3)}°`, phaseFrom: -180, phaseTo: -180 + mg.pm, inPhase: true, color: '--series-1' });
-    for (const c of mg.crossings || []) marks.push({ w: c.w, label: `GM ${fmt(db(c.gm), 3)} dB`, dbFrom: 0, dbTo: -db(c.gm), color: '--critical' });
-    return marks;
-  }
+  const marginMarks = (mg) => WB.freq.marginMarks(mg);
 
   // PID-cascade controls shared by C.16 and C.17.
   function gainControls(parent, ctx) {
@@ -374,10 +362,10 @@
   // ------------------------------------------------------------- C.18 --
   // Compensator blocks (loopshape_tools.py).
   const blk = {
-    lead: (b) => T.tf([b.M, b.M * b.w / Math.sqrt(b.M)], [1, b.w * Math.sqrt(b.M)]),
-    lag: (b) => T.tf([1, b.z], [1, b.z / b.M]),
-    lpf: (b) => T.tf([b.p], [1, b.p]),
-    int: (b) => T.tf([1, b.ki], [1, 0]),
+    lead: (b) => T.lead(b.M, b.w),
+    lag: (b) => T.lag(b.z, b.M),
+    lpf: (b) => T.lpf(b.p),
+    int: (b) => T.pi(b.ki),
   };
   // Inner plant: τ → θ. Repo (loopShapingInner.py): 1/((Js+Jp)s²), no rate feedback.
   // Book text (p. 362): body only, with rate feedback −k_Dθ s/(σs+1).
@@ -436,24 +424,7 @@
       outer: { k: 1, int: { on: false, ki: 0.1 }, lead: { on: false, w: 0.15, M: 10 }, lag: { on: false, z: 0.5, M: 10 }, lpf1: { on: false, p: 1.5 }, lpf2: { on: false, p: 1.8 }, pf: { on: false, p: 0.1 } } };
   }
 
-  // Port of ctrlLoopshape.transferFunction: control canonical form, RK4 at Ts,
-  // output computed after the state update (the repo's indexing bug for strictly
-  // proper numerators is fixed; see ISSUES.md).
-  function tfFilter(G, Ts) {
-    let num = G.num.slice(), den = G.den.slice();
-    if (den[0] !== 1) { const t0 = den[0]; num = num.map((v) => v / t0); den = den.map((v) => v / t0); }
-    const n = den.length, m = num.length;
-    const A = L.zeros(n - 1, n - 1), B = new Array(n - 1).fill(0), Cv = new Array(n - 1).fill(0);
-    for (let i = 0; i < n - 1; i++) A[0][i] = -den[i + 1];
-    for (let i = 1; i < n - 1; i++) A[i][i - 1] = 1;
-    if (n > 1) B[0] = 1;
-    let D = 0;
-    if (m === n) { D = num[0]; for (let i = 0; i < n - 1; i++) Cv[i] = num[i + 1] - num[0] * den[i + 1]; }
-    else for (let i = n - m - 1; i < n - 1; i++) Cv[i] = num[i - (n - m - 1)];
-    let x = new Array(n - 1).fill(0);
-    const f = (xx, u) => xx.map((_, i) => A[i].reduce((s, a, j) => s + a * xx[j], 0) + B[i] * u);
-    return { update(u) { if (n > 1) x = M.rk4Step(f, x, u, Ts); return Cv.reduce((s, c, j) => s + c * x[j], 0) + D * u; } };
-  }
+  const tfFilter = T.repoFilter;   // ctrlLoopshape.transferFunction
 
   function loopshapeController(ctx) {
     const { sys, pModel, S } = ctx;

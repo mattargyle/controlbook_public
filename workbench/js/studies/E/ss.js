@@ -19,20 +19,6 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   // Work-mode starting gains: a sluggish, underdamped design (ζ = 0.6 breaks the E.11(a) rule).
   const W0K = { trTh: 1.5, zetaTh: 0.6, trZ: 5, zetaZ: 0.6, pI: -0.4, obsFactor: 3, zetaObs: 0.7, pD: -1, comp: 'eq', obsMode: 'decoupled' };
 
-  function det(Am) {
-    const A = Am.map((r) => r.slice()), n = A.length;
-    let d = 1;
-    for (let c = 0; c < n; c++) {
-      let piv = c;
-      for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
-      if (Math.abs(A[piv][c]) < 1e-300) return 0;
-      if (piv !== c) { [A[c], A[piv]] = [A[piv], A[c]]; d = -d; }
-      d *= A[c][c];
-      for (let r = c + 1; r < n; r++) { const f = A[r][c] / A[c][c]; for (let j = c; j < n; j++) A[r][j] -= f * A[c][j]; }
-    }
-    return d;
-  }
-
   function workDefaults(sys, level) {
     const p = { ...Object.fromEntries(sys.params.map((q) => [q.key, q.value])), ...sys.constants };
     const d = E.ssDesign(p, W0K, level === 'sf' ? 'sf' : level);
@@ -155,11 +141,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       spoiler: true,
     };
   }
-  function ctrbCard(A, B, title, page) {
-    const Cm = L.ctrb(A, B);
-    return { title, page, theory: '\\mathcal{C}_{A,B} = \\begin{bmatrix} B & AB & A^2B & A^3B\\end{bmatrix},\\quad \\text{controllable} \\iff \\operatorname{rank}\\mathcal{C}_{A,B} = n',
-      numbers: `\\operatorname{rank}\\mathcal{C} = ${L.rank(Cm)},\\quad \\det\\mathcal{C} = ${tex(det(Cm))}`, spoiler: true };
-  }
+  const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page, { matrix: false, det: true });
   function polesCard(ctx, d, level) {
     return {
       title: 'Desired closed-loop poles', page: 'p. 190 (B.11), p. 113 · Eq. 8.5',
@@ -295,10 +277,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         {
           id: 'c', title: '(c) Controllability (A, B from E.6)',
           inputs: { rank: 'rank 𝒞<sub>A,B</sub>', det: 'det 𝒞<sub>A,B</sub>' },
-          check: (v) => { const Cm = L.ctrb(jac().A, jac().B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: det(Cm) }, { det: 'det' }); },
+          check: (v) => { const Cm = L.ctrb(jac().A, jac().B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: L.det(Cm) }, { det: 'det' }); },
           solution: () => {
             const { A, B, b0 } = jac(), Cm = L.ctrb(A, B);
-            return [{ tex: `\\mathcal{C}_{A,B} = ${texMat(Cm)},\\quad \\det = -g^2b_0^4 = ${tex(det(Cm))} \\ne 0 \\Rightarrow \\text{rank } 4` }, { html: `b₀ = ℓ/J<sub>e</sub> = ${fmt(b0, 4)}. The sign of the determinant depends on column order; its magnitude is what matters.` }];
+            return [{ tex: `\\mathcal{C}_{A,B} = ${texMat(Cm)},\\quad \\det = -g^2b_0^4 = ${tex(L.det(Cm))} \\ne 0 \\Rightarrow \\text{rank } 4` }, { html: `b₀ = ℓ/J<sub>e</sub> = ${fmt(b0, 4)}. The sign of the determinant depends on column order; its magnitude is what matters.` }];
           },
         },
         {
@@ -598,5 +580,5 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     },
   });
 
-  WB.E.ss = { det, knobsOf };
+  WB.E.ss = { knobsOf };
 })();

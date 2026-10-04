@@ -11,12 +11,13 @@ WB.chapters = WB.chapters || {};
   const { tex, texPole, fmt } = M;
   const PD = () => WB.pd;
   const W = T.logspace(-3, 4, 700);
-  const db = (m) => 20 * Math.log10(m);
+  const { db } = T;
+  // Every gain margin, as text (conditionally stable loops have several).
   const gmText = (mg) => (mg.crossings && mg.crossings.length ? mg.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)}`).join(', ') : '∞');
 
   const plantTf = (ctx) => T.tf([ctx.model.b0], [1, ctx.model.a1, ctx.model.a0]);
-  // C_PID with dirty derivative (p. 313): ((kD + σkP)s² + (kP + σkI)s + kI) / (s(σs + 1))
-  const pidTf = ({ kP, kI, kD, sigma }) => T.tf([kD + sigma * kP, kP + sigma * kI, kI], [sigma, 1, 0]);
+  // C_PID with dirty derivative (p. 313)
+  const pidTf = (st) => T.pid(st);
 
   // A.10 gains (t_r = 0.6, ζ = 0.9, ω_n = π/(2t_r√(1−ζ²)), k_I = 0.2, σ = 0.05) on the book parameters.
   function a10(sys) {
@@ -48,10 +49,12 @@ WB.chapters = WB.chapters || {};
     return { markers: mk, fitR: 15 };
   }
 
-  function marginMarks(mg, phaseAt) {
+  // Bode annotations for the margins: the PM at ω_co and every GM. tag gives a
+  // short PM label (for two loops on one plot); gm: false leaves the GMs off.
+  function marginMarks(mg, { color = '--series-1', tag = '', gm = true } = {}) {
     const marks = [];
-    if (isFinite(mg.wc)) marks.push({ w: mg.wc, label: `ω_co = ${fmt(mg.wc, 3)}, PM = ${fmt(mg.pm, 3)}°`, phaseFrom: -180, phaseTo: -180 + mg.pm, inPhase: true, color: '--series-1' });
-    for (const c of mg.crossings || []) marks.push({ w: c.w, label: `GM ${fmt(db(c.gm), 3)} dB`, dbFrom: 0, dbTo: -db(c.gm), color: '--critical' });
+    if (isFinite(mg.wc)) marks.push({ w: mg.wc, label: tag ? `${tag}PM ${fmt(mg.pm, 3)}°` : `ω_co = ${fmt(mg.wc, 3)}, PM = ${fmt(mg.pm, 3)}°`, phaseFrom: -180, phaseTo: -180 + mg.pm, inPhase: true, color });
+    if (gm) for (const c of mg.crossings || []) marks.push({ w: c.w, label: `GM ${fmt(db(c.gm), 3)} dB`, dbFrom: 0, dbTo: -db(c.gm), color: '--critical' });
     return marks;
   }
 
@@ -115,7 +118,7 @@ WB.chapters = WB.chapters || {};
     },
     buildProblem(parent, ctx) {
       const m = () => ctx.model, P = () => plantTf(ctx);
-      const magDb = (w) => db(L.C.abs(T.at(P(), w)));
+      const magDb = (w) => db(T.mag(P(), w));
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch15, [
         {
           id: 'a', title: 'Straight-line pieces',
@@ -143,9 +146,9 @@ WB.chapters = WB.chapters || {};
 
     specs(ctx) {
       const P = plantTf(ctx), C = pidTf(ctx.st), Lg = T.mul(P, C), st = ctx.st;
-      const Br = db(L.C.abs(T.at(Lg, st.wr)));
-      const Bdin = db(L.C.abs(T.at(C, st.wdin)));
-      const Bn = -db(L.C.abs(T.at(Lg, st.wno)));
+      const Br = db(T.mag(Lg, st.wr));
+      const Bdin = db(T.mag(C, st.wdin));
+      const Bn = -db(T.mag(Lg, st.wno));
       const Ma = ctx.model.b0 * st.kI / ctx.model.a1;   // lim s^2 P C
       return { Br, gr: Math.pow(10, -Br / 20), Bdin, gdin: Math.pow(10, -Bdin / 20), Bn, gn: Math.pow(10, -Bn / 20), Ma, B2: db(Ma), eParab: 2 * st.A / Ma, eParabBook: st.A / Ma, Lg, P };
     },
@@ -231,11 +234,6 @@ WB.chapters = WB.chapters || {};
   };
 
   // ------------------------------------------------------------ Chapter 17 --
-  function bandwidth(Tc) {
-    const { mag } = T.bode(Tc, W);
-    for (let i = 0; i < W.length; i++) if (mag[i] < Math.SQRT1_2) return W[i];
-    return NaN;
-  }
 
   WB.chapters.ch17 = {
     id: 'ch17', num: 17, tab: 'Ch 17', title: 'Stability margins', pages: 'pp. 303–322',
@@ -249,7 +247,7 @@ WB.chapters = WB.chapters || {};
       const Tc = T.feedback(Lg);
       const mg = T.margins(Lg);
       const { mag } = T.bode(Tc, W);
-      return { Lg, Tc, mg, bw: bandwidth(Tc), peak: db(Math.max(...mag)) };
+      return { Lg, Tc, mg, bw: T.bandwidth(Tc, W, Math.SQRT1_2), peak: db(Math.max(...mag)) };
     },
 
     buildControls(parent, ctx) {
@@ -316,10 +314,10 @@ WB.chapters = WB.chapters || {};
 
   // ------------------------------------------------------------ Chapter 18 --
   const blocks = {
-    lead: { label: 'Lead', page: 'p. 328 · Eq. 18.2', tf: (b) => T.tf([b.M, b.M * b.w / Math.sqrt(b.M)], [1, b.w * Math.sqrt(b.M)]) },
-    lag: { label: 'Lag', page: 'p. 325 · Eq. 18.1', tf: (b) => T.tf([1, b.z], [1, b.z / b.M]) },
-    lpf1: { label: 'Low-pass 1', page: 'p. 325', tf: (b) => T.tf([b.p], [1, b.p]) },
-    lpf2: { label: 'Low-pass 2', page: 'p. 325', tf: (b) => T.tf([b.p], [1, b.p]) },
+    lead: { label: 'Lead', page: 'p. 328 · Eq. 18.2', tf: (b) => T.lead(b.M, b.w) },
+    lag: { label: 'Lag', page: 'p. 325 · Eq. 18.1', tf: (b) => T.lag(b.z, b.M) },
+    lpf1: { label: 'Low-pass 1', page: 'p. 325', tf: (b) => T.lpf(b.p) },
+    lpf2: { label: 'Low-pass 2', page: 'p. 325', tf: (b) => T.lpf(b.p) },
   };
 
   function presetBook() {
@@ -331,7 +329,7 @@ WB.chapters = WB.chapters || {};
   function presetRepo(ctx) {
     const d = { k: 1, lead: { on: true, w: 10, M: 10 }, lag: { on: true, z: 5, M: 90 }, lpf1: { on: true, p: 90 }, lpf2: { on: true, p: 100 }, pf: { on: true, p: 2 } };
     const C0 = T.mul(pidTf(ctx.st), blocks.lpf1.tf(d.lpf1), blocks.lag.tf(d.lag), blocks.lead.tf(d.lead));
-    d.k = 1 / L.C.abs(T.at(T.mul(plantTf(ctx), C0), 6.35));   // loopShaping.py: crossover at 6.35 rad/s
+    d.k = 1 / T.mag(T.mul(plantTf(ctx), C0), 6.35);   // loopShaping.py: crossover at 6.35 rad/s
     return d;
   }
 
@@ -348,7 +346,7 @@ WB.chapters = WB.chapters || {};
       for (const key of Object.keys(blocks)) if (st[key].on) Cl = T.mul(Cl, blocks[key].tf(st[key]));
       const Cp = pidTf(st), P = plantTf(ctx);
       const C = T.mul(Cp, Cl), Lg = T.mul(P, C), Lp = T.mul(P, Cp);
-      const F = st.pf.on ? T.tf([st.pf.p], [1, st.pf.p]) : T.gain(1);
+      const F = st.pf.on ? T.lpf(st.pf.p) : T.gain(1);
       const pr = ctx.sys.problems.ch18;
       const { mag: clMag } = T.bode(Cl, W);
       let lowMin = Infinity, highMax = 0;
@@ -433,8 +431,8 @@ WB.chapters = WB.chapters || {};
         { label: 'P·C (loop gain)', ...T.bode(d.Lg, W), color: '--series-1' },
       ];
       if (ctx.st.showT) lines.push({ label: 'closed loop F·T', mag: T.bode(T.mul(d.F, T.feedback(d.Lg)), W).mag, color: '--series-3', width: 1.5 });
-      const lowDb = db(L.C.abs(T.at(d.Lp, pr.wLow))) + 20 * Math.log10(pr.factor);
-      const highDb = db(L.C.abs(T.at(d.Lp, pr.wHigh))) - 20 * Math.log10(pr.factor);
+      const lowDb = db(T.mag(d.Lp, pr.wLow)) + 20 * Math.log10(pr.factor);
+      const highDb = db(T.mag(d.Lp, pr.wHigh)) - 20 * Math.log10(pr.factor);
       return {
         title: 'Loopshaping: P·C_pid vs. P·C', w: W, lines,
         specs: [
@@ -485,4 +483,7 @@ WB.chapters = WB.chapters || {};
       ]);
     },
   };
+
+  // Bode helpers shared with the B–F frequency chapters.
+  WB.freq = { gmText, marginMarks };
 })();

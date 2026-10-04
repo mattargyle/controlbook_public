@@ -49,7 +49,7 @@ window.WB = window.WB || {};
     const { pModel, S } = ctx;
     const s = sysE();
     const Ts = S.sim.Ts, sigma = opt.sigma ?? 0.05;
-    const beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     const FeV = s.Fe(pModel);
     let zPrev = null, thPrev = 0, zd = 0, thd = 0, Iz = 0, ezPrev = 0, Ith = 0, ethPrev = 0;
     return {
@@ -173,7 +173,7 @@ window.WB = window.WB || {};
     const Ts = S.sim.Ts, uLim = s.uLimit(pModel);
     const useObs = level === 'obs' || level === 'dobs';
     const useDO = level === 'dobs' && opt.dobs !== false;
-    const sigma = 0.05, beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const sigma = 0.05, { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     const Lg = g.L || [];
     let I = 0, ePrev = 0, uPrev = null, yPrev = null, zd = 0, thd = 0;
     let xh = [opt.zhat0 || 0, 0, 0, 0], dh = 0;
@@ -286,19 +286,8 @@ window.WB = window.WB || {};
   const poleText = (ps) => ps.map((q) => M.fmtPole(q, 4)).join(', ');
 
   // Closed-loop bandwidth: the first frequency where |T| falls 3 dB below its
-  // low-frequency value, refined by bisection on log ω between grid points.
-  function bandwidth(Tc, W) {
-    const m = (w) => L.C.abs(WB.tf.at(Tc, w));
-    const target = m(W[0]) * Math.pow(10, -3 / 20);  // −3 dB, as control.bandwidth
-    for (let i = 1; i < W.length; i++) {
-      if (m(W[i]) < target) {
-        let lo = Math.log(W[i - 1]), hi = Math.log(W[i]);
-        for (let k = 0; k < 60; k++) { const mid = 0.5 * (lo + hi); if (m(Math.exp(mid)) < target) hi = mid; else lo = mid; }
-        return Math.exp(0.5 * (lo + hi));
-      }
-    }
-    return NaN;
-  }
+  // low-frequency value (as control.bandwidth).
+  const bandwidth = (Tc, W) => WB.tf.bandwidth(Tc, W, WB.tf.mag(Tc, W[0]) * 10 ** (-3 / 20));
 
   WB.E = {
     pdDesign, innerPoles, outerPoles, nestedPoles, nestedPID, nestedLinearSim,

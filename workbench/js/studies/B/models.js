@@ -12,18 +12,7 @@
   const DEG = Math.PI / 180;
 
   // ------------------------------------------------------- open-loop force --
-  function inputForce(inp, t) {
-    const { shape, amp, freq, t0 = 0, width = 0.5 } = inp;
-    if (t < t0) return 0;
-    const tt = t - t0;
-    switch (shape) {
-      case 'const': return amp;
-      case 'pulse': return tt < width ? amp : 0;
-      case 'square': return (tt % (1 / freq)) <= 0.5 / freq ? amp : -amp;
-      case 'sine': return amp * Math.sin(2 * Math.PI * freq * tt);
-      default: return 0;
-    }
-  }
+  const inputForce = (inp, t) => WB.models.inputTorque({ inp }, t);   // same shapes as Study A
 
   function inputControls(parent, ctx, { title = 'Input force F(t)', ampMax = 5 } = {}) {
     const names = { zero: 'none', const: 'constant', pulse: 'pulse', square: 'square', sine: 'sine' };

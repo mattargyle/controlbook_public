@@ -15,6 +15,11 @@ WB.design = (function () {
     if (rule === 'tp') return Math.PI / (2 * tr * Math.sqrt(Math.max(1e-9, 1 - zeta * zeta)));
     return 2.2 / tr;
   }
+  // Inverse of wnFromTr: the rise time a given ω_n corresponds to under each rule.
+  function trFromWn(wn, zeta, rule = '2.2') {
+    if (rule === 'tp') return Math.PI / (2 * wn * Math.sqrt(Math.max(1e-9, 1 - zeta * zeta)));
+    return 2.2 / wn;
+  }
   function polesFromWnZeta(wn, zeta) {
     if (zeta < 1) {
       const wd = wn * Math.sqrt(1 - zeta * zeta);
@@ -30,6 +35,11 @@ WB.design = (function () {
   }
 
   // ---------------------------------------------------------------- PID block --
+  // Dirty-derivative coefficients (Eq. 10.4): ẏ[n] = β ẏ[n−1] + γ (y[n] − y[n−1]).
+  function dirtyCoeffs(sigma, Ts) {
+    return { beta: (2 * sigma - Ts) / (2 * sigma + Ts), gamma: 2 / (2 * sigma + Ts) };
+  }
+
   // Digital PID on one loop (Listing 10.1/10.2 conventions).
   //   deriv: 'y' (dirty derivative of the measurement; D term = −kD ẏ) or 'error'
   //          (dirty derivative of e; D term = +kD ė).
@@ -38,7 +48,7 @@ WB.design = (function () {
   //   limit: saturation of this block's output (Infinity = none). update() returns
   //          the saturated value when a limit is set (as the repo's PIDControl does).
   function pidBlock({ kP, kI = 0, kD = 0, sigma = 0.05, Ts, limit = Infinity, antiwindup = 'none', vbar = Infinity, deriv = 'y' }) {
-    const beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const { beta, gamma } = dirtyCoeffs(sigma, Ts);
     const st = { I: 0, ePrev: 0, yPrev: null, ydot: 0, edot: 0, u: 0, uUnsat: 0, first: true };
     const sat = (u) => M.saturate(u, limit);
     return {
@@ -152,7 +162,7 @@ WB.design = (function () {
   const num = (s) => WB.pd.num(s);
 
   return {
-    wnFromTr, polesFromWnZeta, pdGains, pidBlock,
+    wnFromTr, trFromWn, polesFromWnZeta, pdGains, dirtyCoeffs, pidBlock,
     place, refGain, augmentIntegrator, augmentDisturbance, observerGain, observer, linearPlant,
     problemPanel, checkNumbers, num,
   };

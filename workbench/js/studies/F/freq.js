@@ -14,7 +14,7 @@
   const { tex, texPole, fmt } = M;
   const PD = () => WB.pd;
   const W = T.logspace(-3, 4, 700);
-  const db = (m) => 20 * Math.log10(m);
+  const { db } = T;
   const ALL = ['kPh', 'kDh', 'kIh', 'kPth', 'kDth', 'kPz', 'kDz', 'kIz'];
   const LOOPS = { lon: 'altitude', inner: 'inner θ', outer: 'outer z' };
 
@@ -28,30 +28,13 @@
     };
   }
   // C_PID with dirty derivative (p. 313); kI = 0 gives PD.
-  const pidTf = (kP, kI, kD, sigma) => (kI
-    ? T.tf([kD + sigma * kP, kP + sigma * kI, kI], [sigma, 1, 0])
-    : T.tf([kD + sigma * kP, kP], [sigma, 1]));
-  const abs = (G, w) => L.C.abs(T.at(G, w));
-  // Frequency where |G| falls through level, refined by bisection on log ω
-  // between grid points (the 700-point grid alone is only good to ~2%).
-  function crossDown(G, level, wa, wb) {
-    let lo = Math.log(wa), hi = Math.log(wb);
-    for (let k = 0; k < 60; k++) { const mid = 0.5 * (lo + hi); if (abs(G, Math.exp(mid)) >= level) lo = mid; else hi = mid; }
-    return Math.exp(0.5 * (lo + hi));
-  }
-  // closed-loop bandwidth: first drop below −3 dB
-  function bandwidth(Tc) {
-    const { mag } = T.bode(Tc, W);
-    for (let i = 1; i < W.length; i++) if (mag[i] < Math.SQRT1_2) return crossDown(Tc, Math.SQRT1_2, W[i - 1], W[i]);
-    return NaN;
-  }
-  const gmText = (mg) => (mg.crossings && mg.crossings.length ? mg.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)}`).join(', ') : '∞');
-  function marginMarks(mg, color = '--series-1') {
-    const marks = [];
-    if (isFinite(mg.wc)) marks.push({ w: mg.wc, label: `ω_co = ${fmt(mg.wc, 3)}, PM = ${fmt(mg.pm, 3)}°`, phaseFrom: -180, phaseTo: -180 + mg.pm, inPhase: true, color });
-    for (const c of mg.crossings || []) marks.push({ w: c.w, label: `GM ${fmt(db(c.gm), 3)} dB`, dbFrom: 0, dbTo: -db(c.gm), color: '--critical' });
-    return marks;
-  }
+  const pidTf = (kP, kI, kD, sigma) => T.pid({ kP, kI, kD, sigma });
+  const abs = T.mag;
+  // Closed-loop bandwidth: first drop below −3 dB, refined by bisection on log ω
+  // (the 700-point grid alone is only good to ~2%).
+  const bandwidth = (Tc) => T.bandwidth(Tc, W, Math.SQRT1_2);
+  const gmText = WB.freq.gmText;
+  const marginMarks = (mg, color) => WB.freq.marginMarks(mg, { color });
 
   // ---------------------------------------------- gains for Ch 16 and 17 --
   // 'mine': your F.10 Work-mode gains (Ch 10 tab). 'ref': the reference F.10 design.
@@ -212,8 +195,7 @@
     const Sd = T.tf(L.conv(P.inner.num, lp.Ci.den), L.polyAdd(L.conv(P.inner.den, lp.Ci.den), L.conv(P.inner.num, lp.Ci.num)));
     for (const w of W) if (w <= pr.wdin) { minC = Math.min(minC, abs(lp.Ci, w)); maxS = Math.max(maxS, abs(Sd, w)); }
     // (d) frequency above which 1° of θ noise shows up as < 0.1°
-    let wSensor = NaN;
-    for (let i = W.length - 2; i >= 0; i--) if (abs(lp.Ti, W[i]) >= pr.thetaNoise) { wSensor = crossDown(lp.Ti, pr.thetaNoise, W[i], W[i + 1]); break; }
+    const wSensor = T.crossDown(lp.Ti, W, pr.thetaNoise).pop() ?? NaN;
     const gr = 1 / abs(lp.Lo, pr.wr), grExact = abs(T.feedback(T.gain(1), lp.Lo), pr.wr);
     const gout = 1 / abs(lp.Lo, pr.wdout), goutExact = abs(T.feedback(T.gain(1), lp.Lo), pr.wdout);
     return { lp, g, ePar, eParImpl, nIntL, gn, gnExact, gdin: 1 / minC, gdinExact: maxS, wSensor, gr, grExact, gout, goutExact };
@@ -412,11 +394,11 @@
   // Compensator per loop: k·[(s+z_I)/s]·lead·lag·LPF·LPF, prefilter F = p/(s+p).
   // The outer loop's C carries a minus sign (P_out has −g).
   const BLK = {
-    pi: (b) => T.tf([1, b.z], [1, 0]),
-    lead: (b) => T.tf([b.M, b.M * b.w / Math.sqrt(b.M)], [1, b.w * Math.sqrt(b.M)]),
-    lag: (b) => T.tf([1, b.z], [1, b.z / b.M]),
-    lpf1: (b) => T.tf([b.p], [1, b.p]),
-    lpf2: (b) => T.tf([b.p], [1, b.p]),
+    pi: (b) => T.pi(b.z),
+    lead: (b) => T.lead(b.M, b.w),
+    lag: (b) => T.lag(b.z, b.M),
+    lpf1: (b) => T.lpf(b.p),
+    lpf2: (b) => T.lpf(b.p),
   };
   const blank = (o = {}) => ({ k: 1, pi: { on: false, z: 0.1 }, lead: { on: false, w: 1, M: 10 }, lag: { on: false, z: 0.1, M: 10 }, lpf1: { on: false, p: 50 }, lpf2: { on: false, p: 100 }, pf: { on: false, p: 1 }, wco: 1, ...o });
   // Reference designs (see ISSUES.md / Show solution); k is set for crossover at wco.
@@ -443,7 +425,7 @@
     const Ti = T.feedback(Li);
     const Pout = T.mul(P.outer, Ti);
     const Lo = T.mul(Pout, Co);
-    const pf = (c) => (c.pf.on ? T.tf([c.pf.p], [1, c.pf.p]) : T.gain(1));
+    const pf = (c) => (c.pf.on ? T.lpf(c.pf.p) : T.gain(1));
     return { P, Cl, Ci, Co, Ll, Li, Ti, Pout, Lo, Fl: pf(st.lon), Fo: pf(st.outer), mgl: T.margins(Ll), mgi: T.margins(Li), mgo: T.margins(Lo) };
   }
   // k so that |L(j wco)| = 1 for one loop

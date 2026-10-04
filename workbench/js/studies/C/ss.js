@@ -14,14 +14,8 @@
   const R2D = 180 / Math.PI;
 
   // --------------------------------------------------------------- design --
-  function augI(A, B) {
-    const A1 = A.map((r) => [...r, 0]); A1.push([0, -1, 0, 0, 0]);     // ẋ_I = φ_r − φ (C_r = [0 1 0 0])
-    return { A1, B1: [...B.map((r) => [r[0]]), [0]] };
-  }
-  function augD(A, B, C) {
-    const A2 = A.map((r, i) => [...r, B[i][0]]); A2.push([0, 0, 0, 0, 0]);
-    return { A2, C2: C.map((r) => [...r, 0]) };
-  }
+  const augI = (A, B) => WB.design.augmentIntegrator(A, B, [[0, 1, 0, 0]]);   // ẋ_I = φ_r − φ (C_r = [0 1 0 0])
+  const augD = (A, B, C) => WB.design.augmentDisturbance(A, B, C);
   const wnPair = (st) => {
     const wnTh = lib().wnRule(st.trTh, st.zetaTh, st.rule), wnPhi = lib().wnRule(st.M * st.trTh, st.zetaPhi, st.rule);
     return { wnTh, wnPhi, th: lib().pairPoles(wnTh, st.zetaTh), ph: lib().pairPoles(wnPhi, st.zetaPhi) };
@@ -39,7 +33,7 @@
     const w = wnPair(st);
     const out = { ...w, poles: [...w.ph, ...w.th] };
     if (level === 'sf') {
-      const K = lib().place(A, B, out.poles);
+      const K = WB.yt.place(A, B, out.poles);
       out.K = K ? K[0] : [NaN, NaN, NaN, NaN];
       const Ai = L.inv(L.sub(A, L.mul(B, [out.K])));
       out.kr = Ai ? -1 / L.mul(L.mul([[0, 1, 0, 0]], Ai), B)[0][0] : NaN;
@@ -47,17 +41,17 @@
     }
     const { A1, B1 } = augI(A, B);
     out.poles = [...out.poles, { re: st.pI, im: 0 }];
-    const K1 = lib().place(A1, B1, out.poles);
+    const K1 = WB.yt.place(A1, B1, out.poles);
     out.K = K1 ? K1[0].slice(0, 4) : [NaN, NaN, NaN, NaN];
     out.ki = K1 ? K1[0][4] : NaN;
     if (level === 'obs' || level === 'dobs') {
       out.obsPoles = obsPoles(st.obs);
-      out.L = lib().obsGain(A, C, out.obsPoles);
+      out.L = WB.yt.observer(A, C, out.obsPoles);
     }
     if (level === 'dobs') {
       const { A2, C2 } = augD(A, B, C);
       out.dPoles = [...out.obsPoles, { re: st.pD, im: 0 }];
-      out.L2 = lib().obsGain(A2, C2, out.dPoles);
+      out.L2 = WB.yt.observer(A2, C2, out.dPoles);
     }
     return out;
   }
@@ -206,7 +200,7 @@
     re = Math.min(-0.01, re);
     const wn = Math.hypot(re, im);
     const zeta = Math.max(0.2, Math.min(0.99, -re / wn));
-    const inv = (w, z) => (st.rule === 'tp' ? 0.5 * Math.PI / (w * Math.sqrt(1 - z * z)) : 2.2 / w);
+    const inv = (w, z) => WB.design.trFromWn(w, z, st.rule);
     if (id === 'cth') { st.zetaTh = zeta; st.trTh = inv(wn, zeta); }
     else if (id === 'cph') { st.zetaPhi = zeta; st.M = Math.max(1, inv(wn, zeta) / st.trTh); }
     else if (id === 'cI') st.pI = re;
@@ -235,13 +229,7 @@
       spoiler: true,
     };
   }
-  function ctrbCard(A, B, title, page) {
-    const Cab = L.ctrb(A, B);
-    return {
-      title, page, theory: '\\mathcal{C}_{A,B} = \\begin{bmatrix} B & AB & \\cdots & A^{n-1}B\\end{bmatrix},\\quad \\operatorname{rank}\\mathcal{C}_{A,B} = n',
-      numbers: `\\mathcal{C} = ${texMat(Cab)},\\quad \\operatorname{rank} = ${L.rank(Cab)}`, spoiler: true,
-    };
-  }
+  const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page);
   // Work-mode starting gains: a slow, stable design (t_rθ = 4 s, ζ = 0.8, M = 2.5,
   // p_I = −0.8), rounded. Deliberately not the answers.
   const W0 = { K1: 7.7, K2: 3.2, K3: 11, K4: 33.5, kr: 1.5, ki: -1.2 };
@@ -326,8 +314,8 @@
         {
           id: 'c', title: '(c) Controllability',
           inputs: { rank: 'rank 𝒞<sub>A,B</sub>', det: 'det 𝒞<sub>A,B</sub>' },
-          check: (v) => { const Cm = L.ctrb(A, B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: detOf(Cm) }, { det: 'det' }); },
-          solution: () => { const Cm = L.ctrb(A, B); return [{ tex: `\\mathcal{C}_{A,B} = ${texMat(Cm)},\\quad \\det = ${tex(detOf(Cm))} \\ne 0` }]; },
+          check: (v) => { const Cm = L.ctrb(A, B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: L.det(Cm) }, { det: 'det' }); },
+          solution: () => { const Cm = L.ctrb(A, B); return [{ tex: `\\mathcal{C}_{A,B} = ${texMat(Cm)},\\quad \\det = ${tex(L.det(Cm))} \\ne 0` }]; },
         },
         {
           id: 'd', title: '(d) K and k<sub>r</sub>',
@@ -339,7 +327,6 @@
       ]);
     },
   });
-  function detOf(Mx) { const n = Mx.length, A = Mx.map((r) => r.slice()); let d = 1; for (let c = 0; c < n; c++) { let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r; if (A[p][c] === 0) return 0; if (p !== c) { [A[c], A[p]] = [A[p], A[c]]; d = -d; } d *= A[c][c]; for (let r = c + 1; r < n; r++) { const f = A[r][c] / A[c][c]; for (let j = c; j < n; j++) A[r][j] -= f * A[c][j]; } } return d; }
 
   // ------------------------------------------------------------- C.12 --
   CH.ch12 = base('sfi', 12, 'Integrator with state feedback', 'pp. 210–214', {
@@ -462,7 +449,7 @@
           html: 'Desired observer polynomial s⁴ + β<sub>3</sub>s³ + β<sub>2</sub>s² + β<sub>1</sub>s + β<sub>0</sub>.',
           inputs: { wTh: 'ω<sub>n,obs,θ</sub>', wPh: 'ω<sub>n,obs,φ</sub>', b3: 'β<sub>3</sub>', b0: 'β<sub>0</sub>' },
           check: (v) => { const o = od(), c = L.polyFromRoots(obsPoles(o)); return PD().checkNumbers(v, { wTh: o.wTh, wPh: o.wPh, b3: c[1], b0: c[4] }, { wTh: 'ωobs,θ', wPh: 'ωobs,φ' }); },
-          solution: () => { const o = od(), Lg = lib().obsGain(A, C, obsPoles(o)); return [{ tex: `\\omega_{obs,\\theta} = ${tex(o.wTh)},\\; \\omega_{obs,\\phi} = ${tex(o.wPh)},\\quad \\Delta_{obs} = ${WB.tf.polyTex(L.polyFromRoots(obsPoles(o)))}` }, { tex: `L^\\top = ${texMat(L.T(Lg))}` }, { html: 'One of many valid L; this is the repo\'s (place → scipy YT).' }]; },
+          solution: () => { const o = od(), Lg = WB.yt.observer(A, C, obsPoles(o)); return [{ tex: `\\omega_{obs,\\theta} = ${tex(o.wTh)},\\; \\omega_{obs,\\phi} = ${tex(o.wPh)},\\quad \\Delta_{obs} = ${WB.tf.polyTex(L.polyFromRoots(obsPoles(o)))}` }, { tex: `L^\\top = ${texMat(L.T(Lg))}` }, { html: 'One of many valid L; this is the repo\'s (place → scipy YT).' }]; },
         },
         {
           id: 'e', title: '(e) Add an input disturbance of 1.0 N·m',

@@ -19,8 +19,9 @@ All six design studies (A–F) have a tab for every problem. Issues found in the
 
 ```
 js/core/math.js        RK4, saturate, roots of quadratics, step metrics, formatting, answer matching
-js/core/linalg.js      small matrices, polynomials, roots, ctrb/obsv, charPoly, Ackermann place()
-js/core/tf.js          transfer functions: products, feedback, Bode, margins, state-space filter
+js/core/linalg.js      small matrices, polynomials, roots, det, ctrb/obsv, charPoly, Ackermann place()
+js/core/place_yt.js    port of scipy's place_poles (YT), so multi-output observer gains match control.place
+js/core/tf.js          transfer functions: products, feedback, Bode, margins, bandwidth, root locus, PID/lead/lag, filters
 js/core/ui.js          sliders/toggles bound to state, KaTeX helper, PDF page links, storage
 js/core/plot.js        TimePlot, SPlane (draggable poles, root-locus branches), BodePlot (spec regions)
 js/core/sim.js         closed-loop loop matching hwNN_*Sim.py (controller sat → +d → plant sat → RK4), noise

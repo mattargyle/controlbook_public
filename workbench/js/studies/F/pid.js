@@ -556,26 +556,6 @@
   });
 
   // ------------------------------------------------------- Appendix P.6 --
-  function rootLocus(den, num, kMax, steps = 300) {
-    const branches = [];
-    let prev = null;
-    for (let i = 0; i <= steps; i++) {
-      const k = kMax * Math.pow(i / steps, 2);
-      let r = L.roots(L.polyAdd(den, L.polyScale(num, k)));
-      if (prev) {
-        const used = new Set(), ordered = [];
-        for (const q of prev) {
-          let best = -1, bd = Infinity;
-          r.forEach((c, j) => { if (!used.has(j)) { const d = Math.hypot(c.re - q.re, c.im - q.im); if (d < bd) { bd = d; best = j; } } });
-          used.add(best); ordered.push(r[best]);
-        }
-        r = ordered;
-      } else r.forEach(() => branches.push([]));
-      r.forEach((c, j) => branches[j].push(c));
-      prev = r;
-    }
-    return branches;
-  }
   // Evans form 1 + K·n(s)/d(s) = 0 for the altitude (K = k_Ih) or outer loop (K = −k_Iz).
   function evans(ctx, loop, g) {
     const m = ctx.sys.models(ctx.pModel);
@@ -629,7 +609,7 @@
       const loop = ctx.st.view === 'outer' ? 'outer' : 'lon';
       const ev = evans(ctx, loop, ctx.gains);
       const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, ev.K * 1.2, 1e-6);
-      const loci = rootLocus(ev.den, ev.num, kMax);
+      const loci = WB.tf.rootLocus(ev.den, ev.num, kMax);
       const mk = L.roots(ev.den).map((q) => ({ ...q, kind: 'ol', label: 'pole of L(s)' }));
       L.roots(L.polyAdd(ev.den, L.polyScale(ev.num, ev.K))).forEach((q, i) => mk.push({ ...q, kind: 'cl', label: `closed-loop pole at k_I = ${fmt(loop === 'lon' ? ev.K : -ev.K, 3)}`, dragId: i }));
       const fitR = Math.max(...L.roots(ev.den).map((q) => Math.hypot(q.re, q.im))) * 1.6;
@@ -733,7 +713,7 @@
     },
     math(ctx) {
       const st = ctx.st, Ts = ctx.S.sim.Ts;
-      const beta = (2 * st.sigma - Ts) / (2 * st.sigma + Ts), gamma = 2 / (2 * st.sigma + Ts);
+      const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       const m = ctx.sys.models(ctx.pModel);
       return [
         { title: 'Nested PID from measured outputs', page: 'p. 155, p. 163–165',

@@ -20,25 +20,22 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const PD = () => WB.pd;
   const CH = WB.studies.E.chapters;
   const W = T.logspace(-4, 4, 800);
-  const db = (m) => 20 * Math.log10(m);
+  const { db, mag } = T;
   const pct = (x) => `${fmt(100 * x, 3)} %`;
 
   const Pin = (ctx) => T.tf([ctx.sys.linear(ctx.pModel).b0], [1, 0, 0]);
   const Pout = (ctx) => T.tf([-ctx.pModel.g], [1, 0, 0]);
   const PinFull = (ctx) => { const l = ctx.sys.linear(ctx.pModel); return T.tf([l.b0, 0, 0], [1, 0, 0, 0, -ctx.pModel.m1 * ctx.pModel.g ** 2 / l.De]); };
-  const pdTf = (kP, kD, sigma) => T.tf([kD + sigma * kP, kP], [sigma, 1]);
-  const pidTf = (kP, kI, kD, sigma) => T.tf([kD + sigma * kP, kP + sigma * kI, kI], [sigma, 1, 0]);
 
   const KN = (st) => ({ trTh: st.trTh, zetaTh: st.zetaTh, M: st.M, zetaZ: st.zetaZ, rule: '2.2' });
   function loopsOf(ctx) {
     const st = ctx.st;
     const d = E.pdDesign(ctx.pModel, KN(st));
     const g = { ...d, kIz: st.kIz, kIth: st.kIth || 0 };
-    const Cin = g.kIth ? pidTf(g.kPth, g.kIth, g.kDth, st.sigma) : pdTf(g.kPth, g.kDth, st.sigma), Cout = pidTf(g.kPz, g.kIz, g.kDz, st.sigma);
+    const Cin = T.pid({ kP: g.kPth, kI: g.kIth, kD: g.kDth, sigma: st.sigma }), Cout = T.pid({ kP: g.kPz, kI: g.kIz, kD: g.kDz, sigma: st.sigma });
     const Lin = T.mul(Pin(ctx), Cin), Lout = T.mul(Pout(ctx), Cout);
     return { g, Cin, Cout, Lin, Lout, Tin: T.feedback(Lin), Tout: T.feedback(Lout) };
   }
-  const mag = (G, w) => L.C.abs(T.at(G, w));
 
   function knobSection(parent, ctx, title, page) {
     const sec = section(parent, title, page);
@@ -87,11 +84,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     L.roots(L.polyAdd(Lg.den, Lg.num)).forEach((q, i) => mk.push({ ...q, kind: 'cl', label: `closed-loop pole ${i + 1}`, noFit: Math.hypot(q.re, q.im) > 0.5 / ctx.st.sigma }));
     return { markers: mk };
   }
-  function marginMarks(mg, color = '--series-1', tag = '') {
-    const marks = [];
-    if (isFinite(mg.wc)) marks.push({ w: mg.wc, label: tag ? `${tag}PM ${fmt(mg.pm, 3)}°` : `ω_co = ${fmt(mg.wc, 3)}, PM = ${fmt(mg.pm, 3)}°`, phaseFrom: -180, phaseTo: -180 + mg.pm, inPhase: true, color });
-    return marks;
-  }
+  const marginMarks = (mg, color, tag) => WB.freq.marginMarks(mg, { color, tag, gm: false });
 
   // ------------------------------------------------------------ Chapter 15 --
   CH.ch15 = {
@@ -308,7 +301,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       sec.append(box);
       WB.ui.addRefresher(() => {
         const l = this.loops(ctx);
-        const gm = (m) => (m.crossings.length ? m.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)}`).join(', ') : '∞');
+        const gm = WB.freq.gmText;
         box.replaceChildren(...(showOf(ctx, 'E:ch17:m') ? [
           metricRow('inner PM', `${fmt(l.mi.pm, 3)}° at ${fmt(l.mi.wc, 3)} rad/s`),
           metricRow('inner GM', gm(l.mi)),
@@ -372,9 +365,9 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   };
 
   // ------------------------------------------------------------ Chapter 18 --
-  const lead = (b) => T.tf([b.M, b.M * b.w / Math.sqrt(b.M)], [1, b.w * Math.sqrt(b.M)]);
-  const lag = (b) => T.tf([1, b.z], [1, b.z / b.M]);
-  const lpf = (b) => T.tf([b.p], [1, b.p]);
+  const lead = (b) => T.lead(b.M, b.w);
+  const lag = (b) => T.lag(b.z, b.M);
+  const lpf = (b) => T.lpf(b.p);
   const blankLoop = () => ({ k: 1, pi: { on: false, z: 0.1 }, lead: { on: false, w: 10, M: 10 }, lag: { on: false, z: 1, M: 10 }, lpf: { on: false, p: 100 } });
   function startDesign() {
     return {
@@ -389,7 +382,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
 
   function buildC(b, sign = 1) {
     let C = T.gain(sign * b.k);
-    if (b.pi.on) C = T.mul(C, T.tf([1, b.pi.z], [1, 0]));
+    if (b.pi.on) C = T.mul(C, T.pi(b.pi.z));
     if (b.lead.on) C = T.mul(C, lead(b.lead));
     if (b.lag.on) C = T.mul(C, lag(b.lag));
     if (b.lpf.on) C = T.mul(C, lpf(b.lpf));
@@ -400,7 +393,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     const Cin = buildC(st.d.in), Cout = buildC(st.d.out, -1);
     const Lin = T.mul(Pin(ctx), Cin), Tin = T.feedback(Lin);
     const Po = T.mul(Pout(ctx), Tin), Lout = T.mul(Po, Cout), Tout = T.feedback(Lout);
-    const F = st.d.pf.on ? T.tf([st.d.pf.p], [1, st.d.pf.p]) : T.gain(1);
+    const F = st.d.pf.on ? T.lpf(st.d.pf.p) : T.gain(1);
     const spec = (Lg, s) => {
       const m = T.bode(Lg, W).mag;
       let lo = Infinity, hi = 0;
@@ -587,5 +580,5 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     },
   };
 
-  WB.E.freq = { loopsOf, lsDesign, sampleInner, sampleOuter, pdTf, pidTf, Pin, Pout };
+  WB.E.freq = { loopsOf, lsDesign, sampleInner, sampleOuter, Pin, Pout };
 })();

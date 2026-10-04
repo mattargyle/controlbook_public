@@ -61,7 +61,7 @@
     const useObs = level === 'obs' || level === 'dobs';
     const useDO = level === 'dobs' && st.dobs;
     const sigma = st.sigma ?? 0.05;
-    const beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     let I = 0, ePrev = 0, yPrev = null, ydot = 0, uPrev = 0;
     let xh = [st.xhat0 || 0, 0], dh = 0;
 
@@ -196,13 +196,7 @@
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`, spoiler: true,
     };
   }
-  function ctrbCard(A, B, title, page) {
-    const Cab = L.ctrb(A, B);
-    return {
-      title, page, theory: '\\mathcal{C}_{A,B} = \\begin{bmatrix} B & AB & \\cdots & A^{n-1}B\\end{bmatrix},\\quad \\text{controllable} \\iff \\operatorname{rank}\\mathcal{C}_{A,B} = n',
-      numbers: `\\mathcal{C} = ${texMat(Cab)},\\quad \\operatorname{rank} = ${L.rank(Cab)}`, spoiler: true,
-    };
-  }
+  const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page);
   function polesCard(ctx, d) {
     return {
       title: 'Desired closed-loop poles', page: 'p. 113 · Eq. 8.5, p. 184',

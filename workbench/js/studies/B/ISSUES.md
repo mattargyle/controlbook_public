@@ -53,7 +53,7 @@ Smaller notation issues:
 | --- | --- | --- |
 | B.8 tuning | Problem: t_r,θ = 0.5 s; outer specs open | `ctrlPD.py`: t_r,θ = 0.15 s, M = 15, ζ_z = 0.707, and the Listing 8.3 k_Dz formula |
 | B.11–B.12 matrices and gains | Printed for ℓ = 0.5 m | `ctrlStateFeedback*.py` use `pendulumParam.ell = 1.0` (correct for the stated problem) |
-| B.13–B.14 observer gains | Not printed | Two outputs make L non-unique. `control.place` returns the one from scipy's YT iteration; the workbench ports that iteration (`place.js`) and lands on the same L to 2e-11. |
+| B.13–B.14 observer gains | Not printed | Two outputs make L non-unique. `control.place` returns the one from scipy's YT iteration; the workbench ports that iteration (`core/place_yt.js`) and lands on the same L to 2e-11. |
 | B.14 observer design | Text: observer 10× faster | `ctrlDisturbanceObserver.py` switches the observer to ω_n = 2.2/t_r (the controller keeps π/(2t_r√(1−ζ²))), and its disturbance pole at −1 is slower than every controller pole. |
 | B.16–B.17 C_in | hw16.py: D on the error, ((k_D + σk_P)s + k_P)/(σs + 1) | `ctrlPID.py` differentiates θ. The loop gain is the same, but the inner closed loop θ_r → θ has numerator P k_Pθ, not P C_in. The Ch 17 "as implemented" outer loop uses the latter. |
 | B.18 implementation | State-space form (Ch 18 text) | `hw18_pendulumSim.py` uses `method="digital_filter"` (Tustin) and α = 0.1. The workbench offers both; python-control's c2d gives Tustin coefficients that differ from direct bilinear substitution by 2e-13. |

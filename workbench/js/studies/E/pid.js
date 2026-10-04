@@ -387,14 +387,6 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   };
 
   // ------------------------------------------------------------- Chapter 9 --
-  // Reference shapes on z: step, ramp (slope [m/s]), parabola (r = A t², [m/s²]).
-  function shapedReference(ctx, base) {
-    const S = ctx.S, A = S.sim.amplitude, t0 = S.sim.tStep, z0 = S.sim.y0;
-    if (ctx.st.input === 'ramp') return (t) => (t < t0 ? z0 : z0 + A * (t - t0));
-    if (ctx.st.input === 'parabola') return (t) => (t < t0 ? z0 : z0 + A * (t - t0) ** 2);
-    return base;
-  }
-
   CH.ch9 = {
     id: 'ch9', num: 9, tab: 'Ch 9', title: 'System type (nested loops)', pages: 'pp. 137–154',
     defaults(sys) {
@@ -404,7 +396,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     simDefaults(sys) { return sys.problems.ch9.sim; },
     gains(ctx) { return ctx.S.mode === 'work' ? workGains(ctx.st) : { ...designed(ctx), kIz: ctx.st.kIzx }; },
     controller(ctx, o) { return E.nestedPID(ctx, ctx.gains, { comp: ctx.st.comp, meas: 'state' }, o); },
-    reference: shapedReference,
+    reference: (ctx, base) => WB.pid.shapedReference(ctx, base),   // on z: step, ramp [m/s], parabola r = A t² [m/s²]
     outputSeries: thetaRSeries,
 
     analysis(ctx) {
@@ -554,29 +546,6 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   };
 
   // ------------------------------------------------- Appendix P.6 (root locus) --
-  function rootLocus(den, num, kMax, steps = 300) {
-    const branches = [];
-    let prev = null;
-    for (let i = 0; i <= steps; i++) {
-      const k = kMax * Math.pow(i / steps, 2);
-      let r = L.roots(L.polyAdd(den, L.polyScale(num, k)));
-      if (prev) {
-        const used = new Set(), ordered = [];
-        for (const q of prev) {
-          let best = -1, bd = Infinity;
-          r.forEach((c, j) => { if (!used.has(j)) { const d = Math.hypot(c.re - q.re, c.im - q.im); if (d < bd) { bd = d; best = j; } } });
-          used.add(best); ordered.push(r[best]);
-        }
-        r = ordered;
-      } else {
-        r.forEach(() => branches.push([]));
-      }
-      r.forEach((c, j) => branches[j].push(c));
-      prev = r;
-    }
-    return branches;
-  }
-
   CH.p6 = {
     id: 'p6', num: 10.5, tab: 'App. P.6', short: 'P.6', title: 'Root locus vs. k_I (outer loop)', pages: 'pp. 465–474',
     defaults(sys) {
@@ -616,7 +585,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       if (ctx.S.mode === 'work' && !ctx.app.isRevealed('E:p6:locus')) return null;
       const ev = this.evans(ctx);
       const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, -ctx.st.kI * 1.2, 1e-6);
-      const loci = rootLocus(ev.den, ev.num, kMax);
+      const loci = WB.tf.rootLocus(ev.den, ev.num, kMax);
       const markers = L.roots(ev.den).map((q, i) => ({ ...q, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
       L.roots(this.clPoly(ev, ctx.st.kI)).forEach((q, i) => markers.push({ ...q, kind: 'cl', label: `closed-loop pole at kI = ${fmt(ctx.st.kI, 3)}`, dragId: i }));
       const fitR = Math.max(...L.roots(ev.den).map((q) => Math.hypot(q.re, q.im))) * 1.6;
@@ -770,7 +739,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
 
     math(ctx) {
       const st = ctx.st, Ts = ctx.S.sim.Ts;
-      const beta = (2 * st.sigma - Ts) / (2 * st.sigma + Ts), gamma = 2 / (2 * st.sigma + Ts);
+      const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       const d = designed(ctx);
       return [
         { title: 'Nested digital PID', page: 'p. 160 · Listing 10.1, p. 163 (B.10)',

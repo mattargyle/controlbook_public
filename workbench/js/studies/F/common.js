@@ -76,10 +76,7 @@ WB.F = (function () {
 
   // ------------------------------------------------------- loop design --
   // PD gains for b0/(s² + a1 s + a0) with u = kP(r − y) − kD ẏ (Ch 7).
-  function pdFromPoles(mdl, poles) {
-    const { alpha1, alpha0 } = M.polyFromPoles(poles[0], poles[1]);
-    return { kP: (alpha0 - mdl.a0) / mdl.b0, kD: (alpha1 - mdl.a1) / mdl.b0 };
-  }
+  const pdFromPoles = WB.design.pdGains;
   function polesWZ(wn, zeta) { return WB.design.polesFromWnZeta(wn, zeta); }
 
   // F.8 design from the tuning knobs: t_r,h, ζ_h; t_r,θ, ζ_θ; M = t_r,z/t_r,θ, ζ_z.

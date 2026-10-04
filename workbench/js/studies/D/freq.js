@@ -16,13 +16,12 @@
   const CH = WB.studies.D.chapters;
   const PID = () => WB.studies.D.pid;
   const W = T.logspace(-3, 4, 700);
-  const db = (m) => 20 * Math.log10(m);
-  const gmText = (mg) => (mg.crossings && mg.crossings.length ? mg.crossings.map((c) => `${fmt(db(c.gm), 3)} dB at ${fmt(c.w, 3)}`).join(', ') : '∞');
+  const { db, mag: absAt } = T;
+  const gmText = (mg) => WB.freq.gmText(mg);
 
   const plantTf = (ctx) => T.tf([ctx.model.b0], [1, ctx.model.a1, ctx.model.a0]);
-  // C_PID with dirty derivative (p. 313): ((kD + σkP)s² + (kP + σkI)s + kI) / (s(σs + 1))
-  const pidTf = ({ kP, kI, kD, sigma }) => T.tf([kD + sigma * kP, kP + sigma * kI, kI], [sigma, 1, 0]);
-  const absAt = (G, w) => L.C.abs(T.at(G, w));
+  // C_PID with dirty derivative (p. 313)
+  const pidTf = (st) => T.pid(st);
 
   // Frequency-domain answers for a PID loop (D.16) and its margins (D.17).
   function specs(ctx, st = ctx.st) {
@@ -43,36 +42,20 @@
   // the first crossing). A crossing where the phase is above 0° gives PM < −180°
   // wrapped to (−180°, 0°); python-control reports it the same way.
   function margins(Lg) {
-    const base = T.margins(Lg);
-    const ws = T.logspace(-4, 5, 6000), { mag, phase } = T.bode(Lg, ws);
-    const gcs = [];
-    for (let i = 1; i < ws.length; i++) {
-      if ((mag[i - 1] - 1) * (mag[i] - 1) <= 0 && mag[i - 1] !== mag[i]) {
-        const t = Math.log(mag[i - 1]) / (Math.log(mag[i - 1]) - Math.log(mag[i]));
-        const w = Math.exp(Math.log(ws[i - 1]) + t * (Math.log(ws[i]) - Math.log(ws[i - 1])));
-        const ph = phase[i - 1] + t * (phase[i] - phase[i - 1]);
-        gcs.push({ w, pm: ((180 + ph) % 360 + 540) % 360 - 180 });
-      }
-    }
-    if (gcs.length < 2) return { ...base, gcs };
-    const worst = gcs.reduce((a, c) => (Math.abs(c.pm) < Math.abs(a.pm) ? c : a));
-    return { ...base, pm: worst.pm, wc: worst.w, gcs };
+    const mg = T.margins(Lg, -4, 5, 6000);
+    if (mg.gcs.length < 2) return mg;
+    const worst = mg.gcs.reduce((a, c) => (Math.abs(c.pm) < Math.abs(a.pm) ? c : a));
+    return { ...mg, pm: worst.pm, wc: worst.w };
   }
 
-  // −3 dB crossings of |T|, interpolated in log ω. `first` is what python-control's
+  // −3 dB crossings of |T|, refined in log ω. `first` is what python-control's
   // bandwidth() returns; `last` is the final roll-off. They differ when |T| dips
   // below −3 dB and recovers (the D.10 PID zeros put a notch in |C|; ISSUES.md).
   function bandwidth(Tc) {
-    const { mag } = T.bode(Tc, W);
-    const cross = [];
-    for (let i = 1; i < W.length; i++) {
-      if (mag[i - 1] >= Math.SQRT1_2 && mag[i] < Math.SQRT1_2) {
-        const a = Math.log(mag[i - 1] / Math.SQRT1_2), b2 = Math.log(mag[i] / Math.SQRT1_2);
-        cross.push(Math.exp(Math.log(W[i - 1]) + (a / (a - b2)) * (Math.log(W[i]) - Math.log(W[i - 1]))));
-      }
-    }
+    const cross = T.crossDown(Tc, W, Math.SQRT1_2);
     return { first: cross.length ? cross[0] : NaN, last: cross.length ? cross[cross.length - 1] : NaN, n: cross.length };
   }
+
   function loop(ctx) {
     const Lg = T.mul(plantTf(ctx), pidTf(ctx.st)), Tc = T.feedback(Lg);
     const { mag } = T.bode(Tc, W);
@@ -113,12 +96,7 @@
     poles.forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole ${i + 1}`, noFit: Math.hypot(p.re, p.im) > 12 }));
     return { markers: mk, fitR: 3 };
   }
-  function marginMarks(mg) {
-    const marks = [];
-    if (isFinite(mg.wc)) marks.push({ w: mg.wc, label: `ω_co = ${fmt(mg.wc, 3)}, PM = ${fmt(mg.pm, 3)}°`, phaseFrom: -180, phaseTo: -180 + mg.pm, inPhase: true, color: '--series-1' });
-    for (const c of mg.crossings || []) marks.push({ w: c.w, label: `GM ${fmt(db(c.gm), 3)} dB`, dbFrom: 0, dbTo: -db(c.gm), color: '--critical' });
-    return marks;
-  }
+  const marginMarks = (mg) => WB.freq.marginMarks(mg);
   const revealed = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isRevealed(key);
   function revealButton(ctx, key, text) {
     return el('button', { type: 'button', class: 'btn btn-quiet', text, onclick: () => { ctx.app.reveal(key); ctx.update(); } });
@@ -384,11 +362,11 @@
 
   // ---------------------------------------------------------------- D.18 --
   const blocks = {
-    pi: { label: 'PI (s + z_I)/s', page: 'p. 324 · §18.1.2', tf: (b) => T.tf([1, b.z], [1, 0]) },
-    lead: { label: 'Lead M(s + ω/√M)/(s + ω√M)', page: 'p. 328 · Eq. 18.2', tf: (b) => T.tf([b.M, b.M * b.w / Math.sqrt(b.M)], [1, b.w * Math.sqrt(b.M)]) },
-    lag: { label: 'Lag (s + z)/(s + z/M)', page: 'p. 325 · Eq. 18.1', tf: (b) => T.tf([1, b.z], [1, b.z / b.M]) },
-    lpf1: { label: 'Low-pass p/(s + p)', page: 'p. 325 · §18.1.3', tf: (b) => T.tf([b.p], [1, b.p]) },
-    lpf2: { label: 'Low-pass 2 p/(s + p)', page: 'p. 325 · §18.1.3', tf: (b) => T.tf([b.p], [1, b.p]) },
+    pi: { label: 'PI (s + z_I)/s', page: 'p. 324 · §18.1.2', tf: (b) => T.pi(b.z) },
+    lead: { label: 'Lead M(s + ω/√M)/(s + ω√M)', page: 'p. 328 · Eq. 18.2', tf: (b) => T.lead(b.M, b.w) },
+    lag: { label: 'Lag (s + z)/(s + z/M)', page: 'p. 325 · Eq. 18.1', tf: (b) => T.lag(b.z, b.M) },
+    lpf1: { label: 'Low-pass p/(s + p)', page: 'p. 325 · §18.1.3', tf: (b) => T.lpf(b.p) },
+    lpf2: { label: 'Low-pass 2 p/(s + p)', page: 'p. 325 · §18.1.3', tf: (b) => T.lpf(b.p) },
   };
   const BLOCKS = ['pi', 'lead', 'lag', 'lpf1', 'lpf2'];
   // Work-mode start: a low-gain PI (stable, meets nothing but disturbance rejection).
@@ -416,7 +394,7 @@
       let C = T.gain(st.k);
       for (const key of BLOCKS) if (st[key].on) C = T.mul(C, blocks[key].tf(st[key]));
       const P = plantTf(ctx), Lg = T.mul(P, C);
-      const F = st.pf.on ? T.tf([st.pf.p], [1, st.pf.p]) : T.gain(1);
+      const F = st.pf.on ? T.lpf(st.pf.p) : T.gain(1);
       const pr = ctx.sys.problems.ch18;
       const { mag } = T.bode(Lg, W);
       let lowMin = Infinity, highMax = 0;

@@ -16,18 +16,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const CH = WB.studies.E.chapters;
 
   // ---------------------------------------------------- open-loop force input --
-  function inputForce(st, t) {
-    const { shape, amp, freq, width = 0.5, t0 = 0 } = st.inp;
-    if (t < t0) return 0;
-    const tt = t - t0;
-    switch (shape) {
-      case 'const': return amp;
-      case 'pulse': return tt < width ? amp : 0;
-      case 'square': return (tt % (1 / freq)) <= 0.5 / freq ? amp : -amp;
-      case 'sine': return amp * Math.sin(2 * Math.PI * freq * tt);
-      default: return 0;
-    }
-  }
+  const inputForce = (st, t) => WB.models.inputTorque(st, t);   // same shapes as Study A
 
   // F = F_comp + F_in(t), with F_comp = 0, F_e (at z_e) or F_fl(z).
   function openLoop(ctx, { linear = false } = {}) {

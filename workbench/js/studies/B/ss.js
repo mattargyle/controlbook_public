@@ -3,7 +3,7 @@
 //   ẋ = A x + B F,  y = (z, θ) = C x,  x = (z, θ, ż, θ̇).
 // The closed-loop poles are a θ pair (t_r,θ, ζ_θ) and a slower z pair
 // (t_r,z = M t_r,θ, ζ_z), plus p_I and the observer poles in later chapters.
-// Gains are placed with the port of scipy's place_poles (place.js), so the
+// Gains are placed with the port of scipy's place_poles (core/place_yt.js), so the
 // two-output observer gains match the repo's ctrlObserver.py exactly.
 (function () {
   const { el, slider, segmented, section } = WB.ui;
@@ -35,7 +35,7 @@
     if (level === 'sfi') return lib().sfiCtrl({ K: g.K, ki: g.ki, uLim, Ts, antiwindup: st.antiwindup, linear });
     const xh0 = [st.xhat0.z, st.xhat0.th * DEG, 0, 0];
     if (level === 'dobs' && st.dobs) {
-      const { A2, C2, B1 } = lib().augD(ctx.ss);
+      const { A2, C2, B2: B1 } = lib().augD(ctx.ss);
       return lib().obsCtrl({ Aobs: A2, Bobs: B1, Cobs: C2, L: g.L2, K: g.K, ki: g.ki, Ts, uLim, dist: true, xhat0: [...xh0, 0], antiwindup: st.antiwindup, linear });
     }
     return lib().obsCtrl({ Aobs: A, Bobs: Bm, Cobs: C, L: g.L, K: g.K, ki: g.ki, Ts, uLim, xhat0: xh0, antiwindup: st.antiwindup, linear });
@@ -95,12 +95,12 @@
     re = Math.min(-0.01, re);
     const wn = Math.hypot(re, im);
     const zeta = Math.max(0.2, Math.min(0.99, -re / wn));
-    const trFrom = (w, z, rule) => (rule === 'tp' ? 0.5 * Math.PI / (w * Math.sqrt(1 - z * z)) : 2.2 / w);
+    const trFrom = WB.design.trFromWn;
     if (id === 0) { st.zetaTh = zeta; st.trTh = Math.max(0.02, trFrom(wn, zeta, st.rule)); }
     else if (id === 1) { st.zetaZ = zeta; st.M = Math.max(1.2, Math.min(50, trFrom(wn, zeta, st.rule) / st.trTh)); }
     else if (id === 2) st.pI = re;
     else if (id === 10 || id === 11) {
-      const base = id === 10 ? lib().wnOf(st.trTh, st.zetaTh, st.obsRule) : lib().wnOf(st.trTh * st.M, st.zetaZ, st.obsRule);
+      const base = id === 10 ? WB.design.wnFromTr(st.trTh, st.zetaTh, st.obsRule) : WB.design.wnFromTr(st.trTh * st.M, st.zetaZ, st.obsRule);
       st.obsFactor = Math.max(1, Math.min(60, wn / base));
     } else if (id === 12) st.pD = re;
     ctx.update();
@@ -178,26 +178,7 @@
       note: 'Eq. 11.39 and 12.2 print row 4 for a different ℓ (ISSUES.md). The numbers here use the current ℓ.',
     };
   }
-  function ctrbCard(A, Bm, title, page) {
-    const Cab = L.ctrb(A, Bm);
-    return {
-      title, page,
-      theory: '\\mathcal{C}_{A,B} = \\begin{bmatrix} B & AB & \\cdots & A^{n-1}B\\end{bmatrix},\\quad \\text{controllable} \\iff \\operatorname{rank}\\mathcal{C}_{A,B} = n',
-      numbers: `\\mathcal{C} = ${texMat(Cab)},\\quad \\operatorname{rank} = ${L.rank(Cab)},\\quad \\det = ${tex(detOf(Cab))}`, spoiler: true,
-    };
-  }
-  function detOf(Mx) {
-    const A = Mx.map((r) => r.slice()), n = A.length;
-    let d = 1;
-    for (let c = 0; c < n; c++) {
-      let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
-      if (A[p][c] === 0) return 0;
-      if (p !== c) { [A[c], A[p]] = [A[p], A[c]]; d = -d; }
-      d *= A[c][c];
-      for (let r = c + 1; r < n; r++) { const l = A[r][c] / A[c][c]; for (let j = c; j < n; j++) A[r][j] -= l * A[c][j]; }
-    }
-    return d;
-  }
+  const ctrbCard = (A, Bm, title, page) => WB.ss.ctrbCard(A, Bm, title, page, { det: true });
   function polesCard(ctx, d, level) {
     const st = ctx.st;
     return {
@@ -314,8 +295,8 @@
         {
           id: 'c', title: '(c) Controllability',
           inputs: { rank: 'rank 𝒞', det: 'det 𝒞' },
-          check: (v) => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: detOf(Cm) }, { det: 'det' }); },
-          solution: () => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return [{ tex: `\\mathcal{C}_{A,B} = ${texMat(Cm)},\\; \\det = ${tex(detOf(Cm))} \\ne 0` }, { html: 'The book prints det = −6104.1 (p. 190): that is the ℓ = 0.5 m value.' }]; },
+          check: (v) => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return PD().checkNumbers(v, { rank: L.rank(Cm), det: L.det(Cm) }, { det: 'det' }); },
+          solution: () => { const Cm = L.ctrb(ctx.ss.A, ctx.ss.B); return [{ tex: `\\mathcal{C}_{A,B} = ${texMat(Cm)},\\; \\det = ${tex(L.det(Cm))} \\ne 0` }, { html: 'The book prints det = −6104.1 (p. 190): that is the ℓ = 0.5 m value.' }]; },
         },
         {
           id: 'd', title: '(d) K and k<sub>r</sub> for the (a) poles',

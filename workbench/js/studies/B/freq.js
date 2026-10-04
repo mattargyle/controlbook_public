@@ -16,12 +16,12 @@
   const DEG = Math.PI / 180;
   const W = T.logspace(-4, 5, 900);
   const W15 = T.logspace(-2, 3, 600);   // the range of Figs. 15-13 and 15-14
-  const db = (m) => 20 * Math.log10(m);
+  const { db } = T;
 
   const Pin = (p) => { const J = p.m1 * p.ell / 6.0 + p.m2 * 2 * p.ell / 3.0; return T.tf([-1 / J], [1, 0, -(p.m1 + p.m2) * p.g / J]); };
   const Pout = (p) => T.tf([-2 * p.ell / 3.0, 0, p.g], [1, 0, 0]);
-  const Cin = (g) => T.tf([g.kDth + g.sigma * g.kPth, g.kPth], [g.sigma, 1]);
-  const Cout = (g) => T.tf([g.kDz + g.kPz * g.sigma, g.kPz + g.kIz * g.sigma, g.kIz], [g.sigma, 1, 0]);
+  const Cin = (g) => T.pid({ kP: g.kPth, kD: g.kDth, sigma: g.sigma });
+  const Cout = (g) => T.pid({ kP: g.kPz, kI: g.kIz, kD: g.kDz, sigma: g.sigma });
 
   // Bode with the low-frequency phase shifted into (−270°, 90°], so a negative
   // DC gain reads −180° (the usual place for margins).
@@ -49,7 +49,7 @@
         const target = 360 * Math.max(a, b2) - 180;
         const t = (target - phase[i - 1]) / (phase[i] - phase[i - 1]);
         const w = Math.exp(Math.log(ws[i - 1]) + t * (Math.log(ws[i]) - Math.log(ws[i - 1])));
-        gms.push({ w, gm: 1 / L.C.abs(T.at(Lg, w)) });
+        gms.push({ w, gm: 1 / T.mag(Lg, w) });
       }
     }
     const w0 = ((phase[0] + 180) % 360 + 360) % 360;
@@ -58,20 +58,8 @@
     }
     return { pms, gms, pm: pms.length ? pms[0].pm : Infinity, wc: pms.length ? pms[0].w : NaN };
   }
-  // First frequency where |T| falls 3 dB below |T(0)| (control.bandwidth's
-  // definition, dbdrop = −3), located on the grid and refined by bisection.
-  function bandwidth(Tc) {
-    const ref = Math.abs(T.dcgain(Tc)) * 10 ** (-3 / 20);
-    const m = (w) => L.C.abs(T.at(Tc, w));
-    for (let i = 1; i < W.length; i++) {
-      if (m(W[i]) < ref) {
-        let lo = Math.log(W[i - 1]), hi = Math.log(W[i]);
-        for (let k = 0; k < 60; k++) { const mid = (lo + hi) / 2; if (m(Math.exp(mid)) < ref) hi = mid; else lo = mid; }
-        return Math.exp((lo + hi) / 2);
-      }
-    }
-    return NaN;
-  }
+  // control.bandwidth's definition: 3 dB below |T(0)|.
+  const bandwidth = (Tc) => T.bandwidth(Tc, W);
   const gmText = (gms) => (gms.length ? gms.map((c) => `${fmt(db(c.gm), 3)} dB at ${c.w === 0 ? 'ω → 0' : fmt(c.w, 3) + ' rad/s'}`).join('; ') : '∞');
   const pmText = (pms) => (pms.length ? pms.map((c) => `${fmt(c.pm, 3)}° at ${fmt(c.w, 3)} rad/s`).join('; ') : 'no crossover');
 
@@ -188,8 +176,8 @@
     specs(ctx) {
       const p = ctx.pModel, pr = ctx.sys.problems.ch16, g = ctx.st;
       const Li = T.mul(Pin(p), Cin(g)), Lo = T.mul(Pout(p), Cout(g));
-      const BrIn = db(L.C.abs(T.at(Li, pr.wrIn))), BnIn = -db(L.C.abs(T.at(Li, pr.wnoIn)));
-      const BrOut = db(L.C.abs(T.at(Lo, pr.wrOut)));
+      const BrIn = db(T.mag(Li, pr.wrIn)), BnIn = -db(T.mag(Li, pr.wnoIn));
+      const BrOut = db(T.mag(Lo, pr.wrOut));
       return { Li, Lo, BrIn, grIn: 10 ** (-BrIn / 20), BnIn, gnIn: 10 ** (-BnIn / 20), BrOut, grOut: 10 ** (-BrOut / 20), pr };
     },
     buildControls(parent, ctx) {
@@ -390,8 +378,8 @@
       const Li = T.mul(Pin(p), Ci), Ti = T.feedback(Li);
       const Pouter = T.mul(Pout(p), Ti), Lo = T.mul(Pouter, Co), To = T.feedback(Lo);
       const mi = marginsB(Li), mo = marginsB(Lo), bwi = bandwidth(Ti);
-      const maxAbove = (G, w0) => { let m = 0; for (const w of W) if (w >= w0) m = Math.max(m, L.C.abs(T.at(G, w))); return m; };
-      const minBelow = (G, w1) => { let m = Infinity; for (const w of W) if (w <= w1) m = Math.min(m, L.C.abs(T.at(G, w))); return m; };
+      const maxAbove = (G, w0) => { let m = 0; for (const w of W) if (w >= w0) m = Math.max(m, T.mag(G, w)); return m; };
+      const minBelow = (G, w1) => { let m = Infinity; for (const w of W) if (w <= w1) m = Math.min(m, T.mag(G, w)); return m; };
       const inNoise = maxAbove(Li, pr.inner.wno), outNoise = maxAbove(Lo, pr.outer.wno), outTrack = minBelow(Lo, pr.outer.wr);
       const stableIn = L.roots(L.polyAdd(Li.den, Li.num)).every((r) => r.re < 0);
       const stableOut = L.roots(L.polyAdd(Lo.den, Lo.num)).every((r) => r.re < 0);

@@ -301,11 +301,7 @@
         numbers: `A_{lon} = ${texMat(S.lon.A)},\\; B_{lon} = ${texMat(S.lon.B)},\\quad A_{lat} = ${texMat(S.lat.A)},\\; B_{lat} = ${texMat(S.lat.B)}`, spoiler: true },
     ];
   }
-  function ctrbCard(A, B, title, page) {
-    const Cm = L.ctrb(A, B);
-    return { title, page, theory: '\\mathcal{C}_{A,B} = \\begin{bmatrix}B & AB & \\cdots & A^{n-1}B\\end{bmatrix}',
-      numbers: `\\mathcal{C} = ${texMat(Cm, 3)},\\quad \\operatorname{rank} = ${L.rank(Cm)}`, spoiler: true };
-  }
+  const ctrbCard = (A, B, title, page) => WB.ss.ctrbCard(A, B, title, page, { sig: 3 });
   function polesCard(ctx, d, level) {
     const P = d.poles;
     const lat = [...P.outer, ...P.inner];

@@ -127,6 +127,24 @@ WB.la = (function () {
     return M.map((row) => row.slice(n));
   }
 
+  // Determinant by LU with partial pivoting.
+  function det(A) {
+    const M = A.map((r) => r.slice()), n = M.length;
+    let d = 1;
+    for (let c = 0; c < n; c++) {
+      let piv = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+      if (M[piv][c] === 0) return 0;
+      if (piv !== c) { [M[c], M[piv]] = [M[piv], M[c]]; d = -d; }
+      d *= M[c][c];
+      for (let r = c + 1; r < n; r++) {
+        const f = M[r][c] / M[c][c];
+        for (let j = c; j < n; j++) M[r][j] -= f * M[c][j];
+      }
+    }
+    return d;
+  }
+
   function rank(A, tol = 1e-9) {
     const M = A.map((r) => r.slice());
     const n = M.length, m = M[0].length;
@@ -193,6 +211,6 @@ WB.la = (function () {
 
   return {
     C, conv, polyAdd, polyScale, polyvalC, polyFromRoots, roots, trimLeading,
-    zeros, eye, T, mul, add, sub, scale, col, hstack, vstack, inv, rank, ctrb, obsv, charPoly, eig, polyMat, place,
+    zeros, eye, T, mul, add, sub, scale, col, hstack, vstack, inv, det, rank, ctrb, obsv, charPoly, eig, polyMat, place,
   };
 })();

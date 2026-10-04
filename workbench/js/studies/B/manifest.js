@@ -3,7 +3,6 @@
 // page is parsing, so document.write places them before app.js.
 WB.loadStudy('B', [
   'js/studies/B/system.js',
-  'js/studies/B/place.js',
   'js/studies/B/lib.js',
   'js/studies/B/models.js',
   'js/studies/B/slc.js',

@@ -11,6 +11,7 @@
   const { el, slider, segmented, section } = WB.ui;
   const M = WB.math;
   const L = WB.la;
+  const T = WB.tf;
   const { tex, texPole, fmt, fmtPole } = M;
   const B = WB.studies.B;
   const lib = () => B.lib;
@@ -65,14 +66,6 @@
     if (filter) { for (let j = 0; j < n; j++) Acl[iF][j] = zf.a * uo[j]; Acl[iF][iF] += -zf.b; }
     if (withI) Acl[iI][0] = -1;
     return L.eig(Acl);
-  }
-
-  // Reference shapes for Ch 9: step, ramp, parabola on z_r.
-  function shapedReference(ctx, base) {
-    const { S } = ctx, A = S.sim.amplitude, t0 = S.sim.tStep, z0 = S.sim.y0;
-    if (ctx.st.input === 'ramp') return (t) => (t < t0 ? z0 : z0 + A * (t - t0));
-    if (ctx.st.input === 'parabola') return (t) => (t < t0 ? z0 : z0 + A * (t - t0) ** 2);
-    return base;
   }
 
   // The successive-loop markers reuse the 'cl' / 'obs' kinds for the inner and
@@ -246,7 +239,7 @@
 
     specPoles(ctx) {
       const pr = ctx.sys.problems.ch8;
-      return [...lib().pair(2.2 / pr.trTh, pr.zetaTh), ...lib().pair(2.2 / (pr.trTh * pr.M), pr.zetaZ)];
+      return [...WB.design.polesFromWnZeta(2.2 / pr.trTh, pr.zetaTh), ...WB.design.polesFromWnZeta(2.2 / (pr.trTh * pr.M), pr.zetaZ)];
     },
 
     buildControls(parent, ctx) {
@@ -362,7 +355,7 @@
     controller(ctx, { linear = false } = {}) {
       return lib().slcPID({ g: ctx.gains, p: ctx.pModel, Ts: ctx.S.sim.Ts, uLim: ctx.sys.uLimit(ctx.pModel), gate: false, deriv: 'state', thetaMax: Infinity, filter: ctx.st.filter, linear });
     },
-    reference: shapedReference,
+    reference: (ctx, base) => WB.pid.shapedReference(ctx, base),   // step, ramp, parabola on z_r
     linearSim(ctx, c) { return linearSim(ctx, c, (lin) => this.controller(ctx, { linear: lin })); },
 
     analysis(ctx) {
@@ -533,7 +526,7 @@
 
     math(ctx) {
       const st = ctx.st, Ts = ctx.S.sim.Ts, g = ctx.gains;
-      const beta = (2 * st.sigma - Ts) / (2 * st.sigma + Ts), gamma = 2 / (2 * st.sigma + Ts);
+      const { beta, gamma } = WB.design.dirtyCoeffs(st.sigma, Ts);
       return [
         { title: 'Outer PID → saturation → filter → inner PD', page: 'p. 164–165 · Listing 10.3',
           theory: '\\theta_r = \\text{sat}_{\\theta_{max}}\\big(k_{Pz}e_z + k_{Iz}\\textstyle\\int e_z - k_{Dz}\\dot{\\hat z}\\big) \\xrightarrow{F(s)} \\theta_r,\\quad F = k_{P\\theta}(\\theta_r - \\theta) - k_{D\\theta}\\dot{\\hat\\theta}' },
@@ -586,29 +579,6 @@
   };
 
   // ---------------------------------------------------- Appendix P.6 (root locus) --
-  // Branch-tracked root locus of den(s) + k num(s) = 0 for k in [0, kMax] (as A's P.6).
-  function rootLocus(den, num, kMax, steps = 300) {
-    const branches = [];
-    let prev = null;
-    for (let i = 0; i <= steps; i++) {
-      const k = kMax * Math.pow(i / steps, 2);
-      let r = L.roots(L.polyAdd(den, L.polyScale(num, k)));
-      if (prev) {
-        const used = new Set(), ordered = [];
-        for (const p of prev) {
-          let best = -1, bd = Infinity;
-          r.forEach((q, j) => { if (!used.has(j)) { const d = Math.hypot(q.re - p.re, q.im - p.im); if (d < bd) { bd = d; best = j; } } });
-          used.add(best); ordered.push(r[best]);
-        }
-        r = ordered;
-      } else {
-        r.forEach(() => branches.push([]));
-      }
-      r.forEach((q, j) => branches[j].push(q));
-      prev = r;
-    }
-    return branches;
-  }
   const maxRe = (poly) => Math.max(...L.roots(poly).map((r) => r.re));
 
   B.chapters.p6 = {
@@ -660,7 +630,7 @@
 
     splane(ctx) {
       const ev = this.evans(ctx);
-      const loci = rootLocus(ev.den, ev.num, Math.max(ctx.st.kMax, ctx.st.kappa * 1.2));
+      const loci = T.rootLocus(ev.den, ev.num, Math.max(ctx.st.kMax, ctx.st.kappa * 1.2));
       const mk = L.roots(ev.den).map((p, i) => ({ ...p, kind: 'ol', label: `pole of L(s) ${i + 1}` }));
       (ev.num.length > 1 ? L.roots(ev.num) : []).forEach((z, i) => mk.push({ ...z, kind: 'olzero', label: `zero of L(s) ${i + 1}` }));
       L.roots(L.polyAdd(ev.den, L.polyScale(ev.num, ctx.st.kappa))).forEach((p, i) => mk.push({ ...p, kind: 'cl', label: `closed-loop pole at k_Iz = ${fmt(-ctx.st.kappa, 3)}`, dragId: i }));
@@ -742,5 +712,5 @@
     },
   };
 
-  B.slc = { innerPoles, outerPoles, outerPoly, fullPoles, markers, LOOP_NAMES, rootLocus, qOf };
+  B.slc = { innerPoles, outerPoles, outerPoly, fullPoles, markers, LOOP_NAMES, qOf };
 })();

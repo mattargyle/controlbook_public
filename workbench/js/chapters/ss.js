@@ -16,17 +16,8 @@ WB.chapters = WB.chapters || {};
   function ctrlPoles(st) { return PD().polesFromWnZeta(wnOf(st), st.zeta); }
   function obsPoles(st) { return PD().polesFromWnZeta(st.wnObs, st.zetaObs); }
 
-  function augI(ss) {
-    const { A, B, C } = ss;
-    return {
-      A1: [[...A[0], 0], [...A[1], 0], [-C[0][0], -C[0][1], 0]],
-      B1: [[B[0][0]], [B[1][0]], [0]],
-    };
-  }
-  function augD(ss) {
-    const { A, B, C } = ss;
-    return { A2: [[...A[0], B[0][0]], [...A[1], B[1][0]], [0, 0, 0]], C2: [[C[0][0], C[0][1], 0]] };
-  }
+  const augI = (ss) => WB.design.augmentIntegrator(ss.A, ss.B, ss.C);
+  const augD = (ss) => WB.design.augmentDisturbance(ss.A, ss.B, ss.C);
 
   // Designed gains from the tuning knobs (explore mode / problem solutions).
   function design(ctx, st = ctx.st, level = ctx.level) {
@@ -71,7 +62,7 @@ WB.chapters = WB.chapters || {};
     const useObs = level === 'obs' || level === 'dobs';
     const useDO = level === 'dobs' && st.dobs;
     const sigma = 0.05;
-    const beta = (2 * sigma - Ts) / (2 * sigma + Ts), gamma = 2 / (2 * sigma + Ts);
+    const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
     let I = 0, ePrev = null, yPrev = null, ydot = 0, uPrev = 0;
     let xh = [st.xhat0 * M.DEG, 0], dh = 0;
 
@@ -237,11 +228,13 @@ WB.chapters = WB.chapters || {};
       numbers: `A = ${texMat(A)},\\quad B = ${texMat(B)}`,
     };
   }
-  function ctrbCard(ctx, A, B, title, page) {
+  // Controllability card, shared with studies B–F. matrix: show C_AB; det: add det C_AB.
+  function ctrbCard(A, B, title, page, { matrix = true, det = false, sig = 4 } = {}) {
     const Cab = L.ctrb(A, B);
+    const nums = [...(matrix ? [`\\mathcal{C} = ${texMat(Cab, sig)}`] : []), `\\operatorname{rank} = ${L.rank(Cab)}`, ...(det ? [`\\det = ${tex(L.det(Cab))}`] : [])];
     return {
       title, page, theory: '\\mathcal{C}_{A,B} = \\begin{bmatrix} B & AB & \\cdots & A^{n-1}B\\end{bmatrix},\\quad \\text{controllable} \\iff \\operatorname{rank}\\mathcal{C}_{A,B} = n',
-      numbers: `\\mathcal{C} = ${texMat(Cab)},\\quad \\operatorname{rank} = ${L.rank(Cab)}`, spoiler: true,
+      numbers: nums.join(',\\quad '), spoiler: true,
     };
   }
   function polesCard(ctx, d) {
@@ -293,7 +286,7 @@ WB.chapters = WB.chapters || {};
       const g = ctx.gains;
       return [
         ssCard(ctx),
-        ctrbCard(ctx, A, B, 'Controllability', 'p. 180 · Eq. 11.29'),
+        ctrbCard(A, B, 'Controllability', 'p. 180 · Eq. 11.29'),
         polesCard(ctx, d),
         { title: 'Pole placement (Ackermann)', page: 'p. 182 · Eq. 11.32',
           theory: 'K = (\\alpha - a_A)\\,\\mathcal{A}_A^{-1}\\,\\mathcal{C}_{A,B}^{-1}',
@@ -364,7 +357,7 @@ WB.chapters = WB.chapters || {};
         { title: 'Augmented system', page: 'p. 198 · Eq. 12.1',
           theory: '\\dot x_I = r - C_r x,\\quad A_1 = \\begin{bmatrix}A & 0\\\\ -C_r & 0\\end{bmatrix},\\quad B_1 = \\begin{bmatrix}B\\\\ 0\\end{bmatrix}',
           numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}` },
-        ctrbCard(ctx, A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'),
+        ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 198'),
         polesCard(ctx, d),
         { title: 'Gains', page: 'p. 199–201',
           theory: 'K_1 = \\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I\\int_0^t (r - y)\\,d\\tau',
@@ -563,5 +556,5 @@ WB.chapters = WB.chapters || {};
     },
   });
 
-  WB.ss = { makeSS, design };
+  WB.ss = { makeSS, design, ctrbCard };
 })();

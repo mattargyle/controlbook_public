@@ -14,7 +14,7 @@ js/studies/X/ISSUES.md     book/repo inconsistencies found while building (same 
 tools/regress_X.py         (optional) numerical check against _X_*/python, modeled on tools/regress_A.py
 ```
 
-Do not edit shared files: `js/core/*`, `js/app.js`, `js/chapters/*`, `js/systems/arm.js`, `index.html`, `css/*`. If the framework is missing something, solve it locally inside your study files, and list the gap in your final report.
+Do not edit shared files: `js/core/*`, `js/app.js`, `js/chapters/*`, `js/systems/arm.js`, `index.html`, `css/*`. If the framework is missing something, solve it locally inside your study files, and list the gap in your final report. Before writing a math helper, check the building blocks below: most of what studies B–F once wrote for themselves (root locus, bandwidth, PID/lead/lag transfer functions, determinants, scipy's YT placement) is now shared.
 
 Scripts are classic scripts on the global `WB` namespace, with no ES modules, so the page works from `file://`. Wrap each file in an IIFE.
 
@@ -103,13 +103,15 @@ The result object has a scalar channel 0 (`y, r, u, uDemand, uApplied, yMeas`), 
 
 ## Building blocks (`WB.design`, `WB.la`, `WB.tf`, `WB.math`)
 
-- `WB.design.wnFromTr(tr, zeta, '2.2'|'tp')`, `polesFromWnZeta`, `pdGains({b0, a1, a0}, poles)`.
+- `WB.design.wnFromTr(tr, zeta, '2.2'|'tp')` and its inverse `trFromWn`, `polesFromWnZeta`, `pdGains({b0, a1, a0}, poles)`, `dirtyCoeffs(sigma, Ts) -> {beta, gamma}` (Eq. 10.4).
 - `WB.design.pidBlock({kP, kI, kD, sigma, Ts, limit, antiwindup, vbar, deriv})`. It follows the repo conventions (error_prev = 0, y_prev = first sample, trapezoid, dirty derivative). `update(r, y, {ydot?})`.
 - `WB.design.place(A, B, poles)` returns K as a flat row. Also `refGain`, `augmentIntegrator(A, B, Cr)`, `augmentDisturbance(A, B, C)`, `observerGain(A, C, poles)`.
 - `WB.design.observer({A, B, C, L, Ts, x0, rhs?})` is an RK4 observer (`update(y, u)`).
 - `WB.design.linearPlant(A, B, C, {xe, ue, ye})`.
-- `WB.la`: matrices, `roots`, `eig`, `ctrb`, `obsv`, `rank`, `polyFromRoots`, `charPoly`.
-- `WB.tf`: `tf`, `mul`, `feedback`, `bode`, `margins` (all phase crossings), `filter` (state-space RK4 with substeps), `texTf`, `polyTex`.
+- `WB.yt.place(A, B, poles)` / `WB.yt.observer(A, C, poles)`: the port of scipy's `place_poles` (YT) that `control.place` uses. Use it where a multi-input or multi-output gain must match a `ctrl*.py` (the gain is not unique); otherwise `WB.design.place` is enough.
+- `WB.la`: matrices, `roots`, `eig`, `ctrb`, `obsv`, `rank`, `det`, `polyFromRoots`, `charPoly`.
+- `WB.tf`: `tf`, `mul`, `feedback`, `bode`, `mag`, `db`, `margins` (all phase crossings in `crossings`, all gain crossovers in `gcs`), `crossDown`, `bandwidth`, `rootLocus`, `pid` (dirty-derivative PID/PD), `lead`, `lag`, `lpf`, `pi`, `filter` (state-space RK4 with substeps), `repoFilter` (the repo's `transferFunction` class), `texTf`, `polyTex`.
+- Chapter kits from study A: `WB.pid.shapedReference(ctx, base, scale, y0)` (Ch 9 ramp/parabola references), `WB.ss.ctrbCard(A, B, title, page, opts)`, `WB.freq.gmText(mg)` and `WB.freq.marginMarks(mg, opts)` (Bode margin annotations).
 - `WB.math`: `rk4Step`, `stepMetrics`, `fmt`, `tex`, `texMat`, `texPole`, `parseComplex`, `close`, `polesMatch`.
 - A's modules can be reused where they genuinely fit (`WB.pd`, `WB.pid`, `WB.ss`, `WB.models`), but they assume a single loop with x = (y, ẏ).
 

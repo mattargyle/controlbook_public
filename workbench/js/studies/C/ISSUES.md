@@ -53,7 +53,7 @@ Smaller notation issues:
 | Topic | Book | Repo (`_C_satellite/python`) |
 | --- | --- | --- |
 | C.11–C.13 numbers | Printed for k = 0.15 and other poles | t_rθ = 2 s, M = 3, ζ = 0.9, π/(2t_r√(1−ζ²)), p_I = −2: K = [24.73, 33.82, 21.32, 183.39], k_r = 58.56; K₁ = [42.64, 425.34, 31.32, 680.04, −117.11] |
-| C.13/C.14 observer gains | Not printed | L = place(Aᵀ, Cᵀ, q)ᵀ with two outputs is not unique. The repo's values are what scipy's YT algorithm converges to: Lᵀ = [[21.62, 5.30, 107.95, 1.31], [−5.21, 21.56, 0.69, 106.87]]. The workbench ports that algorithm (`system.js`, `placePoles`) and reproduces L and L₂ to 4×10⁻¹⁰. |
+| C.13/C.14 observer gains | Not printed | L = place(Aᵀ, Cᵀ, q)ᵀ with two outputs is not unique. The repo's values are what scipy's YT algorithm converges to: Lᵀ = [[21.62, 5.30, 107.95, 1.31], [−5.21, 21.56, 0.69, 106.87]]. The workbench ports that algorithm (`core/place_yt.js`, shared with study B) and reproduces L and L₂ to 6×10⁻¹⁰. |
 | C.16/C.17 gains | C.8 loops (see above) | `hw16.py` and `hw17.py` import ctrlPID, so they use the C.10 gains and print different numbers from the book |
 | C.18 simulation | Not specified | `hw18_satelliteSim.py` uses `method="digital_filter"` (Tustin); `"state_space"` crashes (see below) |
 | C.18 inner loop | Rate feedback + 45·8/(s + 8) | Lead only, no rate feedback (`ctrlLoopshape` computes θ̇ but never uses it) |
