@@ -16,6 +16,18 @@
   const DEG = Math.PI / 180;
 
   const KEYS = ['K1', 'K2', 'K3', 'K4'];
+  // Python answers: module-level matrices, checked at random parameter sets.
+  const pyVars = (ctx, names, truth) => (code) => WB.py.check(ctx, { items: names.map((k) => ({ var: k, truth: (p) => truth(p)[k] })) }, code);
+  // Every pole in `given` matches a distinct pole in `truth` (1%).
+  function polesMatchAll(given, truth) {
+    const left = truth.slice();
+    for (const g of given) {
+      const i = left.findIndex((q) => M.close(g.re, q.re, 0.01, 1e-3) && M.close(g.im, q.im, 0.01, 1e-3));
+      if (i < 0) return false;
+      left.splice(i, 1);
+    }
+    return left.length === 0;
+  }
   const tuning = (st) => ({ trTh: st.trTh, zetaTh: st.zetaTh, M: st.M, zetaZ: st.zetaZ, rule: st.rule, pI: st.pI, obsFactor: st.obsFactor, obsRule: st.obsRule, pD: st.pD });
 
   // Gains: designed from the knobs (explore), or K/k_r/k_I from the sliders with
@@ -64,7 +76,8 @@
 
   function markers(ctx, level, prob) {
     const { A } = ctx.ss, g = ctx.gains, explore = ctx.S.mode === 'explore';
-    const mk = L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}` }));
+    // Work mode: the open-loop poles (eig A) answer B.6 until it is solved.
+    const mk = explore || ctx.app.isSolved('B.6/a') ? L.eig(A).map((p, i) => ({ ...p, kind: 'ol', label: `open-loop pole ${i + 1}` })) : [];
     const names = { 0: 'θ-pair pole', 1: 'z-pair pole', 2: 'integrator pole' };
     if (explore) {
       tagged({ poles: g.poles }, 0).forEach((p) => mk.push({ ...p, kind: 'cl', label: `controller ${names[p.dragId]}` }));
@@ -152,17 +165,17 @@
   function ssCard(ctx) {
     const { A, B: Bm } = ctx.ss;
     return {
-      title: 'Linearized state-space model', page: 'p. 90 · Eq. 6.17, p. 189 · Eq. 11.39',
+      title: 'Linearized state-space model (B.6)', page: 'p. 90 · Eq. 6.17, p. 189 · Eq. 11.39', answers: 'B.6/a',
       theory: '\\dot x = Ax + BF,\\quad y = \\begin{pmatrix}1&0&0&0\\\\0&1&0&0\\end{pmatrix}x,\\quad x = (z, \\theta, \\dot z, \\dot\\theta)^\\top,\\quad y_r = (1, 0, 0, 0)\\,x',
-      numbers: `A = ${texMat(A)},\\quad B = ${texMat(Bm)}`, spoiler: true,
+      numbers: `A = ${texMat(A)},\\quad B = ${texMat(Bm)}`,
       note: 'Eq. 11.39 and 12.2 print row 4 for a different ℓ (ISSUES.md). The numbers here use the current ℓ.',
     };
   }
   const ctrbCard = (A, Bm, title, page) => WB.ss.ctrbCard(A, Bm, title, page, { det: true });
-  function polesCard(ctx, d, level) {
+  function polesCard(ctx, d, level, answers) {
     const st = ctx.st;
     return {
-      title: 'Desired closed-loop poles', page: 'p. 189 · B.11(a), p. 207–208',
+      title: 'Desired closed-loop poles', page: 'p. 189 · B.11(a), p. 207–208', answers,
       theory: (st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}') + ',\\quad t_{r,z} = M\\,t_{r,\\theta},\\quad \\Delta^d_{cl} = (s^2 + 2\\zeta_\\theta\\omega_{n\\theta}s + \\omega_{n\\theta}^2)(s^2 + 2\\zeta_z\\omega_{nz}s + \\omega_{nz}^2)' + (level === 'sf' ? '' : '(s - p_I)'),
       numbers: `\\omega_{n\\theta} = ${tex(d.wnTh)},\\; \\omega_{nz} = ${tex(d.wnZ)},\\quad \\Delta^d_{cl} = ${WB.tf.polyTex(L.polyFromRoots(d.poles))}`, spoiler: true,
     };
@@ -253,10 +266,10 @@
         { title: 'Open-loop characteristic polynomial', page: 'p. 190 · Step 2',
           theory: '\\Delta_{ol}(s) = \\det(sI - A),\\quad \\mathbf a_A = (a_{n-1}, \\dots, a_0)',
           numbers: `\\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(A))}`, spoiler: true },
-        polesCard(ctx, d, 'sf'),
+        polesCard(ctx, d, 'sf', ctx.S.mode === 'work' ? 'B.11/a' : undefined),
         { title: 'Gains (Ackermann / place)', page: 'p. 190 · Step 4, Eq. 11.32',
           theory: 'K = (\\boldsymbol\\alpha - \\mathbf a_A)\\,\\mathcal{A}_A^{-1}\\mathcal{C}_{A,B}^{-1},\\quad k_r = \\frac{-1}{C_r(A - BK)^{-1}B}',
-          numbers: `K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}`, spoiler: true },
+          numbers: `K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}`, spoiler: true, answers: 'B.11/d' },
         { title: 'Control law', page: 'p. 191 · Listing 11.2',
           theory: 'F = -Kx + k_r z_r',
           numbers: `F = -(${g.K.map((k, i) => `${tex(k)}\\,${['z', '\\theta', '\\dot z', '\\dot\\theta'][i]}`).join(' + ')}) + ${tex(g.kr)}\\,z_r` },
@@ -267,10 +280,19 @@
       const ref = () => lib().ssDesign(ctx.ss, 'sf', { ...pr.book });
       PD().problemPanel(parent, ctx, pr, [
         {
-          id: 'a', title: '(a) Natural frequencies with B.8\'s ζ = 0.707, t<sub>r,θ</sub> = 0.5 s and t<sub>z</sub> = 3t<sub>θ</sub>',
-          inputs: { wt: 'ω<sub>nθ</sub>', wz: 'ω<sub>nz</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { wt: r.wnTh, wz: r.wnZ }, { wt: 'ωnθ', wz: 'ωnz' }); },
+          id: 'a', title: '(a) Desired closed-loop poles',
+          html: 'Use ζ<sub>z</sub>, ω<sub>n<sub>θ</sub></sub> and ζ<sub>θ</sub> from B.8 (t<sub>r<sub>θ</sub></sub> = 0.5 s, ζ = 0.707, ω<sub>n</sub> = 2.2/t<sub>r</sub>) and an ω<sub>n<sub>z</sub></sub> that gives t<sub>z</sub> = 3t<sub>θ</sub>. Complex values are fine: <code>-1+2j</code>.',
+          inputs: { p1: 'p<sub>1</sub>', p2: 'p<sub>2</sub>', p3: 'p<sub>3</sub>', p4: 'p<sub>4</sub>' },
+          check: (v) => {
+            const g = ['p1', 'p2', 'p3', 'p4'].map((k) => M.parseComplex(v[k]));
+            if (g.some((x) => !x)) return { ok: false, msg: 'Enter all four poles.' };
+            return polesMatchAll(g, ref().poles) ? { ok: true, msg: '' } : { ok: false, msg: 'Roots of (s² + 2ζ_θω_nθ s + ω_nθ²)(s² + 2ζ_zω_nz s + ω_nz²)?' };
+          },
           solution: () => { const r = ref(); return [{ tex: `\\omega_{n\\theta} = 2.2/0.5 = ${tex(r.wnTh)},\\; \\omega_{nz} = 2.2/1.5 = ${tex(r.wnZ)},\\quad p = ${r.poles.map((x) => texPole(x)).join(',\\;')}` }, { html: 'These give the book\'s Δ<sup>d</sup> = s⁴ + 8.2955s³ + 34.414s² + 53.533s + 41.646 (p. 190). The listing instead uses ζ = 0.9, t<sub>z</sub> = 5t<sub>θ</sub> and the π/(2t<sub>r</sub>√(1−ζ²)) rule.' }]; },
+        },
+        {
+          id: 'b', title: '(b) Add A, B, C, D from B.6 to the parameter file',
+          html: 'Use your A, B, C, D from B.6 (the Ch 6 tab) in your <code>pendulumParam.py</code>. The model card in the live math unlocks once B.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability',
@@ -335,14 +357,16 @@
       const { A1, B1 } = lib().augI(ctx.ss);
       return [
         ssCard(ctx),
-        { title: 'Augmented system', page: 'p. 207 · Step 1',
-          theory: '\\dot x_I = z_r - C_r x,\\quad A_1 = \\begin{pmatrix}A & 0\\\\ -C_r & 0\\end{pmatrix},\\quad B_1 = \\begin{pmatrix}B\\\\ 0\\end{pmatrix},\\quad C_r = (1, 0, 0, 0)',
-          numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}`, spoiler: true },
+        { title: 'Integral augmentation', page: 'p. 198 · Eq. 12.1',
+          theory: '\\dot x_I = r - C_r x,\\quad A_1 = \\begin{pmatrix}A & 0\\\\ -C_r & 0\\end{pmatrix},\\quad B_1 = \\begin{pmatrix}B\\\\ 0\\end{pmatrix}' },
+        { title: 'Augmented pendulum model', page: 'p. 207 · Step 1', answers: 'B.12/a1',
+          theory: 'C_r = (1, 0, 0, 0)',
+          numbers: `A_1 = ${texMat(A1)},\\quad B_1 = ${texMat(B1)}` },
         ctrbCard(A1, B1, 'Controllability of (A₁, B₁)', 'p. 207 · Step 2'),
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 208 · Step 3',
           theory: 'K_1 = (K, k_I) = (\\boldsymbol\\alpha - \\mathbf a_{A_1})\\mathcal{A}_{A_1}^{-1}\\mathcal{C}_{A_1,B_1}^{-1},\\quad F = -Kx - k_I x_I',
-          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true },
+          numbers: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}`, spoiler: true, answers: 'B.12/a2' },
       ];
     },
     buildProblem(parent, ctx) {
@@ -350,14 +374,38 @@
       const ref = () => lib().ssDesign(ctx.ss, 'sfi', { ...pr.book });
       PD().problemPanel(parent, ctx, pr, [
         {
-          id: 'a', title: '(a) K and k<sub>I</sub> for the B.11 poles with p<sub>I</sub> = −2',
+          id: 'a1', title: '(a) Integrator on the position: augmented system',
+          html: 'Module-level numpy arrays A1, B1 of the system augmented with x<sub>I</sub> = ∫(z<sub>r</sub> − z) (state (x, x<sub>I</sub>)). Write A and B from B.6 first.',
+          code: {
+            template: '# x1 = (z, theta, zdot, thetadot, xI)\nA1 = ...\nB1 = ...\n',
+            check: pyVars(ctx, ['A1', 'B1'], (p) => lib().augI(ctx.sys.stateSpace(p))),
+          },
+          solution: () => [
+            { tex: 'A_1 = \\begin{pmatrix}A & 0\\\\ -C_r & 0\\end{pmatrix},\\quad B_1 = \\begin{pmatrix}B\\\\ 0\\end{pmatrix},\\quad C_r = (1, 0, 0, 0)' },
+            { code: 'd = 0.25 * P.m1 + P.m2\nA = np.array([\n    [0, 0, 1, 0],\n    [0, 0, 0, 1],\n    [0, -0.75 * P.m1 * P.g / d,\n     -P.b / d, 0],\n    [0, 1.5 * (P.m1 + P.m2) * P.g / (d * P.ell),\n     1.5 * P.b / (d * P.ell), 0]])\nB = np.array([[0], [0], [1 / d],\n              [-1.5 / (d * P.ell)]])\nCr = np.array([[1, 0, 0, 0]])\nA1 = np.block([[A, np.zeros((4, 1))],\n               [-Cr, np.zeros((1, 1))]])\nB1 = np.vstack([B, [[0]]])' },
+            { html: 'Book: Step 1 (p. 207).' },
+          ],
+        },
+        {
+          id: 'a2', title: '(a) K and k<sub>I</sub> for the B.11 poles with p<sub>I</sub> = −2',
+          html: 'Anti-windup: the controls on the right hold the integrator while F saturates (the listing has none).',
           inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', ki: 'k<sub>I</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], ki: r.ki }, { ki: 'kI' }); },
           actions: [WB.design.useGains(ctx, [...KEYS, 'ki'])],
           solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` }, { html: 'The book prints K = (−5.3744, −32.1057, −4.5745, −5.1545), k<sub>I</sub> = 3.0101 (p. 208): the ℓ = 0.5 m gains. Its Step 2 text names p<sub>I</sub> = −10 and different B.11 poles, but the polynomial it then uses has (s + 2) and the B.8 poles.' }]; },
         },
         {
-          id: 'c', title: '(b, c) Tracking with d = 0.5 N and 20% uncertainty',
+          id: 'b', title: '(b) Constant input disturbance of 0.5 N, parameters vary by up to 20%',
+          html: 'Set in the left panel (the chapter defaults: d = 0.5 N from t = 0, a fixed 20% draw of the true plant).',
+          check: () => {
+            const mis = Object.values(ctx.S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            const d = ctx.S.sim.dist;
+            if (Math.abs(d - 0.5) > 1e-9) return { ok: false, msg: `Set the disturbance to 0.5 N (now ${fmt(d, 3)} N).` };
+            return mis ? { ok: true, msg: 'd = 0.5 N and the true plant differs from the model.' } : { ok: false, msg: 'The true plant equals the model. Randomize it (α = 0.2).' };
+          },
+        },
+        {
+          id: 'c', title: '(c) Tune the integrator pole for good tracking',
           html: 'Passes when |z − r| just before the second reference switch is under 1 cm, with the current disturbance and mismatch.',
           check: () => { const { e, t } = errBeforeSwitch(ctx); return { ok: e < 0.01, msg: `|z − r| = ${fmt(e * 100, 3)} cm at t = ${fmt(t, 4)} s (d = ${fmt(ctx.S.sim.dist, 3)} N).` }; },
           solution: () => [{ html: 'The integrator removes the error from the constant disturbance and the parameter mismatch. Faster p<sub>I</sub> removes it sooner but couples into the θ loop; −2 is a reasonable start.' }],
@@ -410,6 +458,16 @@
       const ref = () => lib().ssDesign(ctx.ss, 'obs', { ...pr.repo });
       PD().problemPanel(parent, ctx, pr, [
         {
+          id: 'a', title: '(a) Exact parameters, no input disturbance',
+          html: 'The chapter starts this way: no plant mismatch (α = 0) and d = 0 in the left panel.',
+          check: () => {
+            const mis = Object.values(ctx.S.mismatch || {}).some((v) => Math.abs(v) > 0);
+            if (mis) return { ok: false, msg: 'Clear the plant mismatch (α = 0).' };
+            if (Math.abs(ctx.S.sim.dist) > 0) return { ok: false, msg: 'Set the disturbance to 0.' };
+            return { ok: true, msg: 'The controller knows the true parameters, and d = 0.' };
+          },
+        },
+        {
           id: 'b', title: '(b) Observability',
           inputs: { rank: 'rank 𝒪<sub>A,C</sub>' },
           check: (v) => PD().checkNumbers(v, { rank: L.rank(L.obsv(ctx.ss.A, ctx.ss.C)) }, {}),
@@ -422,7 +480,11 @@
           solution: () => { const r = ref(); return [{ tex: `\\omega_{n\\theta,obs} = ${tex(r.wnThObs)},\\; \\omega_{nz,obs} = ${tex(r.wnZObs)},\\quad L^\\top = ${texMat(L.T(r.L))}` }, { html: 'L is the scipy/control.place result printed by ctrlObserver.py. Any L with these eigenvalues of A − LC is a valid answer.' }]; },
         },
         {
-          id: 'e', title: '(e) Add d = 0.05 N',
+          id: 'd', title: '(d) Plot the states and their estimates',
+          html: 'In your code, have the controller return u and x̂ and plot both. Here ẑ and θ̂ are dashed on the output plots, and the extra plot compares ż or θ̇ with its estimate.',
+        },
+        {
+          id: 'e', title: '(e) Add an input disturbance of 0.05 N',
           html: 'Set the disturbance to 0.05 N in the left panel. The integrator acts on r − ẑ, and ẑ is biased by the unmodeled d, so z settles away from r. Chapter 14 removes the bias.',
           check: () => {
             const res = ctx.app.result();
@@ -464,8 +526,10 @@
         { title: 'Why the plain observer is biased', page: 'p. 240 · Eq. 14.2–14.3',
           theory: '\\dot x = Ax + B(F + d),\\quad \\dot e = (A - LC)e + Bd \\Rightarrow e_{ss} \\ne 0 \\text{ for constant } d' },
         { title: 'Augmented model (ḋ = 0)', page: 'p. 240, Listing 14.4',
-          theory: 'A_2 = \\begin{pmatrix}A & B\\\\ 0 & 0\\end{pmatrix},\\quad C_2 = \\begin{pmatrix}C & 0\\end{pmatrix}',
-          numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}`, spoiler: true },
+          theory: 'A_2 = \\begin{pmatrix}A & B\\\\ 0 & 0\\end{pmatrix},\\quad B_2 = \\begin{pmatrix}B\\\\ 0\\end{pmatrix},\\quad C_2 = \\begin{pmatrix}C & 0\\end{pmatrix}' },
+        { title: 'Augmented pendulum model', page: 'p. 252 · Listing 14.4', answers: 'B.14/b1',
+          theory: '\\hat x_2 = (\\hat z, \\hat\\theta, \\hat{\\dot z}, \\hat{\\dot\\theta}, \\hat d)',
+          numbers: `A_2 = ${texMat(A2)},\\quad \\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` },
         { title: 'Disturbance observer', page: 'p. 241, p. 253',
           theory: '\\dot{\\hat x}_2 = A_2\\hat x_2 + B_1 F + L_2(y - C_2\\hat x_2),\\quad F = -K\\hat x - k_I x_I - \\hat d' },
         { title: 'Observer poles and gain', page: 'p. 252 · Listing 14.4',
@@ -480,8 +544,8 @@
       const ref = () => lib().ssDesign(ctx.ss, 'dobs', { ...pr.repo });
       PD().problemPanel(parent, ctx, pr, [
         {
-          id: 'a', title: '(a) Without the disturbance observer',
-          html: 'Switch the disturbance observer off. Reports the observer bias |z − ẑ| and the tracking error just before the second reference switch.',
+          id: 'a', title: '(a) α = 0.2, d = 0.5 N, noise σ = 0.001, without the disturbance observer',
+          html: 'The chapter starts with these in the left panel. Switch the disturbance observer off and note how the controller handles the large disturbance. Reports the observer bias |z − ẑ| and the tracking error just before the second reference switch.',
           check: () => {
             const res = ctx.app.result(), { e, t } = errBeforeSwitch(ctx);
             const i = Math.min(res.t.length - 1, Math.round(t / ctx.S.sim.Ts));
@@ -491,14 +555,27 @@
           },
         },
         {
-          id: 'b1', title: '(b) Observer poles for the repo tuning',
+          id: 'b1', title: '(b) Add a disturbance observer: augmented model',
+          html: 'Model the input disturbance as a constant state d (ḋ = 0) entering with F. Return module-level A2, B2, C2 for the state (x, d). Write A, B, C from B.6 first.',
+          code: {
+            template: '# x2 = (z, theta, zdot, thetadot, d)\nA2 = ...\nB2 = ...\nC2 = ...\n',
+            check: pyVars(ctx, ['A2', 'B2', 'C2'], (p) => lib().augD(ctx.sys.stateSpace(p))),
+          },
+          solution: () => [
+            { tex: 'A_2 = \\begin{pmatrix}A & B\\\\ 0 & 0\\end{pmatrix},\\quad B_2 = \\begin{pmatrix}B\\\\ 0\\end{pmatrix},\\quad C_2 = \\begin{pmatrix}C & 0\\end{pmatrix}' },
+            { code: 'd = 0.25 * P.m1 + P.m2\nA = np.array([\n    [0, 0, 1, 0],\n    [0, 0, 0, 1],\n    [0, -0.75 * P.m1 * P.g / d,\n     -P.b / d, 0],\n    [0, 1.5 * (P.m1 + P.m2) * P.g / (d * P.ell),\n     1.5 * P.b / (d * P.ell), 0]])\nB = np.array([[0], [0], [1 / d],\n              [-1.5 / (d * P.ell)]])\nC = np.array([[1, 0, 0, 0],\n              [0, 1, 0, 0]])\nA2 = np.block([[A, B],\n               [np.zeros((1, 5))]])\nB2 = np.vstack([B, [[0]]])\nC2 = np.hstack([C, np.zeros((2, 1))])' },
+            { html: 'Book: p. 240 and Listing 14.4 (p. 252).' },
+          ],
+        },
+        {
+          id: 'b2', title: '(b) Observer poles for the repo tuning',
           html: 'ω<sub>n</sub> of each observer pair (2.2/(t<sub>r</sub>/10), ζ = 0.9) and the disturbance pole.',
           inputs: { wt: 'ω<sub>nθ,obs</sub>', wz: 'ω<sub>nz,obs</sub>', pd: 'p<sub>d</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { wt: r.wnThObs, wz: r.wnZObs, pd: pr.repo.pD }, { wt: 'ωnθ,obs', wz: 'ωnz,obs', pd: 'pd' }); },
           solution: () => { const r = ref(); return [{ tex: `\\omega_{n\\theta,obs} = ${tex(r.wnThObs)},\\; \\omega_{nz,obs} = ${tex(r.wnZObs)},\\; p_d = ${pr.repo.pD},\\quad L_2^\\top = ${texMat(L.T(r.L2))}` }]; },
         },
         {
-          id: 'b2', title: '(b) Estimator bias removed',
+          id: 'b3', title: '(b) Steady-state error in the estimator removed',
           html: 'Passes when |z − ẑ| at t<sub>end</sub> is under 2 mm with the disturbance observer on. Compare with it off.',
           check: () => {
             const res = ctx.app.result(), n = res.t.length - 1;
