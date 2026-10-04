@@ -50,25 +50,59 @@ WB.myCtrl = (function () {
     };
   }
 
-  // A fixed run for a check. o: { params (default nominal), mismatch: {key: %},
-  // ref: {type, amplitude (display units), frequency, tStep}, y0 (display units),
-  // dist: value (SI, from tDist), tDist, noise: σ (SI), seed, tEnd, Ts, feed, extraP }.
+  // Channel view of a system (scalar form, as the arm, or the multi-channel form of B-F).
+  function chan(sys) {
+    const outputs = sys.outputs || [{ key: 'y', ...sys.output }];
+    return {
+      outputs,
+      nIn: sys.inputs ? sys.inputs.length : 1,
+      refs: sys.refs || [{ output: 0, scale: outputs[0].scale || 1 }],
+      initial: sys.initial || null,
+      dists: sys.disturbances || [{ input: 0 }],
+    };
+  }
+  // Initial state from display-unit initial values (keys of sys.initial; scalar form: y0).
+  function initialState(sys, p, init = {}, y0 = 0) {
+    const v = chan(sys);
+    if (!v.initial) return sys.x0(y0 / (v.outputs[0].scale || 1));
+    return sys.x0(Object.fromEntries(v.initial.map((q) => [q.key, (init[q.key] ?? q.value ?? 0) / (q.scale || 1)])), p);
+  }
+
+  // A fixed run for a check (independent of the left panel). o: { params (default
+  // nominal), mismatch: {key: %}, ref (channel 0) / refs: [per reference channel]
+  // ({type, amplitude in display units, frequency, tStep}), y0 (scalar form) /
+  // init: {key: display value}, dist (input-disturbance channel 0, SI) / dists: [...],
+  // tDist, noise: σ (SI, output 0) / noises: [...], seed, tEnd, Ts, feed, extraP }.
   function scenario(ctx, o = {}) {
-    const sys = ctx.sys, imp = implementOf(ctx);
+    const sys = ctx.sys, imp = implementOf(ctx), v = chan(sys);
     const params = { ...(o.params || ctx.pModel) };
     const plantParams = { ...params };
-    for (const [k, v] of Object.entries(o.mismatch || {})) plantParams[k] = params[k] * (1 + v / 100);
-    const out = sys.output || {};
-    const scale = out.scale || 1;
-    const ref = { type: 'step', amplitude: 30, frequency: 0.05, tStep: 0, ...(o.ref || {}) };
-    const y0 = (o.y0 || 0) / scale;
-    const g = WB.sim.makeReference({ ...ref, amplitude: ref.amplitude / scale });
-    const tDist = o.tDist ?? 0, dv = o.dist || 0;
+    for (const [k, val] of Object.entries(o.mismatch || {})) plantParams[k] = params[k] * (1 + val / 100);
+    const x0 = initialState(sys, params, o.init, o.y0);
+    // each reference starts from its output's initial value, as app.js does
+    const y0s = sys.h(x0, plantParams);
+    const gens = v.refs.map((rf, i) => {
+      const c = { type: 'step', amplitude: i === 0 ? 30 : 0, frequency: 0.05, tStep: 0, ...((o.refs || [])[i] || {}), ...(i === 0 ? o.ref || {} : {}) };
+      const sc = rf.scale || 1;
+      const g = WB.sim.makeReference({ type: c.type, amplitude: c.amplitude / sc, offset: rf.offset || 0, frequency: c.frequency, tStep: c.tStep });
+      const pre = asArr(y0s)[rf.output];
+      return (t) => (t < c.tStep ? pre : g(t));
+    });
+    const dv = o.dists || [o.dist || 0];
+    const tDist = o.tDist ?? 0;
+    const disturbance = (t) => {
+      if (v.nIn === 1) return t >= tDist ? dv[0] || 0 : 0;
+      const arr = new Array(v.nIn).fill(0);
+      if (t >= tDist) v.dists.forEach((dd, i) => { arr[dd.input] += dv[i] || 0; });
+      return arr;
+    };
+    const sig = o.noises || [o.noise || 0];
+    const gn = v.outputs.map((_, i) => WB.sim.makeNoise(sig[i] || 0, (o.seed ?? 1) + 1000 * i));
+    const noise = !gn.some(Boolean) ? null : v.outputs.length === 1 ? gn[0] : (k) => gn.map((g) => (g ? g(k) : 0));
     return {
-      params, plantParams, x0: sys.x0(y0), Ts: o.Ts ?? 0.01, tEnd: o.tEnd ?? 10,
-      reference: (t) => (t < ref.tStep ? y0 : g(t)),
-      disturbance: (t) => (t >= tDist ? dv : 0),
-      noise: WB.sim.makeNoise(o.noise || 0, o.seed ?? 1),
+      params, plantParams, x0, Ts: o.Ts ?? 0.01, tEnd: o.tEnd ?? 10,
+      reference: gens.length === 1 ? gens[0] : (t) => gens.map((g) => g(t)),
+      disturbance, noise,
       feed: o.feed || imp.feed || 'y',
       extraP: { ...(imp.params ? imp.params(ctx) : {}), ...(o.extraP || {}) },
     };
@@ -134,7 +168,7 @@ WB.myCtrl = (function () {
 
   // Probe a fresh controller open loop: calls = [[r, y], ...] (y an array). Resolves
   // to {u: [[...], ...]} or {ok: false, ...}.
-  async function probe(ctx, code, calls, { params = ctx.pModel, Ts = ctx.S.sim.Ts, x0 = ctx.sys.x0(0), extraP = {} } = {}) {
+  async function probe(ctx, code, calls, { params = ctx.pModel, Ts = ctx.S.sim.Ts, x0 = initialState(ctx.sys, ctx.pModel), extraP = {} } = {}) {
     const imp = implementOf(ctx);
     const P = { ...params, Ts, ...(ctx.sys.pyParams ? ctx.sys.pyParams(x0) : {}), ...(imp.params ? imp.params(ctx) : {}), ...extraP };
     const out = await WB.py.probe(code, { params: P, calls, Ts, m: ranges(ctx.sys, params).length });
@@ -195,8 +229,8 @@ WB.myCtrl = (function () {
   // Run the student's code on each case and compare the output with a reference
   // run. cases: [{ sc, ref: () -> WB.sim result, label }], the first with the
   // nominal parameters; tol in SI. Resolves to {ok, msg, detail?}.
-  async function matchCheck(ctx, code, cases, { tol, t0 = 0, what = 'the design' }) {
-    const out = ctx.sys.output || ctx.sys.outputs[0];
+  async function matchCheck(ctx, code, cases, { tol, t0 = 0, what = 'the design', output = chan(ctx.sys).refs[0].output }) {
+    const out = chan(ctx.sys).outputs[output];
     const k = out.scale || 1, unit = out.unit === '°' ? '°' : ` ${out.unit}`;
     const f = (v) => `${M.fmt(v * k, 3)}${unit}`;
     let worst = 0;
@@ -205,7 +239,7 @@ WB.myCtrl = (function () {
       const mine = await run(ctx, code, c.sc);
       if (mine.ok === false) return mine;
       const ref = c.ref();
-      const d = maxDiff(mine, ref, { t0 });
+      const d = maxDiff(mine, ref, { t0, output });
       const detail = (mine.stdout || '').trim() ? `print output:\n${mine.stdout.trim()}` : '';
       if (!(d.e <= tol)) {
         if (i > 0) {
@@ -213,7 +247,7 @@ WB.myCtrl = (function () {
           return { ok: false, msg: `Matches ${what} with the nominal parameters but not with ${c.label} (off by ${f(d.e)}). Compute the gains from ${keys} rather than numbers.`, detail };
         }
         const n = mine.t.length - 1;
-        const off = mine.r[n] - mine.y[n], refOff = ref.r[n] - ref.y[n];
+        const off = mine.r[n] - mine.yAll[output][n], refOff = ref.r[n] - ref.yAll[output][n];
         let msg = `Your ${out.label} differs from ${what} by ${f(d.e)} at t = ${M.fmt(d.t, 3)} s.`;
         if (Math.abs(off - refOff) > tol) msg += ` At the end it is ${f(off)} from the reference (${what}: ${f(refOff)}).`;
         return { ok: false, msg, detail };
@@ -318,7 +352,8 @@ WB.myCtrl = (function () {
     const what = feed === 'state'
       ? `x = np.array([[${py.x.join('], [')}]]): the state`
       : `y = np.array([[${py.y.join('], [')}]]): the measured output${py.y.length > 1 ? 's' : ''}`;
-    return `class Controller:\n    def __init__(self):\n        pass\n\n    def update(self, ${py.r}, ${arg}):\n        # ${what}\n        ${py.u} = 0.0\n        return ${py.u}\n`;
+    const rDoc = py.rDoc ? `        # ${py.rDoc}\n` : '';
+    return `class Controller:\n    def __init__(self):\n        pass\n\n    def update(self, ${py.r}, ${arg}):\n${rDoc}        # ${what}\n        ${py.u} = ${py.uZero || '0.0'}\n        return ${py.u}\n`;
   }
 
   // A Python part whose answer is a controller. spec: { id, title, html, seed:
@@ -346,12 +381,12 @@ WB.myCtrl = (function () {
   // Python help text for the implementation parts.
   function helpHtml(ctx) {
     const sys = ctx.sys;
-    const extra = sys.pyParams ? Object.keys(sys.pyParams(sys.x0(0))) : [];
+    const extra = sys.pyParams ? Object.keys(sys.pyParams(initialState(sys, ctx.pModel))) : [];
     return `Controller parts: write <code>class Controller</code> with <code>__init__(self)</code> and <code>update(self, ${sys.py.r}, y)</code>, as in the book's controller classes. `
       + `<code>P</code> also holds <code>P.Ts</code>${extra.map((k) => `, <code>P.${k}</code>`).join('')}. `
-      + '<code>import control as cnt</code> gives <code>cnt.place</code> (one input), <code>cnt.ctrb</code> and <code>cnt.obsv</code>. '
+      + '<code>import control as cnt</code> gives <code>cnt.place</code>, <code>cnt.ctrb</code> and <code>cnt.obsv</code>. '
       + 'Return the input, or a tuple (u, x̂) or (u, x̂, d̂) to have your estimates plotted.';
   }
 
-  return { scenario, run, probe, matchCheck, paramCases, reference, refCtx, maxDiff, mean, simulate, use, status, banner, part, savedCode, setActive, isActive, template, helpHtml, ranges };
+  return { chan, initialState, scenario, run, probe, matchCheck, paramCases, reference, refCtx, maxDiff, mean, simulate, use, status, banner, part, savedCode, setActive, isActive, template, helpHtml, ranges };
 })();

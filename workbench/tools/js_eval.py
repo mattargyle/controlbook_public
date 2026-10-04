@@ -10,6 +10,7 @@ app.js is skipped, so no page UI is built. Needs google-chrome.
 """
 import html
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -29,7 +30,7 @@ def js_eval(body, chrome="google-chrome", budget=20000):
 try {{ const r = (function () {{ {body} }})(); document.getElementById('out').textContent = JSON.stringify({{ ok: true, value: r, errors: window.__errs }}); }}
 catch (e) {{ document.getElementById('out').textContent = JSON.stringify({{ ok: false, error: e.message + ' ' + (e.stack || ''), errors: window.__errs }}); }}
 </script></body></html>"""
-    tmp = WB / ".smoke_eval.html"
+    tmp = WB / f".smoke_eval_{os.getpid()}.html"  # unique: runs may overlap
     tmp.write_text(page)
     try:
         res = subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--allow-file-access-from-files",

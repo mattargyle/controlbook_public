@@ -14,6 +14,7 @@ Exit status is 1 if any error was seen. Needs google-chrome (or --chrome PATH).
 import argparse
 import html
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -77,7 +78,7 @@ def main():
     base = f'<base href="{WB.as_uri()}/">'
     src = src.replace("<head>", "<head>" + base + ERR_HOOK, 1)
     src = src.replace("</body>", HARNESS_JS % {"study": json.dumps(args.study)} + "</body>", 1)
-    harness = WB / ".smoke_harness.html"
+    harness = WB / f".smoke_harness_{os.getpid()}.html"  # unique: runs may overlap
     harness.write_text(src)
     try:
         start = f"#{args.study}/ch2/work" if args.study else "#A/ch2/work"

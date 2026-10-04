@@ -293,7 +293,9 @@ def wb_probe(payload):
     return _run(_probe, payload)
 
 # A small stand-in for python-control (python-control itself needs scipy):
-# ctrb, obsv, and place for one input (Ackermann, Eq. 11.32). For an observer,
+# ctrb, obsv, and place (Ackermann, Eq. 11.32). With several inputs, place
+# returns K = v k for a combination v that keeps (A, B v) controllable: a valid
+# gain, though not the one python-control's place picks. For an observer,
 # place(A.T, C.T, poles).T as in the book.
 def _install_control():
     def _m(A):
@@ -313,18 +315,25 @@ def _install_control():
         n = A.shape[0]
         if B.shape[0] != n:
             B = B.T
-        if B.shape[1] != 1:
-            raise NotImplementedError('the workbench control.place handles one input (B with one column)')
         p = np.atleast_1d(np.asarray(p, dtype=complex))
         if p.size != n:
             raise ValueError(f'place needs {n} poles, got {p.size}')
-        Cab = ctrb(A, B)
-        if np.linalg.matrix_rank(Cab) < n:
+        def acker(b):
+            a = np.real(np.poly(p))
+            phi = sum(a[i] * np.linalg.matrix_power(A, n - i) for i in range(n + 1))
+            e = np.zeros((1, n)); e[0, -1] = 1.0
+            return e @ np.linalg.solve(ctrb(A, b), phi)
+        if np.linalg.matrix_rank(ctrb(A, B)) < n:
             raise ValueError('place: (A, B) is not controllable')
-        a = np.real(np.poly(p))
-        phi = sum(a[i] * np.linalg.matrix_power(A, n - i) for i in range(n + 1))
-        e = np.zeros((1, n)); e[0, -1] = 1.0
-        return e @ np.linalg.solve(Cab, phi)
+        if B.shape[1] == 1:
+            return acker(B)
+        rng = np.random.default_rng(0)
+        for trial in range(50):
+            v = np.ones((B.shape[1], 1)) if trial == 0 else rng.standard_normal((B.shape[1], 1))
+            Cv = ctrb(A, B @ v)
+            if np.linalg.matrix_rank(Cv) == n and np.linalg.cond(Cv) < 1e12:
+                return v @ acker(B @ v)
+        raise ValueError('place: no single combination of the inputs controls (A, B)')
     mod = types.ModuleType('control')
     mod.ctrb, mod.obsv, mod.place, mod.acker = ctrb, obsv, place, place
     sys.modules['control'] = mod
