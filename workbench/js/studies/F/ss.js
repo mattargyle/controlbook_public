@@ -592,7 +592,12 @@ class Controller:
   const TR11 = 12.5;
   // F.12(a) windup test: f_max lowered to just above hover, so a 10 m climb keeps a
   // rotor at its limit for seconds and an integrator that keeps integrating winds up.
-  const WINDUP = { fmax: 7.45, step: 10, os: 0.5, tEnd: 30 };
+  // The student picks the poles, so the allowed overshoot scales with the loop's own
+  // (unsaturated) overshoot on a 0.1 m step: 0.3 m + 10 m × that fraction. The
+  // reference design: 0.23 m with anti-windup, 1.38 m without (allowed 0.58 m).
+  const WINDUP = { fmax: 7.45, step: 10, small: 0.1, slack: 0.3, tEnd: 30 };
+  // F.12(a) integrator test: constant input disturbances that only integrators remove.
+  const DIST12 = { dF: 0.5, dtau: 0.02 };
   const misText = (ctx, mis) => Object.entries(mis).map(([k, v]) => `${ctx.sys.params.find((q) => q.key === k).label} ${v > 0 ? '+' : ''}${v}%`).join(', ');
   const fm = (v) => `${fmt(v, 3)} m`;
 
@@ -766,8 +771,9 @@ class Controller:
         polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 199–201',
           theory: '\\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad u = -Kx - k_I x_I' },
-        { title: 'Gains for the desired poles', page: 'F.12(a) p. 400', answers: 'F.12/a',
-          numbers: `K_h = ${texMat([d.Kh])},\\; k_{I,h} = ${tex(d.kIh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{I,z} = ${tex(d.kIz)}` },
+        // the reference design's tuning (not given by the book): Explore only
+        ...(ctx.S.mode === 'work' ? [] : [{ title: 'Gains for the desired poles', page: 'F.12(a) p. 400',
+          numbers: `K_h = ${texMat([d.Kh])},\\; k_{I,h} = ${tex(d.kIh)},\\quad K_z = ${texMat([d.Kz])},\\; k_{I,z} = ${tex(d.kIz)}` }]),
         { title: 'Wind as a lateral force', page: 'F.12(b) p. 400',
           theory: '\\ddot z = \\frac{-(f_r + f_\\ell)\\sin\\theta - \\mu\\dot z + F_{wind}}{m_c + 2m_r}', symbolic: '\\theta_{ss} = \\frac{F_{wind}}{F_e}', spoiler: true,
           note: 'The integrator on z finds the steady tilt that cancels the wind; without it z settles off target.' },
@@ -779,32 +785,48 @@ class Controller:
       const num = (v) => PD().num(v);
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: `(a) Gains with the F.8 pole pairs plus p<sub>I,h</sub> = ${prob.pIh}, p<sub>I,z</sub> = ${prob.pIz}`,
-          html: 'Use the F.11 reference poles (the F.8 pairs: altitude t<sub>r</sub> = 8 s; lateral t<sub>r,z</sub> = 8 s and t<sub>r,θ</sub> = 0.8 s; ζ = 0.707) plus the integrator poles. Book sign: u = −Kx − k<sub>I</sub>x<sub>I</sub> with x<sub>I</sub> = ∫(r − y).',
-          inputs: { Kh1: 'K<sub>h,1</sub>', Kh2: 'K<sub>h,2</sub>', kIh: 'k<sub>I,h</sub>', Kz1: 'K<sub>z,1</sub>', Kz2: 'K<sub>z,2</sub>', Kz3: 'K<sub>z,3</sub>', Kz4: 'K<sub>z,4</sub>', kIz: 'k<sub>I,z</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { Kh1: r.Kh[0], Kh2: r.Kh[1], kIh: r.kIh, Kz1: r.Kz[0], Kz2: r.Kz[1], Kz3: r.Kz[2], Kz4: r.Kz[3], kIz: r.kIz }, { kIh: 'kI,h', kIz: 'kI,z' }); },
-          solution: () => { const r = ref(); return [{ tex: `K_h = ${texMat([r.Kh])},\\; k_{I,h} = ${tex(r.kIh)},\\quad K_z = ${texMat([r.Kz])},\\; k_{I,z} = ${tex(r.kIz)}` }, { html: '[K k<sub>I</sub>] = place(A<sub>1</sub>, B<sub>1</sub>, p) for each loop, with the augmented A<sub>1</sub>, B<sub>1</sub> of Eq. 12.1 (p. 198).' }]; },
+          id: 'a', title: '(a) Integral augmentation: gains as functions of the closed-loop poles',
+          html: 'Add an integrator x<sub>I</sub> = ∫(r − y) to each loop (book sign: u = −Kx − k<sub>I</sub>x<sub>I</sub>, Eq. 12.1). Write the augmented gains as functions of the desired closed-loop poles: <code>gains_lon(p1, p2, p3)</code> returns [K<sub>h,1</sub>, K<sub>h,2</sub>, k<sub>I,h</sub>] for x<sub>lon</sub> = (h, ḣ); <code>gains_lat(p1, …, p5)</code> returns [K<sub>z,1</sub>, …, K<sub>z,4</sub>, k<sub>I,z</sub>] for x<sub>lat</sub> = (z, θ, ż, θ̇). The check calls them at random real poles. <code>import control as cnt</code> gives <code>cnt.place</code>.',
+          code: F.pyPart(ctx, {
+            args: Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`p${i}`, { label: `p${i}`, lo: -3, hi: -0.1 }])),
+            items: [
+              { fn: 'gains_lon', args: ['p1', 'p2', 'p3'], truth: (q, a) => { const S = sub(q), A = augI(S.lon.A, S.lon.B, S.lon.C); return D().place(A.A1, A.B1, [a.p1, a.p2, a.p3].map((re) => ({ re, im: 0 }))); } },
+              { fn: 'gains_lat', args: ['p1', 'p2', 'p3', 'p4', 'p5'], truth: (q, a) => { const S = sub(q), A = augI(S.lat.A, S.lat.B, S.Cz); return D().place(A.A1, A.B1, [a.p1, a.p2, a.p3, a.p4, a.p5].map((re) => ({ re, im: 0 }))); } },
+            ],
+          }, 'import control as cnt\n\ndef gains_lon(p1, p2, p3):\n    # [K_h1, K_h2, k_Ih]\n    return ...\n\ndef gains_lat(p1, p2, p3, p4, p5):\n    # [K_z1, K_z2, K_z3, K_z4, k_Iz]\n    return ...\n'),
+          solution: () => { const r = ref(); return [
+            { code: "import control as cnt\n\nM = P.mc + 2 * P.mr\nJ = P.Jc + 2 * P.mr * P.d**2\n\ndef augment(A, B, C):\n    # x_I = integral of (r - C x): A1 = [[A, 0], [-C, 0]], B1 = [[B], [0]] (Eq. 12.1)\n    n = A.shape[0]\n    return (np.block([[A, np.zeros((n, 1))], [-C, np.zeros((1, 1))]]),\n            np.vstack([B, [[0.0]]]))\n\ndef gains_lon(p1, p2, p3):\n    A = np.array([[0.0, 1.0], [0.0, 0.0]])\n    B = np.array([[0.0], [1 / M]])\n    A1, B1 = augment(A, B, np.array([[1.0, 0.0]]))\n    return cnt.place(A1, B1, [p1, p2, p3])[0]\n\ndef gains_lat(p1, p2, p3, p4, p5):\n    A = np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0],\n                  [0.0, -P.g, -P.mu / M, 0.0], [0.0, 0.0, 0.0, 0.0]])\n    B = np.array([[0.0], [0.0], [0.0], [1 / J]])\n    A1, B1 = augment(A, B, np.array([[1.0, 0.0, 0.0, 0.0]]))\n    return cnt.place(A1, B1, [p1, p2, p3, p4, p5])[0]\n" },
+            { html: `[K k<sub>I</sub>] = place(A<sub>1</sub>, B<sub>1</sub>, p) for each loop (p. 198–199). For example, the F.8 pole pairs plus integrator poles at ${prob.pIh} give:` },
+            { tex: `K_h = ${texMat([r.Kh])},\\; k_{I,h} = ${tex(r.kIh)},\\quad K_z = ${texMat([r.Kz])},\\; k_{I,z} = ${tex(r.kIz)}` },
+          ]; },
         },
         WB.myCtrl.part(ctx, {
           id: 'a2', title: '(a) Add integrators with anti-windup to your F.11 controller', seed: 'F.11/e',
-          html: `Use the gains from above. The check (1) runs 1 m steps in h<sub>r</sub> and z<sub>r</sub> for 20 s with the nominal and with other parameters and compares h(t) and z(t) with the design (within 3 cm), then (2) lowers f<sub>max</sub> to ${WINDUP.fmax} N (just above hover) and steps h<sub>r</sub> to ${WINDUP.step} m, so a rotor saturates for seconds: h may overshoot by at most ${WINDUP.os} m.`,
+          html: `Choose the integrator poles (and keep or retune the others). The check (1) adds constant input disturbances d<sub>F</sub> = ${DIST12.dF} N and d<sub>τ</sub> = ${DIST12.dtau} N·m to 1 m steps in h<sub>r</sub> and z<sub>r</sub> for 40 s, with the nominal and with other parameters: both errors at the end must be under 2 cm; then (2) lowers f<sub>max</sub> to ${WINDUP.fmax} N (just above hover) and steps h<sub>r</sub> to ${WINDUP.step} m, so a rotor saturates for seconds: h may overshoot by at most ${WINDUP.slack} m plus ${WINDUP.step}× your loop's own overshoot fraction on a ${WINDUP.small} m step.`,
           check: async (code) => {
-            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
-              const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(1), STEP(1)], tEnd: 20, feed: 'state' });
-              return { sc, label: pc.label, ref: () => refSS(ctx, sc, 'sfi') };
-            });
-            const m = await WB.myCtrl.matchCheck(ctx, code, cases, { tol: { 0: 0.03, 1: 0.03 } });
-            if (!m.ok) return m;
-            const sc = F.scenario(ctx, { params: { ...ctx.pModel, f_max: WINDUP.fmax }, refs: [STEP(WINDUP.step), STEP(0)], tEnd: WINDUP.tEnd, feed: 'state' });
-            const res = await WB.myCtrl.run(ctx, code, sc);
-            if (res.ok === false) return res;
-            const os = Math.max(...res.yAll[1]) - WINDUP.step;
-            if (!(os <= WINDUP.os)) return { ok: false, msg: `Tracking matches, but with f_max = ${WINDUP.fmax} N the ${WINDUP.step} m climb overshoots by ${fm(os)}: the integrators wind up while a rotor is saturated.` };
-            return { ok: true, msg: `${m.msg} Saturated ${WINDUP.step} m climb: overshoot ${fm(Math.max(0, os))}.` };
+            for (const pc of WB.myCtrl.paramCases(ctx)) {
+              const sc = F.scenario(ctx, { params: pc.params, refs: [STEP(1), STEP(1)], tEnd: 40, ext: DIST12, feed: 'state' });
+              const res = await WB.myCtrl.run(ctx, code, sc);
+              if (res.ok === false) return res;
+              const eh = Math.abs(F.endErr(res, 1)), ez = Math.abs(F.endErr(res, 0));
+              if (!(eh < 0.02 && ez < 0.02)) return { ok: false, msg: `With d_F = ${DIST12.dF} N, d_τ = ${DIST12.dtau} N·m and ${pc.label}: |h_r − h| = ${fm(eh)}, |z_r − z| = ${fm(ez)} at t = 40 s. Integrators remove constant input disturbances.` };
+            }
+            const climb = async (step) => {
+              const sc = F.scenario(ctx, { params: { ...ctx.pModel, f_max: WINDUP.fmax }, refs: [STEP(step), STEP(0)], tEnd: WINDUP.tEnd, feed: 'state' });
+              const res = await WB.myCtrl.run(ctx, code, sc);
+              return res.ok === false ? res : { os: Math.max(...res.yAll[1]) - step };
+            };
+            const lin = await climb(WINDUP.small);
+            if (lin.ok === false) return lin;
+            const sat = await climb(WINDUP.step);
+            if (sat.ok === false) return sat;
+            const allowed = WINDUP.slack + WINDUP.step * Math.max(0, lin.os / WINDUP.small);
+            if (!(sat.os <= allowed)) return { ok: false, msg: `The integrators remove the disturbances, but with f_max = ${WINDUP.fmax} N the ${WINDUP.step} m climb overshoots by ${fm(sat.os)} (allowed ${fm(allowed)} for your loop): the integrators wind up while a rotor is saturated.` };
+            return { ok: true, msg: `Disturbances removed (nominal and other parameters). Saturated ${WINDUP.step} m climb: overshoot ${fm(Math.max(0, sat.os))} (allowed ${fm(allowed)}).` };
           },
           solution: () => [
             { code: SOL.f12 },
-            { html: `Anti-windup here holds both integrators while a rotor saturates (f<sub>max</sub> = ${WINDUP.fmax} N: about 0.23 m overshoot, versus 1.4 m without anti-windup). Integrating only while the loop is nearly settled, or unwinding by the saturation error (back-calculation), pass too.` },
+            { html: `One choice: the F.8 pole pairs plus integrator poles at ${prob.pIh}. Anti-windup holds both integrators while a rotor saturates (f<sub>max</sub> = ${WINDUP.fmax} N: 0.23 m overshoot, versus 1.38 m without). Integrating only while the loop is nearly settled, or unwinding by the saturation error (back-calculation), pass too.` },
           ],
         }),
         {
@@ -847,10 +869,10 @@ class Controller:
       ...(ctx.S.mode === 'explore' ? [{ title: 'Lateral observer gain (workbench block structure)', page: 'p. 222 · Eq. 13.16',
         theory: 'L_{lat} = \\begin{bmatrix}L_{z1} & 0\\\\ 0 & L_{\\theta1}\\\\ L_{z2} & 0\\\\ 0 & L_{\\theta2}\\end{bmatrix}',
         note: 'With two outputs L is not unique. This structure lets the z innovation correct only (ẑ, ż̂) and the θ innovation only (θ̂, θ̇̂).' }] : []),
-      { title: 'Observer gains for the VTOL', page: 'F.13(c) p. 400', answers: ['F.6/b', 'F.13/c'],
+      ...(ctx.S.mode === 'work' ? [] : [{ title: 'Observer gains for the reference design', page: 'F.13(c) p. 400',
         symbolic:'\\operatorname{eig}(A - LC) = \\operatorname{eig}\\begin{bmatrix}-L_{z1} & 1\\\\ -L_{z2} & -\\frac{\\mu}{M}\\end{bmatrix} \\cup \\operatorname{eig}\\begin{bmatrix}-L_{\\theta1} & 1\\\\ -L_{\\theta2} & 0\\end{bmatrix}',
         numbers: d.Lz ? `L_h = ${texMat(d.Lh)},\\quad (L_{z1}, L_{z2}) = (${tex(d.Lz[0])}, ${tex(d.Lz[1])}),\\quad (L_{\\theta1}, L_{\\theta2}) = (${tex(d.Lt[0])}, ${tex(d.Lt[1])})` : '',
-        note: 'place() on the full (A, C) would return a different L with the same eigenvalues.' },
+        note: 'place() on the full (A, C) would return a different L with the same eigenvalues.' }]),
       { title: 'Observer', page: 'p. 216 · Eq. 13.3, p. 224', answers: 'F.13/c',
         theory: '\\dot{\\hat x} = A\\hat x + B\\tilde u + L(y - C\\hat x),\\quad \\tilde u = (F_{sat} - F_e,\\; \\tau_{sat})' },
     ];
@@ -1002,8 +1024,8 @@ class Controller:
           symbolic:'A_{h} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{z} = \\begin{bmatrix}0&1&0\\\\0&-\\frac{\\mu}{M}&\\frac1M\\\\0&0&0\\end{bmatrix},\\; A_{\\theta} = \\begin{bmatrix}0&1&0\\\\0&0&\\frac1J\\\\0&0&0\\end{bmatrix},\\; C = \\begin{bmatrix}1&0&0\\end{bmatrix}' },
         { title: 'Observer gains', page: 'p. 241',
           theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top \\text{ per block}' },
-        { title: 'Observer gains for the specs', page: 'F.14(b) p. 401', answers: 'F.14/b',
-          numbers: `L_h = ${texMat(d.Lh)},\\; L_z = ${texMat(d.Lz)},\\; L_\\theta = ${texMat(d.Lt)}` },
+        ...(ctx.S.mode === 'work' ? [] : [{ title: 'Observer gains for the reference design', page: 'F.14(b) p. 401',
+          numbers: `L_h = ${texMat(d.Lh)},\\; L_z = ${texMat(d.Lz)},\\; L_\\theta = ${texMat(d.Lt)}` }]),
         { title: 'Control law', page: 'p. 241', answers: 'F.14/b',
           theory: '\\tilde F = -K_h\\hat x_{lon} - k_{I,h}x_{I,h} - \\hat d_F,\\quad \\tau = -K_z\\hat x_{lat} - k_{I,z}x_{I,z} - \\hat d_\\tau',
           note: 'd_z is not matched to τ, so it is not cancelled directly; removing the estimator bias lets the z integrator do the rest.' },
