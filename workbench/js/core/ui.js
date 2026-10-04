@@ -32,7 +32,16 @@ WB.ui = (function () {
   // "p. 101 · Eq. 7.5", "pp. 102–103", "A.7 p. 102": a page and the labels that follow it.
   const PAGE_RE = /(?:[A-F]\.\d+\s+)?pp?\.\s*(\d+)(?:[–-]\d+)?(?:\s*·\s*(?:Eqs?\.|Fig\.|Listing)\s*[\d.–-]+)*/g;
 
+  // When served over http(s) (e.g. GitHub Pages) the local PDF isn't there: link
+  // to the public copy from the repo README instead. It can't jump to a page, so
+  // the tooltip names the page.
+  const HOSTED = /^https?:$/.test(location.protocol);
+  const PUBLIC_PDF = 'https://drive.google.com/file/d/1OH6oSsbbdsxkY2CTMMxnchkWnNy_16zy/view?usp=sharing';
+
   function pdfLink(page, text) {
+    if (HOSTED) {
+      return el('a', { class: 'pdf-link', href: PUBLIC_PDF, target: 'controlbook-pdf', rel: 'noopener', title: `PDF page ${page} (opens the public PDF; go to page ${page})`, text });
+    }
     // A named target reuses one PDF tab instead of opening a new tab per click.
     const a = el('a', { class: 'pdf-link', href: `${PDF_PATH}#page=${page}`, target: 'controlbook-pdf', title: `Open controlbook.pdf at page ${page}`, text });
     // If that tab already shows the PDF, a change to #page alone is a same-document

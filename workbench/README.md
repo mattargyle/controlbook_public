@@ -2,6 +2,8 @@
 
 Interactive pages for working through the design studies. Open `index.html` directly in a browser; there's no build step or server. KaTeX loads from a CDN, and if you're offline the equations show as raw TeX.
 
+**Hosted copy:** https://mattargyle.github.io/controlbook_public/workbench/ (GitHub Pages, serving `feature/workbench`). Page links there open the public PDF from the repo README, which can't jump to a page.
+
 Deep links: `index.html#A/ch8/explore` (study / chapter / mode). Work mode always starts from your own gains; Explore never writes into it.
 
 Page references (`p. 101 · Eq. 7.5`) are controlbook.pdf page numbers. They link to `../book_and_notes/controlbook.pdf#page=N`, which only resolves where the gitignored PDF exists locally. All links share one PDF tab.
