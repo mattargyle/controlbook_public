@@ -150,13 +150,18 @@ WB.plot = (function () {
       ctx.setLineDash([]);
 
       for (const vm of vmarks) {
-        ctx.strokeStyle = css(vm.color || '--text-muted'); ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = css(vm.color || '--text-muted'); ctx.lineWidth = vm.width || 1; ctx.setLineDash(vm.dash || [2, 3]);
         const x = Math.round(X(vm.t)) + 0.5;
         ctx.beginPath(); ctx.moveTo(x, m.t); ctx.lineTo(x, h - m.b); ctx.stroke();
         ctx.setLineDash([]);
         if (vm.label) {
-          ctx.fillStyle = css('--text-muted'); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-          ctx.fillText(vm.label, x + 3, m.t + 2);
+          // at: 'bottom' keeps a second mark's label clear of the top one
+          const bottom = vm.at === 'bottom';
+          ctx.fillStyle = css(vm.color || '--text-muted'); ctx.textAlign = 'left'; ctx.textBaseline = bottom ? 'bottom' : 'top';
+          const ly = bottom ? h - m.b - 2 : m.t + 2;
+          ctx.strokeStyle = css('--surface'); ctx.lineWidth = 3; ctx.lineJoin = 'round';
+          ctx.strokeText(vm.label, x + 3, ly);
+          ctx.fillText(vm.label, x + 3, ly);
         }
       }
 
@@ -274,7 +279,8 @@ WB.plot = (function () {
       const reLo = -R;
       // equal scale: pixels per unit is limited by the tighter direction
       const m = 12;
-      const scale = Math.min((w - 2 * m) / (reHi - reLo), (h - 2 * m) / (2 * R));
+      // kept positive: a canvas narrower than the margins (mid-resize) would flip it
+      const scale = Math.max(1e-6, Math.min((w - 2 * m) / (reHi - reLo), (h - 2 * m) / (2 * R)));
       const cx = m + (-reLo) * scale + ((w - 2 * m) - (reHi - reLo) * scale) / 2;
       return { scale, cx, cy: h / 2 };
     }

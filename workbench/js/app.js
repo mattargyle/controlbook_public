@@ -404,10 +404,21 @@ window.WB = window.WB || {};
 
   const SERIES = ['--series-1', '--series-3', '--series-2'];
 
+  // The disturbances that switch on at tDist, as a vertical mark for the time plots.
+  function distMark(v, t) {
+    const sim = S.sim;
+    const on = v.dists.map((d, i) => ({ d, val: i === 0 ? sim.dist : sim.dists[i - 1] || 0 })).filter((q) => q.val !== 0);
+    if (!on.length || sim.tDist < t[0] || sim.tDist > t[t.length - 1]) return null;
+    const name = (d) => d.label.replace(/<sub>(.*?)<\/sub>/g, '_$1').replace(/<[^>]*>/g, '');
+    const label = on.map((q) => `${name(q.d)} = ${M.fmt(q.val, 3)} ${q.d.unit}`).join(', ');
+    return { t: sim.tDist, label: `${label} on`, color: '--series-3', dash: [6, 3], at: 'bottom' };
+  }
+
   function drawPlots() {
     const s = sys(), v = view(s);
     const t = result.t;
     const ch = chapter();
+    const dMark = distMark(v, t);
     v.outputs.forEach((o, oi) => {
       const k = o.scale || 1;
       const sc = (arr) => Array.from(arr || [], (val) => val * k);
@@ -430,6 +441,7 @@ window.WB = window.WB || {};
         data.points = metrics.os > 0.5 ? [{ t: t[metrics.iPeak], y: yv[metrics.iPeak] * k, color: '--series-1', label: `${M.fmt(metrics.os, 3)}% OS` }] : [];
         data.vmarks = isNaN(metrics.t90) ? [] : [{ t: metrics.t90, label: `90% · tr ${M.fmt(metrics.tr, 3)} s` }];
       }
+      if (dMark) data.vmarks = [...(data.vmarks || []), dMark];
       yPlots[oi].setData(data);
     });
 
@@ -443,10 +455,14 @@ window.WB = window.WB || {};
       series.push({ label: `${lab} demanded${v.inputs.length > 1 ? '' : ' (before saturation)'}`.trim(), y: clip(ud, rg[i]), color: v.inputs.length > 1 ? SERIES[i % 3] : '--series-2', dash: [5, 4], width: 1.5 });
       series.push({ label: `${lab} applied`.trim(), y: Array.from(result.uAppliedAll[i]), color: SERIES[i % 3] });
     });
+    // One input and one disturbance on it: draw d(t) in the input's units next to u.
+    if (dMark && v.inputs.length === 1 && v.dists.length === 1 && v.dists[0].unit === v.inputs[0].unit) {
+      series.push({ label: 'disturbance d', y: Array.from(t, (tk) => (tk < S.sim.tDist ? 0 : S.sim.dist)), color: '--series-3', dash: [2, 3], width: 1.5 });
+    }
     const hl = lims.map((y, j) => ({ y, color: '--critical', label: j === 0 ? 'limit' : '', fit: true }));
     const hiMax = Math.max(...rg.map((r) => r[1])), loMin = Math.min(...rg.map((r) => r[0]));
     uPlot.setData({
-      t, series, hlines: hl,
+      t, series, hlines: hl, vmarks: dMark ? [dMark] : [],
       bands: [{ y0: hiMax, y1: 1e9, color: '--critical', alpha: 0.07 }, { y0: -1e9, y1: loMin, color: '--critical', alpha: 0.07 }],
     });
     const extra = ch.extraPlot ? ch.extraPlot(ctx, result) : null;
