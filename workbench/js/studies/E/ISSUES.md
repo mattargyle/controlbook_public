@@ -16,11 +16,18 @@ Page numbers are PDF pages (book page + 8). The numbers below use the book's par
 | --- | --- | --- | --- |
 | Gravity | g = 9.8 m/s² (p. 385) | `testDynamics.py` expects g = 9.81. Its first vector gives θ̈ = −29.43 = −3g/(2ℓ) with g = 9.81. `blockbeamParam.py` leaves g blank. | Uses 9.8 everywhere. `regress_E.py` passes g = 9.81 only for the test vectors. The JS f then reproduces all ten vectors within the script's 1e-14 tolerance (max error 1.8e-15). |
 | Problem numbering | E.6 is followed by E.8, and the list on p. 385 also has no E.7 | n/a | No E.7 tab. |
+| Beam length name | ℓ (p. 385) | `blockbeamParam.py` calls it `length` | Python answers get `P.ell`, with `P.length` as an alias so code written against the param file works. |
 
 ## Ambiguous or underspecified problem statements
 
 | Problem | Page | Issue | Workbench choice |
 | --- | --- | --- | --- |
+| E.3(c) | 386 | Asks for "damping forces", but the system description (p. 385) has no friction or damping. | B = 0: the Python check expects (0, 0) and, on a wrong answer, points back to p. 385. |
+| E.4(a) | 386 | "Find the equilibria." θ = π (beam turned over through the pivot) also makes f(x, F) = 0, with the same F_e. | The check expects the configuration of Fig. 20-1 (θ_e = 0) and says so if θ = π is entered. |
+| E.4(c) | 386 | "If possible, linearize using feedback linearization." The book never works it for E. F appears only in the θ equation, so the z equation (z̈ = zθ̇² − g sin θ) cannot be linearized by any additive F_fl; the θ equation can. E.8(e) then uses F_fl(z) = m₁gz/ℓ + m₂g/2 with the measured z. | The check accepts any F_fl that, with F̃ = 0, holds the beam at rest for every z and θ (gravity on block and beam both scale with cos θ, like F), and whose stated θ̈ matches the plant. Cancelling the Coriolis term too is also accepted. The solution explains why the whole system is not feedback-linearizable this way. |
+| E.5, E.6 | 386–387 | Neither says which equilibrium to linearize about; E.4 gives a family z_e. | Both use z_e = ℓ/2, the design point E.8 states, and say so in the part text. E.4(b) asks for A and B as functions of z_e. |
+| E.P.6 | 388 | Has no lettered parts. | Three steps in order: the Evans form (a Python answer, negated as the problem says), the critical k_I from the locus, and the choice of k_I. |
+| E.16 | 391 | Each half starts with an unlettered instruction to plot the plant and loop gain with `bode`. | Shown as unlettered info parts before (a) and before (d). |
 | E.5 → E.15, E.18 | 387, 390, 392 | E.18(a) says "P_in(s) … derived in HW E.5", and E.15(a) asks for "the inner loop transfer function from F̃ to θ̃". E.5 derives two models: the full (ℓ/J_e)s²/(s⁴ − m₁g²/J_e) in part (b), and the simplified b₀/s² in part (c). | Uses the simplified b₀/s². It is the model E.8 designs with, and F_fl(z) cancels exactly the term (c) drops. E.15 can overlay the full model. |
 | E.8(f) | 388 | "a step of size 0.25 meter is placed on z̃^r" does not say where the block starts. | The block starts at rest at z_e and z_r goes to z_e + 0.25 = 0.5 m, the beam tip. That gives t_rz ≈ 1.173 s. Starting at z = 0 and stepping to 0.25 gives t_rz ≈ 1.040 s instead. |
 | E.8(f) | 388 | "Using the rise time of the outer loop" does not say whether t_rθ stays at 1 s or keeps t_rθ = t_rz/10. | Keeps M = 10, so t_rθ = t_rz/10. With t_rθ fixed at 1 s, the outer loop cannot be pushed far before the separation is lost. |

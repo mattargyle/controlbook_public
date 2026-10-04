@@ -23,6 +23,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const workGains = (st) => ({ kPth: st.kPth, kDth: st.kDth, kPz: st.kPz, kDz: st.kDz, kIz: st.kIz || 0, kIth: st.kIth || 0 });
   // Work-mode starting gains: stable on the exact model, deliberately not an answer.
   const W0 = { kPth: 3, kDth: 1.5, kPz: -0.01, kDz: -0.05 };
+  const showsAnswer = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isSolved(key);
+  const ids = (ctx) => ({ e4: ctx.sys.problems.ch4.id, e5: ctx.sys.problems.ch5.id, e8: ctx.sys.problems.ch8.id, e9: ctx.sys.problems.ch9.id, p6: ctx.sys.problems.p6.id, e10: ctx.sys.problems.ch10.id });
 
   // ------------------------------------------------------------ shared UI --
   function compControl(parent, ctx) {
@@ -78,7 +80,8 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   function loopMarkers(ctx, { drag = false, targets = null } = {}) {
     const g = ctx.gains, p = ctx.pModel;
     const b0 = ctx.sys.linear(p).b0;
-    const mk = [{ re: 0, im: 0, kind: 'ol', label: 'open-loop poles of the design model' }];
+    // The design model's poles at 0 answer E.5(c), so in Work mode they wait for it.
+    const mk = showsAnswer(ctx, `${ctx.sys.problems.ch5.id}/c`) ? [{ re: 0, im: 0, kind: 'ol', label: 'open-loop poles of the design model' }] : [];
     const zoomOuter = ctx.st.zoom === 'outer';
     E.innerPoles(b0, g).forEach((q) => mk.push({ ...q, kind: 'obs', label: 'inner-loop pole (θ)', dragId: drag ? 0 : undefined, noFit: zoomOuter }));
     E.outerPoles(p, g).forEach((q) => mk.push({ ...q, kind: 'cl', label: 'outer-loop pole (z, inner loop as k_DC)', dragId: drag ? 1 : undefined }));
@@ -115,44 +118,50 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     return [{ label: 'θᵣ (outer-loop command)', y: sc(res.extras.thetaR), color: '--series-3', dash: [4, 3], width: 1.5 }];
   }
 
-  // Math cards shared by the successive-loop chapters. The general book forms are
-  // in `theory`; anything specific to E (an answer) is in `symbolic`/`numbers`.
+  // Math cards shared by the successive-loop chapters. General book forms are
+  // always shown; cards with E's own results carry `answers` (locked in Work mode
+  // until that part is solved).
+  function cascadeCard() {
+    return {
+      title: 'Successive loop closure', page: 'p. 117–118 · Fig. 8-10, 8-11',
+      theory: '\\text{inner loop first; the outer loop sees the closed inner loop},\\quad \\text{inner loop} \\approx k_{DC} \\text{ when it is much faster than the outer loop}',
+    };
+  }
   function designModelCard(ctx) {
     const lin = ctx.sys.linear(ctx.pModel);
     return {
-      title: 'Design model (cascade)', page: 'p. 118 · Fig. 8-10, p. 387 · E.5(c)',
-      theory: 'P(s) \\approx P_{in}(s)\\,P_{out}(s):\\; \\tilde F \\to \\tilde\\Theta \\to \\tilde Z',
-      symbolic: 'P_{in}(s) = \\frac{b_0}{s^2},\\; b_0 = \\frac{\\ell}{\\frac{m_2\\ell^2}{3} + m_1 z_e^2},\\quad P_{out}(s) = -\\frac{g}{s^2},\\quad z_e = \\tfrac{\\ell}{2}',
+      title: 'Design model of the block and beam', page: 'p. 387 · E.5(c)', answers: `${ids(ctx).e5}/c`,
+      theory: 'P_{in}(s) = \\frac{\\tilde\\Theta}{\\tilde F} = \\frac{b_0}{s^2},\\; b_0 = \\frac{\\ell}{\\frac{m_2\\ell^2}{3} + m_1 z_e^2},\\quad P_{out}(s) = \\frac{\\tilde Z}{\\tilde\\Theta} = -\\frac{g}{s^2},\\quad z_e = \\tfrac{\\ell}{2}',
       numbers: `b_0 = ${tex(lin.b0)},\\quad P_{in} = \\frac{${tex(lin.b0)}}{s^2},\\quad P_{out} = \\frac{${tex(-ctx.pModel.g)}}{s^2}`,
-      spoiler: true,
     };
   }
   function equilibriumCard(ctx) {
-    const p = ctx.pModel, s = ctx.sys;
+    const p = ctx.pModel, s = ctx.sys, e4 = ids(ctx).e4;
     return {
-      title: 'x_e, F_e and feedback linearization', page: 'p. 386 · E.4, p. 388 · E.8(e)',
-      theory: 'u = u_e + \\tilde u \\;(\\text{constant equilibrium input})\\quad\\text{vs.}\\quad u = u_{fl}(x) + \\tilde u \\;(\\text{feedback linearization})',
-      symbolic: 'x_e = (\\tfrac{\\ell}{2}, 0, 0, 0),\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2},\\quad F_{fl}(z) = \\frac{m_1 g z}{\\ell} + \\frac{m_2 g}{2}\\;(\\text{follows the block, cancels the } m_1 g\\tilde z \\text{ term})',
+      title: 'Equilibrium force and feedback linearization', page: 'p. 386 · E.4, p. 388 · E.8(e)', answers: [`${e4}/a`, `${e4}/c`],
+      theory: 'x_e = (\\tfrac{\\ell}{2}, 0, 0, 0),\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2},\\quad F_{fl}(z) = \\frac{m_1 g z}{\\ell} + \\frac{m_2 g}{2}\\;(\\text{follows the block, cancels the } m_1 g\\tilde z \\text{ term})',
       numbers: `F_e = ${tex(s.Fe(p))}\\,\\text{N},\\quad F_{fl}(z) = ${tex(p.m1 * p.g / p.ell)}\\,z + ${tex(p.m2 * p.g / 2)}`,
-      spoiler: true,
+    };
+  }
+  function pdTheoryCard() {
+    return {
+      title: 'PD on a second-order plant', page: 'p. 99–101 · Eq. 7.5, p. 113 · Eq. 8.5',
+      theory: 'P = \\frac{b_0}{s^2 + a_1 s + a_0}:\\; \\Delta_{cl} = s^2 + (a_1 + b_0 k_D)s + (a_0 + b_0 k_P) = s^2 + 2\\zeta\\omega_n s + \\omega_n^2,\\quad \\omega_n = \\frac{2.2}{t_r},\\quad k_{DC} = \\lim_{s\\to0}\\tfrac{Y}{R}',
     };
   }
   function innerCard(ctx, d) {
+    const e8 = ids(ctx).e8;
     return {
-      title: 'Inner loop (θ)', page: 'p. 99–100 · Eq. 7.5, p. 124–125 (B.8), p. 387 · E.8(b, c)',
-      theory: 'P = \\frac{b_0}{s^2 + a_1 s + a_0}:\\; \\Delta_{cl} = s^2 + (a_1 + b_0 k_D)s + (a_0 + b_0 k_P) = s^2 + 2\\zeta\\omega_n s + \\omega_n^2,\\quad k_{DC} = \\lim_{s\\to0}\\tfrac{Y}{R}',
-      symbolic: 'k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{DC_\\theta} = 1',
+      title: 'Inner loop (θ) of the block and beam', page: 'p. 387 · E.8(b, c)', answers: [`${e8}/b`, `${e8}/c`],
+      theory: 'k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{DC_\\theta} = 1',
       numbers: `\\omega_{n_\\theta} = ${tex(d.wTh)}\\;\\Rightarrow\\; k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\quad p = ${E.innerPoles(d.b0, d).map((q) => texPole(q)).join(',\\;')}`,
-      spoiler: true,
     };
   }
   function outerCard(ctx, d) {
     return {
-      title: 'Outer loop (z), inner loop as its DC gain', page: 'p. 118 · Fig. 8-11, p. 387 · E.8(d)',
-      theory: '\\text{replace the inner loop by } k_{DC_\\theta}\\text{, then match } s^2 + 2\\zeta_z\\omega_{n_z}s + \\omega_{n_z}^2',
-      symbolic: '\\frac{Z}{Z_r} = \\frac{-g k_{DC}k_{P_z}}{s^2 - g k_{DC}k_{D_z}s - g k_{DC}k_{P_z}},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g k_{DC}},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g k_{DC}}\\;(\\text{both negative})',
+      title: 'Outer loop (z), inner loop as its DC gain', page: 'p. 387 · E.8(d)', answers: `${ids(ctx).e8}/d`,
+      theory: '\\frac{Z}{Z_r} = \\frac{-g k_{DC}k_{P_z}}{s^2 - g k_{DC}k_{D_z}s - g k_{DC}k_{P_z}},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g k_{DC}},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g k_{DC}}\\;(\\text{both negative})',
       numbers: `t_{r_z} = ${tex(d.trZ)}\\,\\text{s},\\; \\omega_{n_z} = ${tex(d.wZ)}\\;\\Rightarrow\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)}`,
-      spoiler: true,
     };
   }
   function separationCard(ctx) {
@@ -174,7 +183,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   function holdCard(ctx) {
     const p = ctx.pModel, g = ctx.gains, Ts = ctx.S.sim.Ts;
     return {
-      title: 'Sampling the feedback-linearizing force', page: 'p. 155–158 (digital implementation)',
+      title: 'Sampling the feedback-linearizing force', page: 'p. 155–158 (digital implementation)', answers: `${ids(ctx).e4}/c`,
       theory: 'u_{fl}(x_k) \\text{ is held over } [t_k, t_k + T_s] \\text{ while the state keeps moving}',
       symbolic: '\\text{uncancelled } \\frac{m_1 g}{\\ell}\\big(z(t) - z_k\\big) \\approx \\frac{m_1 g}{\\ell}\\dot z\\,(t - t_k)\\;\\Rightarrow\\;\\text{average } \\frac{m_1 g T_s}{2\\ell}\\dot z \\;(\\text{negative damping on } \\dot z)',
       numbers: `\\frac{m_1 g T_s}{2\\ell} = ${tex(p.m1 * p.g * Ts / (2 * p.ell))}\\;\\text{N·s/m vs. } |k_{P_\\theta}k_{D_z}| = ${tex(Math.abs(g.kPth * g.kDz))}`,
@@ -266,12 +275,12 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const d = designed(ctx);
       const Fmax = ctx.sys.uLimit(ctx.pModel);
       return [
-        designModelCard(ctx), equilibriumCard(ctx), innerCard(ctx, d), outerCard(ctx, d), separationCard(ctx), holdCard(ctx),
-        { title: 'Saturation and the outer rise time', page: 'p. 119–121 · Eq. 8.8, Fig. 8-13',
-          theory: '|u_{ff} + \\tilde u| \\le u_{max} \\;\\Rightarrow\\; \\tilde u_{max} = u_{max} - |u_{ff}|',
-          symbolic: '\\tilde F(0^+) = k_{P_\\theta}k_{P_z}\\,\\tilde z_r \\;(\\text{negative for } \\tilde z_r > 0\\text{: plenty of room}),\\quad \\text{the binding limit is braking near the tip, where } F_{fl}(z) \\text{ has grown}',
-          numbers: `F_{max} = ${tex(Fmax)}\\,\\text{N},\\quad F_{fl}(z_e + 0.25) = ${tex(ctx.sys.Ffl(ctx.sys.ze(ctx.pModel) + 0.25, ctx.pModel))}\\,\\text{N}`,
-          spoiler: true },
+        cascadeCard(), pdTheoryCard(), designModelCard(ctx), equilibriumCard(ctx), innerCard(ctx, d), outerCard(ctx, d), separationCard(ctx), holdCard(ctx),
+        { title: 'Saturation and the rise time', page: 'p. 119–121 · Eq. 8.8, Fig. 8-13',
+          theory: '|u_{ff} + \\tilde u| \\le u_{max} \\;\\Rightarrow\\; \\tilde u_{max} = u_{max} - |u_{ff}|' },
+        { title: 'Saturation of the block and beam', page: 'p. 388 · E.8(f)', answers: `${ids(ctx).e8}/f`,
+          theory: '\\tilde F(0^+) = k_{P_\\theta}k_{P_z}\\,\\tilde z_r \\;(\\text{negative for } \\tilde z_r > 0\\text{: plenty of room}),\\quad \\text{the binding limit is braking near the tip, where } F_{fl}(z) \\text{ has grown}',
+          numbers: `F_{max} = ${tex(Fmax)}\\,\\text{N},\\quad F_{fl}(z_e + 0.25) = ${tex(ctx.sys.Ffl(ctx.sys.ze(ctx.pModel) + 0.25, ctx.pModel))}\\,\\text{N}` },
       ];
     },
 
@@ -281,10 +290,9 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       const num = PD().num;
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: '(a) Operating point for design',
-          html: 'Sketch the block diagram first (Fig. 8-10, p. 118); then enter the design operating point.',
-          inputs: { ze: 'z<sub>e</sub> [m]', Fe: 'F<sub>e</sub> [N]' },
-          check: (v) => PD().checkNumbers(v, { ze: ctx.sys.ze(ctx.pModel), Fe: ctx.sys.Fe(ctx.pModel) }, { ze: 'ze', Fe: 'Fe' }),
+          id: 'a', title: '(a) Block diagram for successive loop closure',
+          html: 'On paper: draw the block diagram with PD control in both loops (see Fig. 8-10, p. 118, for the pattern). The outer loop takes z<sub>r</sub> and gives θ<sub>r</sub>; the inner loop takes θ<sub>r</sub> and gives F̃. Design about z<sub>e</sub> = ℓ/2.',
+          done: 'I have drawn it',
           solution: () => [
             { html: 'Block diagram: z<sub>r</sub> → [k<sub>P<sub>z</sub></sub>, k<sub>D<sub>z</sub></sub>s] → θ<sub>r</sub> → [k<sub>P<sub>θ</sub></sub>, k<sub>D<sub>θ</sub></sub>s] → F̃ → (+ F<sub>fl</sub>) → plant, with θ fed back to the inner loop and z to the outer loop.' },
             { tex: `z_e = \\tfrac{\\ell}{2} = ${tex(ctx.sys.ze(ctx.pModel))},\\quad F_e = \\frac{m_1 g z_e}{\\ell} + \\frac{m_2 g}{2} = \\frac{(m_1 + m_2)g}{2} = ${tex(ctx.sys.Fe(ctx.pModel))}\\,\\text{N}` },
@@ -460,24 +468,23 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     splane(ctx) { return { markers: loopMarkers(ctx), kindNames: KIND_NAMES }; },
 
     math(ctx) {
-      const a = this.analysis(ctx);
+      const a = this.analysis(ctx), e9 = ids(ctx).e9;
       return [
         designModelCard(ctx),
         { title: 'Error constants and system type', page: 'p. 141 · Table 9-1',
           theory: 'M_p = \\lim_{s\\to0} PC,\\quad M_v = \\lim_{s\\to0} sPC,\\quad M_a = \\lim_{s\\to0} s^2PC,\\quad e_{step} = \\tfrac{1}{1+M_p},\\; e_{ramp} = \\tfrac{1}{M_v},\\; e_{parab} = \\tfrac{1}{M_a}' },
-        { title: 'Inner loop under PD', page: 'p. 151 (C.9 has the same plant form)',
-          theory: '\\text{type} = \\text{number of free integrators in } P_{in}C_{in},\\quad \\text{input disturbance: } \\lim_{s\\to0}\\frac{P_{in}}{1 + P_{in}C_{in}}',
-          symbolic: 'P_{in}C_{in} = \\frac{b_0(k_D s + k_P)}{s^2} \\Rightarrow \\text{type 2},\\; M_a = b_0 k_{P_\\theta};\\quad \\frac{P_{in}}{1 + P_{in}C_{in}}\\Big|_{s\\to0} = \\frac{1}{k_{P_\\theta}} \\Rightarrow \\text{type 0}',
-          numbers: `e_{parab} = \\frac{1}{b_0k_{P_\\theta}} = ${tex(a.inParab)},\\quad e_{d,step} = \\frac{1}{k_{P_\\theta}} = ${tex(a.inDist)}\\;\\text{rad/N}`, spoiler: true },
-        { title: 'Outer loop under PD / PID', page: 'pp. 148–149 (B.9)',
-          theory: 'C_{out} = \\frac{k_D s^2 + k_P s + k_I}{s}:\\; \\text{count the free integrators in } P_{out}C_{out}',
-          symbolic: 'k_I = 0: \\text{type 2},\\; M_a = -gk_{P_z};\\quad k_I \\ne 0: \\text{type 3},\\quad \\frac{P_{out}}{1+P_{out}C_{out}}\\Big|_{s\\to0} = \\frac{1}{k_{P_z}} \\;\\text{(PD, type 0)},\\; \\frac{1}{k_{I_z}}\\frac{1}{s} \\;\\text{(PID, type 1)}',
-          numbers: a.hasI ? `\\text{type 3; input-disturbance type 1, ramp error } \\frac{1}{k_{I_z}} = ${tex(a.outDist)}` : `e_{parab} = -\\frac{1}{gk_{P_z}} = ${tex(a.outParab)},\\quad e_{d,step} = \\frac{1}{k_{P_z}} = ${tex(a.outDist)}\\;\\text{m/rad}`,
-          spoiler: true },
-        { title: 'A force disturbance through both loops', page: 'follows from p. 143–144',
-          theory: '\\text{a force } d \\text{ enters the inner loop; at steady state } \\theta = 0 \\text{ and } \\dot z = 0',
-          symbolic: '\\tilde F = -d \\Rightarrow \\theta_r = -\\frac{d}{k_{P_\\theta}} \\Rightarrow e_z = -\\frac{d}{k_{P_\\theta}k_{P_z}}\\;(\\text{PD}),\\quad 0\\;(\\text{PID})',
-          numbers: `-\\frac{1}{k_{P_\\theta}k_{P_z}} = ${tex(a.forceToZ)}\\;\\text{m/N (current gains)}`, spoiler: true },
+        { title: 'Type with respect to a disturbance', page: 'p. 143–145',
+          theory: '\\text{type} = \\text{number of free integrators in } PC,\\quad \\text{input disturbance: } E(s) = -\\frac{P}{1 + PC}D_{in}(s),\\quad C_{PID} = \\frac{k_D s^2 + k_P s + k_I}{s}' },
+        { title: 'Inner loop of the block and beam under PD', page: 'p. 388 · E.9(a)', answers: [`${e9}/a1`, `${e9}/a2`],
+          theory: 'P_{in}C_{in} = \\frac{b_0(k_D s + k_P)}{s^2} \\Rightarrow \\text{type 2},\\; M_a = b_0 k_{P_\\theta};\\quad \\frac{P_{in}}{1 + P_{in}C_{in}}\\Big|_{s\\to0} = \\frac{1}{k_{P_\\theta}} \\Rightarrow \\text{type 0}',
+          numbers: `e_{parab} = \\frac{1}{b_0k_{P_\\theta}} = ${tex(a.inParab)},\\quad e_{d,step} = \\frac{1}{k_{P_\\theta}} = ${tex(a.inDist)}\\;\\text{rad/N}` },
+        { title: 'Outer loop of the block and beam under PD / PID', page: 'p. 388 · E.9(b)', answers: [`${e9}/b1`, `${e9}/b2`, `${e9}/b3`],
+          theory: 'k_I = 0: \\text{type 2},\\; M_a = -gk_{P_z};\\quad k_I \\ne 0: \\text{type 3},\\quad \\frac{P_{out}}{1+P_{out}C_{out}}\\Big|_{s\\to0} = \\frac{1}{k_{P_z}} \\;\\text{(PD, type 0)},\\; \\frac{1}{k_{I_z}}\\frac{1}{s} \\;\\text{(PID, type 1)}',
+          numbers: a.hasI ? `\\text{type 3; input-disturbance type 1, ramp error } \\frac{1}{k_{I_z}} = ${tex(a.outDist)}` : `e_{parab} = -\\frac{1}{gk_{P_z}} = ${tex(a.outParab)},\\quad e_{d,step} = \\frac{1}{k_{P_z}} = ${tex(a.outDist)}\\;\\text{m/rad}` },
+        { title: 'A force disturbance through both loops', page: 'follows from p. 143–144', answers: `${e9}/b3`,
+          theory: '\\tilde F = -d \\Rightarrow \\theta_r = -\\frac{d}{k_{P_\\theta}} \\Rightarrow e_z = -\\frac{d}{k_{P_\\theta}k_{P_z}}\\;(\\text{PD}),\\quad 0\\;(\\text{PID})',
+          numbers: `-\\frac{1}{k_{P_\\theta}k_{P_z}} = ${tex(a.forceToZ)}\\;\\text{m/N (current gains)}`,
+          note: 'A force d enters the inner loop; at steady state θ = 0 and ż = 0.' },
       ];
     },
 
@@ -566,6 +573,10 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     },
     clPoly(ev, kI) { return L.polyAdd(ev.den, L.polyScale(ev.num, -kI)); },
 
+    // The locus starts at the E.8 PD poles: in Work mode it waits for the Evans
+    // form (E.P.6) or a Reveal.
+    locusShown(ctx) { return ctx.S.mode === 'explore' || ctx.app.isRevealed('E:p6:locus') || ctx.app.isSolved(`${ids(ctx).p6}/a`); },
+
     buildControls(parent, ctx) {
       const sec = section(parent, 'PD from E.8, then add k_I < 0', 'p. 388 · E.P.6');
       compControl(sec, ctx);
@@ -574,15 +585,15 @@ WB.studies.E = WB.studies.E || { chapters: {} };
       E.knob(sec, ctx, 'kMaxFactor', 'locus to', 0.2, 5, 0.1, { unit: '× |kI,crit|', sig: 2 });
       sec.append(el('p', { class: 'muted small', text: 'Drag a closed-loop pole along the locus to set k_I.' }));
       if (ctx.S.mode === 'explore') gainReadout(sec, ctx, ['kPz', 'kDz', 'kIz']);  // E.8(d) answers stay hidden in Work mode
-      else if (!ctx.app.isRevealed('E:p6:locus')) {
+      else if (!this.locusShown(ctx)) {
+        sec.append(el('p', { class: 'muted small', text: 'The root locus appears once the Evans form is solved.' }));
         sec.append(WB.ui.revealButton(ctx, 'E:p6:locus', 'Reveal the root locus (uses the E.8 gains)'));
       }
       zoomControl(sec, ctx);
     },
 
     splane(ctx) {
-      // The locus starts at the E.8 PD poles, so it stays hidden in Work mode until revealed.
-      if (ctx.S.mode === 'work' && !ctx.app.isRevealed('E:p6:locus')) return null;
+      if (!this.locusShown(ctx)) return null;
       const ev = this.evans(ctx);
       const kMax = Math.max(ev.kCrit * ctx.st.kMaxFactor, -ctx.st.kI * 1.2, 1e-6);
       const loci = WB.tf.rootLocus(ev.den, ev.num, kMax);
@@ -608,47 +619,64 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     },
 
     math(ctx) {
-      const ev = this.evans(ctx);
+      const ev = this.evans(ctx), p6 = ids(ctx).p6;
       return [
-        { title: 'Closed outer loop with PID (inner loop as its DC gain)', page: 'p. 470 (A.P.6 form)',
-          theory: '\\Delta_{cl}(s) = \\text{den}(1 + P_{out}C_{out}),\\quad C_{out} = \\frac{k_D s^2 + k_P s + k_I}{s}',
-          symbolic: '\\Delta_{cl}(s) = s^3 - gk_{D_z}s^2 - gk_{P_z}s - gk_{I_z}',
-          numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(this.clPoly(ev, ctx.st.kI))}`, spoiler: true },
-        { title: 'Evans form (negated, since k_I < 0)', page: 'p. 466, p. 388 · E.P.6',
-          theory: '\\Delta_{cl}(s) = 0 \\iff 1 + k\\,L(s) = 0 \\text{ with } k \\text{ the gain being varied}',
-          symbolic: '1 + (-k_{I_z})\\,L(s) = 0,\\quad L(s) = \\frac{g}{s^3 - gk_{D_z}s^2 - gk_{P_z}s}',
-          numbers: `L(s) = \\frac{${tex(ev.num[0])}}{${WB.tf.polyTex(ev.den)}},\\quad k_{P_z} = ${tex(ev.d.kPz)},\\; k_{D_z} = ${tex(ev.d.kDz)}`, spoiler: true },
+        { title: 'Evans form', page: 'p. 466',
+          theory: '\\Delta_{cl}(s) = 0 \\iff 1 + k\\,L(s) = 0 \\quad(k \\text{ is the gain that varies along the locus})' },
+        { title: 'PID with the derivative on the output', page: 'p. 470',
+          theory: '\\Delta_{cl}(s) = \\text{numerator of } 1 + P\\,C,\\quad C = \\frac{k_D s^2 + k_P s + k_I}{s}' },
+        { title: 'Closed outer loop of the block and beam with PID', page: 'p. 388 · E.P.6', answers: `${p6}/a`,
+          theory: '\\Delta_{cl}(s) = s^3 - gk_{D_z}s^2 - gk_{P_z}s - gk_{I_z}\\quad(\\text{inner loop as } k_{DC_\\theta} = 1)',
+          numbers: `\\Delta_{cl}(s) = ${WB.tf.polyTex(this.clPoly(ev, ctx.st.kI))}` },
+        { title: 'Evans form of the outer loop (negated, since k_I < 0)', page: 'p. 388 · E.P.6', answers: `${p6}/a`,
+          theory: '1 + (-k_{I_z})\\,L(s) = 0,\\quad L(s) = \\frac{g}{s^3 - gk_{D_z}s^2 - gk_{P_z}s}',
+          numbers: `L(s) = \\frac{${tex(ev.num[0])}}{${WB.tf.polyTex(ev.den)}},\\quad k_{P_z} = ${tex(ev.d.kPz)},\\; k_{D_z} = ${tex(ev.d.kDz)}` },
         { title: 'Where the locus crosses into the RHP', page: 'Routh–Hurwitz (not in the book)',
-          theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ stable} \\iff c_i > 0,\\; c_2c_1 > c_0',
-          symbolic: 'k_{I,crit} = -g\\,k_{D_z}k_{P_z}\\;(\\text{stable for } k_{I,crit} < k_I < 0)',
-          numbers: `k_{I,crit} = ${tex(-ev.kCrit)}`, spoiler: true },
+          theory: 's^3 + c_2 s^2 + c_1 s + c_0 \\text{ stable} \\iff c_i > 0,\\; c_2c_1 > c_0' },
+        { title: 'Critical k_I of the outer loop', page: 'Routh–Hurwitz', answers: `${p6}/b`,
+          theory: 'k_{I,crit} = -g\\,k_{D_z}k_{P_z}\\;(\\text{stable for } k_{I,crit} < k_I < 0)',
+          numbers: `k_{I,crit} = ${tex(-ev.kCrit)}` },
       ];
     },
 
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.p6;
+      const cx = WB.py.cx;
+      // 1 + (−k_I) L(s) = 0 with the inner loop as its DC gain (1): L = −a32/(s³ + a32 kD s² + a32 kP s), a32 = −g.
+      const Ltruth = (p, a) => { const a32 = ctx.sys.linear(p).A[2][1]; return cx.div(-a32, cx.poly([1, a32 * a.kD, a32 * a.kP, 0], a.s)); };
+      const negOf = (g, w) => { const G = cx.of(g), Wv = cx.of(w); return Math.hypot(G.re + Wv.re, G.im + Wv.im) <= 1e-6 * Math.max(1, Math.hypot(Wv.re, Wv.im)); };
       PD().problemPanel(parent, ctx, prob, [
         {
-          id: 'a', title: 'Evans form: 1 + (−k<sub>I</sub>) c / (s³ + d<sub>2</sub>s² + d<sub>1</sub>s) = 0',
-          html: 'Uses the PD gains from the current t<sub>r<sub>θ</sub></sub>, M, ζ (E.8: 1 s, 10, 0.707).',
-          inputs: { c: 'c', d2: 'd<sub>2</sub>', d1: 'd<sub>1</sub>' },
-          check: (v) => { const ev = this.evans(ctx); return PD().checkNumbers(v, { c: ev.num[0], d2: ev.den[1], d1: ev.den[2] }, {}); },
+          id: 'a', title: 'Characteristic equation in Evans form',
+          html: 'Add an integrator to the outer loop, with the inner loop replaced by its DC gain (E.8(c)). k<sub>P</sub>, k<sub>D</sub> are the outer-loop PD gains. Because k<sub>I</sub> is negative, write the Evans form negated, 1 + (−k<sub>I</sub>)L(s) = 0, as the problem says, and return L(s); the check calls it at complex s.',
+          code: {
+            template: 'def L(s, kP, kD):\n    # 1 + (-kI) * L(s) = 0\n    return ...\n',
+            check: (code) => WB.py.check(ctx, {
+              args: { s: { label: 's', complex: true, re: [-3, 1], im: [0.05, 3] }, kP: { label: 'kP', lo: -0.2, hi: -0.001 }, kD: { label: 'kD', lo: -0.3, hi: -0.005 } },
+              params: (p) => ({ ...p, length: p.ell }),
+              items: [{ fn: 'L', args: ['s', 'kP', 'kD'], truth: Ltruth }],
+              explain: (it, f) => (negOf(f.e.got, f.e.want) ? 'That is the Evans form in k_I, 1 + k_I L(s) = 0. The problem asks for it negated, with −k_I as the gain.' : ''),
+            }, code),
+          },
           solution: () => {
             const ev = this.evans(ctx);
             return [
               { tex: 's^3 - gk_{D_z}s^2 - gk_{P_z}s - gk_{I_z} = 0 \\;\\Rightarrow\\; 1 + (-k_{I_z})\\frac{g}{s^3 - gk_{D_z}s^2 - gk_{P_z}s} = 0' },
-              { tex: `c = g = ${tex(ev.num[0])},\\quad d_2 = ${tex(ev.den[1])},\\quad d_1 = ${tex(ev.den[2])}` },
+              { tex: `\\text{current PD gains: } L(s) = \\frac{${tex(ev.num[0])}}{${WB.tf.polyTex(ev.den)}}` },
+              { code: 'def L(s, kP, kD):\n    g = P.g\n    return g / (s**3 - g * kD * s**2\n                - g * kP * s)' },
+              { html: 'Derived like A.P.6 (p. 470): the outer loop with C = k<sub>P</sub> + k<sub>I</sub>/s and the derivative on z, the inner loop as k<sub>DC</sub> = 1, P<sub>out</sub> = −g/s².' },
             ];
           },
         },
         {
-          id: 'b', title: 'Most negative stable k<sub>I</sub>',
+          id: 'b', title: 'Root locus: most negative stable k<sub>I</sub>',
           inputs: { k: 'k<sub>I,crit</sub>' },
+          html: 'Uses the PD gains from the current t<sub>r<sub>θ</sub></sub>, M and ζ (E.8: 1 s, 10, 0.707).',
           check: (v) => PD().checkNumbers(v, { k: -this.evans(ctx).kCrit }, { k: 'kI,crit' }),
           solution: () => [{ tex: `c_2c_1 > c_0:\\; (-gk_{D_z})(-gk_{P_z}) > -gk_{I_z} \\Rightarrow k_{I_z} > -gk_{D_z}k_{P_z} = ${tex(-this.evans(ctx).kCrit)}` }],
         },
         {
-          id: 'c', title: 'Pick k<sub>I</sub> that barely moves the PD poles',
+          id: 'c', title: 'Select k<sub>I</sub> that does not significantly change the other closed-loop poles',
           html: 'Checks the current k<sub>I</sub>: the complex pair must stay within 10% (in |p|) of the PD-only poles, and the new real pole must be slower than them.',
           check: () => {
             const ev = this.evans(ctx), kI = ctx.st.kI;
@@ -745,14 +773,14 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         { title: 'Nested digital PID', page: 'p. 160 · Listing 10.1, p. 163 (B.10)',
           theory: '\\theta_r = k_{P_z}e_z + k_{I_z}\\textstyle\\int e_z - k_{D_z}\\dot{\\hat z},\\quad \\tilde F = k_{P_\\theta}(\\theta_r - \\theta) + k_{I_\\theta}\\textstyle\\int e_\\theta - k_{D_\\theta}\\dot{\\hat\\theta},\\quad F = F_{fl}(z) + \\tilde F' },
         { title: 'Dirty derivative', page: 'p. 157 · Eq. 10.4',
-          theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)',
-          numbers: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad ${tex(beta)},\\quad ${tex(gamma)}`, spoiler: true },
+          theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)' },
+        { title: 'Dirty-derivative coefficients', page: 'p. 389 · E.10(b)', answers: `${ids(ctx).e10}/b1`,
+          theory: `\\sigma = ${tex(st.sigma)},\\; T_s = ${tex(Ts)}:\\quad \\frac{2\\sigma - T_s}{2\\sigma + T_s} = ${tex(beta)},\\quad \\frac{2}{2\\sigma + T_s} = ${tex(gamma)}` },
         { title: 'Anti-windup when k_I < 0', page: 'p. 157 · §10.1.1, p. 389 · E.10(c)',
           theory: '\\text{integrate } e_z \\text{ only while } |\\dot{\\hat z}| < \\bar v' },
-        { title: 'Gains from the knobs', page: 'p. 387 · E.8',
-          theory: '\\omega_n = 2.2/t_r \\text{ for each loop, as in E.8}',
-          symbolic: 'k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g}',
-          numbers: `k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)},\\quad k_{I,crit} = ${tex(-ctx.pModel.g * d.kDz * d.kPz)}`, spoiler: true },
+        { title: 'Gains from the knobs (E.8 formulas)', page: 'p. 387 · E.8', answers: [`${ids(ctx).e8}/b`, `${ids(ctx).e8}/d`],
+          theory: 'k_{P_\\theta} = \\frac{\\omega_{n_\\theta}^2}{b_0},\\; k_{D_\\theta} = \\frac{2\\zeta_\\theta\\omega_{n_\\theta}}{b_0},\\quad k_{P_z} = -\\frac{\\omega_{n_z}^2}{g},\\; k_{D_z} = -\\frac{2\\zeta_z\\omega_{n_z}}{g},\\quad \\omega_n = 2.2/t_r',
+          numbers: `k_{P_\\theta} = ${tex(d.kPth)},\\; k_{D_\\theta} = ${tex(d.kDth)},\\; k_{P_z} = ${tex(d.kPz)},\\; k_{D_z} = ${tex(d.kDz)},\\quad k_{I,crit} = ${tex(-ctx.pModel.g * d.kDz * d.kPz)}` },
         separationCard(ctx),
       ];
     },
@@ -760,6 +788,18 @@ WB.studies.E = WB.studies.E || { chapters: {} };
     buildProblem(parent, ctx) {
       const prob = ctx.sys.problems.ch10;
       PD().problemPanel(parent, ctx, prob, [
+        {
+          id: 'a', title: '(a) Parameters vary by up to 20%',
+          html: 'Set the true plant in the left panel (<em>Randomize ±α</em> with α = 0.2). The chapter starts with a fixed 20% draw (m₁ +12%, m₂ −9%, ℓ +15%) so the page is repeatable.',
+          check: () => {
+            const mis = Object.values(ctx.S.mismatch || {});
+            return mis.some((v) => Math.abs(v) > 0) ? { ok: true, msg: `Mismatch: ${Object.entries(ctx.S.mismatch).map(([k, v]) => `${k} ${fmt(v, 3)}%`).join(', ')}.` } : { ok: false, msg: 'The true plant equals the model. Randomize it.' };
+          },
+        },
+        {
+          id: 'b0', title: '(b) Use only the measured z, θ and z<sub>r</sub>',
+          html: 'The nested PID here gets only the measurements and the reference; ż and θ̇ come from dirty derivatives with σ = 0.05. In your own controller class, <code>update(r, y)</code> receives y = (z, θ), not the state.',
+        },
         {
           id: 'b1', title: '(b) Dirty-derivative coefficients for σ = 0.05, T<sub>s</sub> = 0.01',
           inputs: { a: '(2σ−T<sub>s</sub>)/(2σ+T<sub>s</sub>)', b: '2/(2σ+T<sub>s</sub>)' },
@@ -785,9 +825,14 @@ WB.studies.E = WB.studies.E || { chapters: {} };
           ],
         },
         {
-          id: 'c', title: '(c) Sign of k<sub>I<sub>z</sub></sub>',
-          inputs: { s: 'sign (+1 or −1)' },
-          check: (v) => PD().checkNumbers(v, { s: -1 }, { s: 'sign' }),
+          id: 'c', title: '(c) Negative integrator gain and the new anti-windup scheme',
+          html: 'Enter the sign the outer integrator gain k<sub>I<sub>z</sub></sub> must have. Then select the anti-windup scheme that integrates only while |ż| is small (Implementation controls) and try a few values of v̄.',
+          inputs: { s: 'sign of k<sub>I<sub>z</sub></sub> (+1 or −1)' },
+          check: (v) => {
+            const r = PD().checkNumbers(v, { s: -1 }, { s: 'sign' });
+            if (r.ok && ctx.st.antiwindup !== 'gate') return { ok: false, msg: 'Right sign. Now select the |ż| < v̄ anti-windup scheme.' };
+            return r;
+          },
           solution: () => [{ html: 'k<sub>P<sub>z</sub></sub> and k<sub>D<sub>z</sub></sub> are negative because a positive beam angle accelerates the block toward the pivot (z̈ = −gθ), so k<sub>I<sub>z</sub></sub> must be negative as well. The saturation is on F in the inner loop, so the outer integrator cannot unwind from u<sub>sat</sub> − u<sub>unsat</sub>; integrating only while |ż| is small stops windup during the large moves.' }],
         },
       ]);
