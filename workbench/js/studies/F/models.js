@@ -867,7 +867,7 @@ def _wb_fl_hold(state, u):
         },
         {
           id: 'd', title: '(d) Open-loop block diagrams',
-          html: 'On paper: draw the longitudinal and the lateral open-loop block diagrams. Click the button when you are done to compare with the live-math card (it unlocks once (b) and (c) are solved too).',
+          html: 'On paper: draw the longitudinal and the lateral open-loop block diagrams. Click the button when you are done to compare with the Math card (it unlocks once (b) and (c) are solved too).',
           done: "I've drawn them",
           solution: () => [{ tex: BLOCK_TEX }, { html: 'The minus sign: a positive roll tilts the thrust toward −z.' }],
         },

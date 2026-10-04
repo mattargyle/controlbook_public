@@ -308,7 +308,7 @@
         },
         {
           id: 'b', title: '(b) Add A, B, C, D from C.6',
-          html: 'Use your matrices from C.6 (the Ch 6 tab). From here on the outputs are y = (θ, φ), as in <code>satelliteParam.py</code> and the C.13 solution, so the second row of C is (0, 1, 0, 0). The model card in the live math unlocks once C.6 is solved.',
+          html: 'Use your matrices from C.6 (the Ch 6 tab). From here on the outputs are y = (θ, φ), as in <code>satelliteParam.py</code> and the C.13 solution, so the second row of C is (0, 1, 0, 0). The model card in the Math section unlocks once C.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability',

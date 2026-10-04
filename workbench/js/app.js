@@ -372,13 +372,24 @@ window.WB = window.WB || {};
     splane = new WB.plot.SPlane(sp, { title: 's-plane' });
     splane.onDrag = (id, re, im) => chapter().onPoleDrag && chapter().onPoleDrag(ctx, id, re, im);
 
+    for (const id of ['anim', 'splane']) collapsibleCard(document.getElementById(id), id);
+
     const pu = document.getElementById('plot-u'); pu.replaceChildren();
     uPlot = new WB.plot.TimePlot(pu, { title: '' });
     const px = document.getElementById('plot-x'); px.replaceChildren();
     xPlot = new WB.plot.TimePlot(px, { title: '' });
     const bd = document.getElementById('bode'); bd.replaceChildren();
     bodePlot = new WB.plot.BodePlot(bd, { title: 'Bode' });
+    for (const id of ['plot-u', 'plot-x', 'bode']) collapsibleCard(document.getElementById(id), id);
     for (const p of [uPlot, xPlot]) p.onHover = (i) => { viewState.hoverIndex = i; drawCursor(); };
+  }
+
+  // Plot cards collapse like the panel sections: the title becomes the toggle and
+  // everything below the head (plot, player) hides.
+  function collapsibleCard(card, key) {
+    const head = card.querySelector('.plot-head');
+    const body = [...card.children].filter((c) => c !== head);
+    WB.ui.collapsible(head, head.querySelector('.plot-title'), card, body, `wb.collapsed.card.${key}`);
   }
 
   // One card per output; rebuilt when the study changes.
@@ -393,6 +404,7 @@ window.WB = window.WB || {};
       const card = el('div', { class: 'card' });
       wrap.append(card);
       const p = new WB.plot.TimePlot(card, { title: `${o.label}(t)`, yLabel: `${o.label} [${o.unit}]`, unit: o.unit, minSpan: o.minSpan ?? 0 });
+      collapsibleCard(card, `plot-y.${o.label}`);
       p.onHover = (i) => { viewState.hoverIndex = i; drawCursor(); };
       return p;
     });
@@ -555,41 +567,78 @@ window.WB = window.WB || {};
   //     until those parts are solved here (a passing Check) or it is revealed.
   const answersOf = (c) => (c.answers ? [].concat(c.answers) : []);
   const partLabel = (k) => { const [prob, part] = k.split('/'); return `${prob} (${part.replace(/\d+$/, '')})`; };
+  // Math lines never scroll sideways. Each renders inline in display style, so
+  // KaTeX wraps it at top-level relations, operators, ",\;" separators and between
+  // the words of \text{}. A part that still doesn't fit (one wide fraction) is
+  // zoomed down to the card width, refitted whenever the line's width changes
+  // (resize, splitter, expanding a card).
+  // Zooming re-wraps the line, so shrink until it fits (a few passes at most).
+  function fitTex(t) {
+    const k = t.firstElementChild;
+    if (!k || !t.clientWidth) return;
+    k.style.zoom = '';
+    for (let i = 0; i < 6 && t.scrollWidth > t.clientWidth + 1; i++) {
+      k.style.zoom = String((+k.style.zoom || 1) * t.clientWidth / t.scrollWidth * 0.995);
+    }
+  }
+  const texFit = new ResizeObserver((entries) => {
+    for (const { target: t, contentRect: r } of entries) {
+      if (!r.width || +t.dataset.fitW === r.width) continue;
+      t.dataset.fitW = r.width;
+      fitTex(t);
+    }
+  });
+  // KaTeX's fonts change line widths when they arrive, without resizing the card.
+  if (document.fonts) document.fonts.addEventListener('loadingdone', () => document.querySelectorAll('#math .tex').forEach(fitTex));
+  function texLine(src) {
+    const d = el('div', { class: 'tex' });
+    const breakable = src
+      .replace(/,\\;/g, ',\\;\\allowbreak ')
+      .replace(/\\text\{([^{}]*)\}/g, (m, words) => words.split(/(?<= )/).map((w) => `\\text{${w}}`).join('\\allowbreak '));  // prose wraps between words
+    renderTex(d, `\\displaystyle ${breakable}`, false);
+    texFit.observe(d);
+    return d;
+  }
+
   function drawMath() {
     const root = document.getElementById('math');
     root.replaceChildren();
+    texFit.disconnect();   // the old lines are gone
     const cards = chapter().math(ctx);
     for (const c of cards) {
       const key = `${S.sysId}:${S.chapter}:${c.title}`;
       const card = el('article', { class: 'math-card' });
-      card.append(el('header', {}, el('h4', { text: c.title }), WB.ui.pageChip(c.page || '')));
+      const h4 = el('h4');
+      const body = el('div', { class: 'math-body' });
+      card.append(el('header', {}, h4, WB.ui.pageChip(c.page || '')), body);
+      WB.ui.collapsible(h4, el('span', { text: c.title }), card, body, `wb.collapsed.math.${c.title}`);
       const need = answersOf(c).filter((k) => !isSolved(k));
       if (S.mode === 'work' && need.length && !revealed.has(key)) {
         card.classList.add('locked');
         const labels = [...new Set(need.map(partLabel))];
-        card.append(el('p', { class: 'muted small locked-text', text: `This is part of the answer to ${labels.join(' and ')}. Solve it in the problem panel to unlock it.` }));
-        card.append(el('button', { type: 'button', class: 'btn btn-quiet reveal', text: 'Reveal anyway', onclick: () => { revealed.add(key); drawMath(); } }));
+        body.append(el('p', { class: 'muted small locked-text', text: `This is part of the answer to ${labels.join(' and ')}. Solve it in the problem panel to unlock it.` }));
+        body.append(el('button', { type: 'button', class: 'btn btn-quiet reveal', text: 'Reveal anyway', onclick: () => { revealed.add(key); drawMath(); } }));
         root.append(card);
         continue;
       }
       const hide = S.mode === 'work' && c.spoiler && !revealed.has(key);
       // Long equations are written with \\quad between parts; give each part its own line.
       const lines = (src) => src.split(/,?\\quad/).map((x) => x.trim()).filter(Boolean);
-      if (c.theory) for (const line of lines(c.theory)) { const d = el('div', { class: 'tex' }); renderTex(d, line); card.append(d); }
+      if (c.theory) for (const line of lines(c.theory)) body.append(texLine(line));
       const answerLines = [c.symbolic, c.numbers].filter(Boolean);
       if (answerLines.length) {
         if (hide) {
-          card.append(el('button', {
+          body.append(el('button', {
             type: 'button', class: 'btn btn-quiet reveal', text: 'Reveal the numbers',
             onclick: () => { revealed.add(key); drawMath(); },
           }));
         } else {
           const nums = el('div', { class: 'tex-numbers' });
-          for (const src of answerLines) for (const line of lines(src)) { const d = el('div', { class: 'tex' }); renderTex(d, line); nums.append(d); }
-          card.append(nums);
+          for (const src of answerLines) for (const line of lines(src)) nums.append(texLine(line));
+          body.append(nums);
         }
       }
-      if (c.note && !(hide && answerLines.length)) card.append(el('p', { class: 'muted small', text: c.note }));
+      if (c.note && !(hide && answerLines.length)) body.append(el('p', { class: 'muted small', text: c.note }));
       root.append(card);
     }
   }
@@ -756,6 +805,9 @@ window.WB = window.WB || {};
     applyHash();
     buildHeader();
     buildCenter();
+    const mathH = document.querySelector('.math-head h2');
+    mathH.replaceChildren();
+    WB.ui.collapsible(mathH, 'Math', document.querySelector('.math-wrap'), document.getElementById('math'), 'wb.collapsed.section.Math');
     rebuild();
     // Collapsible settings column (remembered per browser).
     const layout = document.querySelector('.layout');

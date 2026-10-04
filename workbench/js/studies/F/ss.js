@@ -403,7 +403,7 @@
         },
         {
           id: 'b', title: '(b) State-space matrices from F.6',
-          html: 'Add your A, B, C, D from F.6 (Ch 6 tab) to your param file. The model cards in the live math unlock once F.6 is solved.',
+          html: 'Add your A, B, C, D from F.6 (Ch 6 tab) to your param file. The model cards in the Math section unlock once F.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability ranks', inputs: { rl: 'rank 𝒞 (altitude)', rz: 'rank 𝒞 (lateral)' },

@@ -302,7 +302,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         },
         {
           id: 'b', title: '(b) State-space matrices from E.6',
-          html: 'Add your A, B, C, D from E.6 (the Ch 6 tab) to your param file. The model card in the live math unlocks once E.6 is solved.',
+          html: 'Add your A, B, C, D from E.6 (the Ch 6 tab) to your param file. The model card in the Math section unlocks once E.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability',

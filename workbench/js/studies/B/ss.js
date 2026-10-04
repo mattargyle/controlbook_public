@@ -307,7 +307,7 @@
         },
         {
           id: 'b', title: '(b) Add A, B, C, D from B.6 to the parameter file',
-          html: 'Use your A, B, C, D from B.6 (the Ch 6 tab) in your <code>pendulumParam.py</code>. The model card in the live math unlocks once B.6 is solved.',
+          html: 'Use your A, B, C, D from B.6 (the Ch 6 tab) in your <code>pendulumParam.py</code>. The model card in the Math section unlocks once B.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability',

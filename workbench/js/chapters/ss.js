@@ -319,7 +319,7 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'b', title: '(b) State-space model',
-          html: 'Use your A, B, C, D from A.6 (the Ch 6 tab). The model card in the live math unlocks once A.6 is solved.',
+          html: 'Use your A, B, C, D from A.6 (the Ch 6 tab). The model card in the Math section unlocks once A.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability',

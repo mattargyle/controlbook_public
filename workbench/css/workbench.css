@@ -304,6 +304,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-width: 0; }
 .math-card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .math-card h4 { font-size: 13px; }
 .tex { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.math-card .tex { margin: 4px 0; line-height: 2.2; }
 .tex .katex-display { margin: 4px 0; }
 .tex .katex-display > .katex { text-align: left; }
 .tex-numbers { margin-top: 4px; }
@@ -340,5 +341,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-width: 0; }
 .part.collapsed { padding-bottom: 4px; }
 .part.collapsed .part-title { margin-bottom: 0; }
 .problem.collapsed .problem-head { margin-bottom: 0; }
+.card.collapsed { align-self: start; }
+.card.collapsed .plot-head { margin-bottom: 0; }
+.card.collapsed .legend { display: none; }
+.math-card.collapsed { align-self: start; }
 .part-tools { display: flex; gap: 6px; justify-content: flex-end; margin: 2px 0 -2px; }
 .btn-small { font-size: 12px; padding: 2px 8px; }

@@ -29,17 +29,23 @@ WB.ui = (function () {
     return body;
   }
 
-  // Turn `host` into a toggle button (chevron + label html) that collapses `body`.
-  // `box` gets the class "collapsed". The state is remembered under `key`.
+  // Turn `host` into a toggle button (chevron + label html) that collapses `body`
+  // (an element or a list of them). `box` gets the class "collapsed". The state is
+  // remembered under `key`. `labelHtml` may instead be an existing element, which
+  // moves into the button (so code that retitles it keeps working).
   function collapsible(host, labelHtml, box, body, key) {
-    const label = el('span', { class: 'collapse-label' });
-    label.innerHTML = labelHtml; // authored text (may contain <sub>)
+    let label = labelHtml;
+    if (label instanceof Node) label.classList.add('collapse-label');
+    else {
+      label = el('span', { class: 'collapse-label' });
+      label.innerHTML = labelHtml; // authored text (may contain <sub>)
+    }
     const btn = el('button', { type: 'button', class: 'collapse-toggle', 'aria-expanded': 'true' },
       el('span', { class: 'chev', 'aria-hidden': 'true', text: '▾' }), label);
-    host.append(btn);
+    host.prepend(btn);
     const set = (collapsed) => {
       box.classList.toggle('collapsed', collapsed);
-      body.hidden = collapsed;
+      for (const b of [].concat(body)) b.hidden = collapsed;
       btn.setAttribute('aria-expanded', String(!collapsed));
       btn.classList.toggle('is-collapsed', collapsed);
     };
