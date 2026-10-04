@@ -431,7 +431,9 @@ class Controller:
 
   WB.chapters.ch18 = {
     id: 'ch18', num: 18, tab: 'Ch 18', title: 'Loopshaping', pages: 'pp. 323–374',
-    defaults(sys) { return { ...pidDefaults(sys), ...presetNone(), showT: true }; },
+    // Work mode starts C_pid at the book's A.10 gains (the problem gives C_pid; A.10 itself
+    // is now a controller the student writes). mine: the student's C_l from (a).
+    defaults(sys) { const a = a10(sys); return { ...pidDefaults(sys), ...presetNone(), showT: true, w: { kP: a.kP, kI: a.kI, kD: a.kD }, mine: null }; },
     simDefaults(sys) { return { ...sys.problems.ch18.sim, mismatch: sys.problems.ch18.mismatch }; },
     gains: pidGains,
     linearLabel: 'linear loop (no saturation, d, noise)',
@@ -442,13 +444,15 @@ class Controller:
       params(ctx) { const C = WB.chapters.ch18.design(ctx).C; return { C_num: C.num.slice(), C_den: C.den.slice() }; },
     },
 
+    // Work mode: C_l is the student's own (A.18(a), Python), or 1 until they give one;
+    // Explore: the block knobs.
     design(ctx) {
-      const st = ctx.st;
-      let Cl = T.gain(st.k);
-      for (const key of Object.keys(blocks)) if (st[key].on) Cl = T.mul(Cl, blocks[key].tf(st[key]));
+      const st = ctx.st, work = ctx.S.mode === 'work';
+      let Cl = T.gain(work ? 1 : st.k);
+      if (work) { if (st.mine) Cl = T.tf(st.mine.num, st.mine.den); } else for (const key of Object.keys(blocks)) if (st[key].on) Cl = T.mul(Cl, blocks[key].tf(st[key]));
       const Cp = pidTf(ctx), P = plantTf(ctx);
       const C = T.mul(Cp, Cl), Lg = T.mul(P, C), Lp = T.mul(P, Cp);
-      const F = st.pf.on ? T.lpf(st.pf.p) : T.gain(1);
+      const F = !work && st.pf.on ? T.lpf(st.pf.p) : T.gain(1);
       const pr = ctx.sys.problems.ch18;
       const { mag: clMag } = T.bode(Cl, W);
       let lowMin = Infinity, highMax = 0;
@@ -457,7 +461,8 @@ class Controller:
         if (W[i] >= pr.wHigh) highMax = Math.max(highMax, clMag[i]);
       }
       const mg = T.margins(Lg);
-      return { Cl, C, Lg, Lp, F, P, mg, lowOk: lowMin >= pr.factor * 0.999, highOk: highMax <= 1.001 / pr.factor, pmOk: Math.abs(mg.pm - pr.pm) <= 5, lowMin, highMax };
+      const stable = L.roots(L.polyAdd(Lg.den, Lg.num)).every((q) => q.re < 0);
+      return { Cl, C, Lg, Lp, F, P, mg, stable, lowOk: lowMin >= pr.factor * 0.999, highOk: highMax <= 1.001 / pr.factor, pmOk: Math.abs(mg.pm - pr.pm) <= 5, lowMin, highMax };
     },
 
     controller(ctx, { linear = false } = {}) {
@@ -477,7 +482,13 @@ class Controller:
     },
 
     buildControls(parent, ctx) {
-      if (ctx.S.mode === 'work') WB.myCtrl.banner(section(parent, 'Your controller'), ctx, `${ctx.sys.problems.ch18.id}(c) or (d)`);
+      if (ctx.S.mode === 'work') {
+        // C_l comes from the student's Python in (a), so no block menu here.
+        WB.myCtrl.banner(section(parent, 'Your controller'), ctx, `${ctx.sys.problems.ch18.id}(c) or (d)`);
+        pidControls(parent, ctx);
+        this.specSection(parent, ctx);
+        return;
+      }
       const pre = section(parent, 'Start from', 'p. 340–348');
       // The book and repo designs answer A.18(a): Work mode offers them once it is solved.
       const designs = [
@@ -521,7 +532,10 @@ class Controller:
       segmented(pf, { label: 'Bode: closed loop F·T', options: [{ value: true, label: 'show' }, { value: false, label: 'hide' }], ...bind(ctx, 'showT') });
 
       pidControls(parent, ctx);
+      this.specSection(parent, ctx);
+    },
 
+    specSection(parent, ctx) {
       const sp = section(parent, 'A.18 specs', 'p. 340–341');
       const box = el('div', { class: 'metrics' });
       sp.append(box);
@@ -533,8 +547,23 @@ class Controller:
           row('10× better above 1000 rad/s (max |C_l|)', d.highOk, `${fmt(db(d.highMax), 3)} dB`),
           row('PM ≈ 60° (±5°)', d.pmOk, `${fmt(d.mg.pm, 3)}° at ${fmt(d.mg.wc, 3)} rad/s`),
           WB.ui.metric('gain margin(s)', gmText(d.mg)),
+          ...(d.stable ? [] : [row('closed loop stable', false, 'unstable')]),
         );
       });
+    },
+
+    // Evaluate the student's C_l_num, C_l_den and keep them in the chapter state.
+    async loadMine(ctx, code) {
+      const out = await WB.py.evaluate(code, [{ params: ctx.pModel, vars: ['C_l_num', 'C_l_den'] }]);
+      if (out.error) return WB.yours.pyError(out);
+      const v = out.rows[0].vars;
+      const num = L.trimLeading([v.C_l_num].flat(Infinity)), den = L.trimLeading([v.C_l_den].flat(Infinity));
+      if (![...num, ...den].every((x) => typeof x === 'number' && Number.isFinite(x))) return { ok: false, msg: 'C_l_num and C_l_den must be lists of real numbers.' };
+      if (!den.length || den[0] === 0) return { ok: false, msg: 'C_l_den must have a nonzero leading coefficient.' };
+      if (num.length > den.length) return { ok: false, msg: 'C_l(s) must be proper: the numerator degree can be at most the denominator degree.' };
+      ctx.st.mine = { num, den };
+      ctx.update();
+      return { ok: true };
     },
 
     bode(ctx) {
@@ -570,7 +599,7 @@ class Controller:
         { title: 'Lag and lead', page: 'p. 325–328 · Eq. 18.1–18.2',
           theory: 'C_{lag} = \\frac{s + z}{s + z/M}\\;(20\\log M \\text{ low-frequency boost}),\\quad C_{lead} = M\\frac{s + \\omega_L/\\sqrt M}{s + \\omega_L\\sqrt M},\\; \\phi_{max} = \\sin^{-1}\\frac{M-1}{M+1}' },
         { title: 'Your C_l(s)', page: 'p. 340',
-          theory: 'C_l(s) = ' + parts.join('\\cdot ') },
+          theory: ctx.S.mode !== 'work' ? 'C_l(s) = ' + parts.join('\\cdot ') : st.mine ? `C_l(s) = ${T.texTf(d.Cl, 4)}` : 'C_l(s) = 1\\quad\\text{(none yet: (a))}' },
         { title: 'Margins', page: 'p. 304–306',
           theory: `PM = ${tex(d.mg.pm)}^\\circ \\text{ at } \\omega_{co} = ${tex(d.mg.wc)},\\quad GM = ${d.mg.crossings.length ? d.mg.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB at } ' + tex(c.w)).join(';\\;') : '\\infty'}`,
           note: 'Two phase crossings mean conditional stability: the lag drops the phase below −180° at low frequency, so lowering the gain enough would destabilize the loop. MATLAB\'s margin reports the upper crossing (the book\'s +14.7 dB); python-control reports the first one.' },
@@ -581,9 +610,21 @@ class Controller:
 
     buildProblem(parent, ctx) {
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch18, [
-        { id: 'a', title: '(a) Meet all three specs',
-          check: () => { const d = this.design(ctx); const ok = d.lowOk && d.highOk && d.pmOk; return { ok, msg: `low ${d.lowOk ? '✓' : '✗'}, high ${d.highOk ? '✓' : '✗'}, PM ${fmt(d.mg.pm, 3)}° ${d.pmOk ? '✓' : '✗'}` }; },
-          solution: () => [{ html: 'Book text design (p. 341–345): lag z = 1.5, M = 40 (PM drops to 41°), lead at 40 rad/s with M = 10, then low-pass filters at 50 and 150 rad/s. Its figures give PM 59.7° at 14.2 rad/s. The printed final C also includes an unexplained (s+0.7)/(s+0.07); the figures were made without it. The repo (Listing 18.4) is a different design: try both presets.' }] },
+        { id: 'a', title: '(a) Design C<sub>l</sub>(s) to meet the three specs',
+          html: 'Give C<sub>l</sub>(s) as coefficient lists, highest power of s first (<code>np.convolve</code> multiplies two factors). <em>Use my C_l</em> draws P·C<sub>pid</sub>·C<sub>l</sub> in the Bode plot and the spec readouts; C<sub>pid</sub> uses the gains in the C_PID section. The check also requires a stable closed loop.',
+          code: {
+            template: 'C_l_num = [1.0]\nC_l_den = [1.0]\n',
+            check: async (code) => {
+              const r = await this.loadMine(ctx, code);
+              if (r.ok === false) return r;
+              const d = this.design(ctx);
+              const ok = d.lowOk && d.highOk && d.pmOk && d.stable;
+              return { ok, msg: `low ${d.lowOk ? '✓' : '✗'}, high ${d.highOk ? '✓' : '✗'}, PM ${fmt(d.mg.pm, 3)}° ${d.pmOk ? '✓' : '✗'}${d.stable ? '' : ', closed loop unstable ✗'}` };
+            },
+            actions: [{ label: 'Use my C_l', run: async (code) => { const r = await this.loadMine(ctx, code); return r.ok === false ? r : { info: true, msg: 'Your C_l is in the Bode plot, the s-plane and the spec readouts.' }; } }],
+          },
+          solution: () => [
+            { code: "# book text design (p. 341-345): lag, lead, two low-pass filters\nM_lag, z = 40, 1.5\nlag_num, lag_den = [1, z], [1, z / M_lag]\nM, w = 10, 40\nlead_num, lead_den = [M, M * w / np.sqrt(M)], [1, w * np.sqrt(M)]\nC_l_num = np.convolve(np.convolve(lag_num, lead_num), [50 * 150])\nC_l_den = np.convolve(np.convolve(lag_den, lead_den), np.convolve([1, 50], [1, 150]))\n" },{ html: 'Book text design (p. 341–345): lag z = 1.5, M = 40 (PM drops to 41°), lead at 40 rad/s with M = 10, then low-pass filters at 50 and 150 rad/s. Its figures give PM 59.7° at 14.2 rad/s. The printed final C also includes an unexplained (s+0.7)/(s+0.07); the figures were made without it. The repo (Listing 18.4) is a different design: try both presets.' }] },
         { id: 'b', title: '(b) Add measurement noise',
           html: 'Set noise σ in the left panel. The chapter starts with σ = 0.573° (0.01 rad).' },
         WB.myCtrl.part(ctx, {
