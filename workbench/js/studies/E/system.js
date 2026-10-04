@@ -43,10 +43,10 @@ WB.systems = WB.systems || {};
     sym: { y: 'z', u: 'F', yText: 'z', uText: 'F' },
 
     params: [
-      { key: 'm1', label: 'm<sub>1</sub>', unit: 'kg', value: 0.35, min: 0.05, max: 1.5, step: 0.005 },
-      { key: 'm2', label: 'm<sub>2</sub>', unit: 'kg', value: 2, min: 0.5, max: 6, step: 0.01 },
-      { key: 'ell', label: 'ℓ', unit: 'm', value: 0.5, min: 0.2, max: 1.5, step: 0.005 },
-      { key: 'F_max', label: 'F<sub>max</sub>', unit: 'N', value: 15, min: 5, max: 60, step: 0.5 },
+      { key: 'm1', desc: 'mass of the ball', label: 'm<sub>1</sub>', unit: 'kg', value: 0.35, min: 0.05, max: 1.5, step: 0.005 },
+      { key: 'm2', desc: 'mass of the beam', label: 'm<sub>2</sub>', unit: 'kg', value: 2, min: 0.5, max: 6, step: 0.01 },
+      { key: 'ell', desc: 'length of the beam', label: 'ℓ', unit: 'm', value: 0.5, min: 0.2, max: 1.5, step: 0.005 },
+      { key: 'F_max', desc: 'maximum force', label: 'F<sub>max</sub>', unit: 'N', value: 15, min: 5, max: 60, step: 0.5 },
     ],
     constants: { g: 9.8 },
     uncertain: ['m1', 'm2', 'ell'],

@@ -99,7 +99,7 @@
     sec.append(row);
   }
   function gainControls(parent, ctx) {
-    const sec = section(parent, ctx.S.mode === 'work' ? 'Your B.10 gains (hw16.py transfer functions)' : 'B.10 gains (hw16.py transfer functions)', 'p. 163–164, p. 297');
+    const sec = section(parent, ctx.S.mode === 'work' ? 'Your B.10 gains' : 'B.10 gains', 'p. 163–164, p. 297');
     const obj = () => gainsOf(ctx);
     const sl = (k, label, min, max) => slider(sec, { label, min, max, step: (max - min) / 2000, sig: 4, ...bind(ctx, k, obj) });
     sl('kPth', 'k<sub>Pθ</sub>', -300, 0); sl('kDth', 'k<sub>Dθ</sub>', -40, 0);
@@ -289,7 +289,7 @@
     math(ctx) {
       const s = this.specs(ctx);
       return [
-        { title: 'Controllers (dirty derivative)', page: 'p. 297, hw16.py',
+        { title: 'Controllers (dirty derivative)', page: 'p. 297',
           theory: 'C_{in}(s) = \\frac{(k_{D\\theta} + \\sigma k_{P\\theta})s + k_{P\\theta}}{\\sigma s + 1},\\quad C_{out}(s) = \\frac{(k_{Dz} + \\sigma k_{Pz})s^2 + (k_{Pz} + \\sigma k_{Iz})s + k_{Iz}}{s(\\sigma s + 1)}',
           numbers: `C_{in} = ${T.texTf(Cin(gainsOf(ctx)))},\\quad C_{out} = ${T.texTf(Cout(gainsOf(ctx)))}` },
         { title: 'Tracking', page: 'p. 286 · Eq. 16.4–16.5',
@@ -305,7 +305,7 @@
       const s = () => this.specs(ctx);
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch16, [
         { id: 'in', title: 'Inner loop: Bode plots of the plant and of the plant under PD control',
-          html: 'Use the B.10 gains (hw16.py). In your code: bode(P_in) and bode(P_in·C_in) on one graph. Here: Loop = inner, and the gains on the right (in Work mode, Use my Ch 10 gains).' },
+          html: 'Use the B.10 gains. In your code: bode(P_in) and bode(P_in·C_in) on one graph. Here: Loop = inner, and the gains on the right (in Work mode, Use my Ch 10 gains).' },
         { id: 'a', title: '(a) Inner-loop tracking error below 1 rad/s',
           html: 'Percent tracking error (γ<sub>r</sub>, p. 286) for r<sub>θ</sub> content at frequency w (rad/s), as a function of w and the inner gains with the dirty derivative σ. The check calls it at random arguments; w = 1 is the book\'s case.',
           code: { template: 'def track_pct_in(w, kP, kD, sigma):\n    return ...\n', check: inCheck(ctx, 'track_pct_in', { label: 'w', lo: 0.1, hi: 2 }, (Lg) => 100 / Lg) },
@@ -363,7 +363,7 @@
       loopToggle(sec, ctx, [{ value: 'inner', label: 'inner' }, { value: 'outer', label: 'outer' }, { value: 'both', label: 'both closed loops' }]);
       segmented(sec, {
         label: 'Outer-loop model',
-        options: [{ value: 'impl', label: 'as implemented: C_out·F·T_in·P_out' }, { value: 'book', label: 'P_out·C_out (hw17.py)' }],
+        options: [{ value: 'impl', label: 'as implemented: C_out·F·T_in·P_out' }, { value: 'book', label: 'P_out·C_out' }],
         ...bind(ctx, 'outerModel'),
       });
       const box = el('div', { class: 'metrics' });
@@ -526,7 +526,7 @@
       onOff(pf, 'pf');
       slider(pf, { label: 'p', unit: 'rad/s', min: 0.1, max: 50, log: true, sig: 3, ...bind(ctx, 'p', () => ctx.st.pf), disabled: () => !ctx.st.pf.on });
       segmented(pf, {
-        label: 'Implementation (ctrlLoopshape.py)',
+        label: 'Implementation',
         options: [{ value: 'state_space', label: 'state space, RK4' }, { value: 'digital_filter', label: 'Tustin filter (hw18 default)' }],
         ...bind(ctx, 'method'),
       });
@@ -567,7 +567,7 @@
     math(ctx) {
       const d = this.design(ctx);
       return [
-        { title: 'Building blocks (loopshape_tools.py)', page: 'p. 324–328',
+        { title: 'Building blocks', page: 'p. 324–328',
           theory: '\\text{lead}(\\omega, M) = \\frac{\\sqrt M s + \\omega}{s + \\omega\\sqrt M},\\quad \\text{lag}(z, M) = \\frac{s + z}{s + z/M},\\quad \\text{lpf}(p) = \\frac{p}{s + p}',
           note: 'The repo\'s lead has DC gain 1/√M and high-frequency gain √M; the book\'s Eq. 18.2 lead has DC gain 1, so it is √M times larger.' },
         { title: 'Your controllers', page: 'p. 349, p. 355',
@@ -577,7 +577,7 @@
           note: 'The inner closed loop has DC gain P_in C_in(0)/(1 + P_in C_in(0)) ≠ 1, so P_out sees it as an extra gain.' },
         { title: 'Margins', page: 'p. 351, p. 356',
           theory: `\\text{inner } PM = ${tex(d.mi.pm)}^\\circ \\text{ at } ${tex(d.mi.wc)},\\quad \\text{outer } PM = ${tex(d.mo.pm)}^\\circ \\text{ at } ${tex(d.mo.wc)}` },
-        { title: 'Implementation', page: 'p. 336 · Eq. 18.3–18.7, ctrlLoopshape.py',
+        { title: 'Implementation', page: 'p. 336 · Eq. 18.3–18.7',
           theory: '\\tilde z_r = F(z_r),\\quad \\theta_r = C_{out}(\\tilde z_r - z),\\quad F = \\text{sat}\\big(C_{in}(\\theta_r - \\theta)\\big)',
           note: ctx.st.method === 'digital_filter' ? 'Tustin: s → (2/T_s)(z − 1)/(z + 1), then a difference equation (digitalFilter).' : 'Control-canonical state space, one RK4 step per sample (transferFunction).' },
       ];

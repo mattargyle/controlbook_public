@@ -331,7 +331,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
               { html: validatePoles(ps).ok ? 'For your poles from (a):' : 'Part (a) is not filled in yet, so this uses −3.52 ± 2.64j, −1.173 ± 0.88j:' },
               { tex: `\\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(use))},\\quad \\Delta_{ol} = ${WB.tf.polyTex(L.charPoly(jac().A))}` },
               { tex: `K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}` },
-              { html: 'Cross-checked against python-control <code>place</code> (tools/regress_E.py).' },
+              { html: 'Cross-checked against python-control <code>place</code>.' },
             ];
           },
         },

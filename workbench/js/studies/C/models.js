@@ -139,8 +139,8 @@
       slider(sec, { label: 'f', unit: 'Hz', min: 0.01, max: 1, step: 0.01, sig: 3, ...bind(ctx, 'f') });
       slider(sec, { label: 'φ lags θ by', unit: '°', min: 0, max: 180, step: 1, sig: 3, ...bind(ctx, 'lag') });
       sec.append(el('p', { class: 'muted small', text: ctx.S.mode === 'explore'
-        ? 'No dynamics here: the angles are imposed, as in hw02_satelliteSim.py (which uses θ = 2π sin(0.2πt) rad and φ = 0.5 sin(0.2πt) rad). The plot below splits K into the body and panel parts.'
-        : 'No dynamics here: the angles are imposed, as in hw02_satelliteSim.py (which uses θ = 2π sin(0.2πt) rad and φ = 0.5 sin(0.2πt) rad). Once (a) is solved, or you click Plot my K, the plot below shows the kinetic energy along this motion; until then it is empty.' }));
+        ? 'No dynamics here: the angles are imposed. The plot below splits K into the body and panel parts.'
+        : 'No dynamics here: the angles are imposed. Once (a) is solved, or you click Plot my K, the plot below shows the kinetic energy along this motion; until then it is empty.' }));
     },
 
     // K(t) answers C.2(a), so in Work mode the plot is empty until (a) is solved, apart
@@ -187,7 +187,7 @@
         },
         {
           id: 'b', title: '(b) Animate the satellite',
-          html: 'You write this class in your own <code>satelliteAnimation.py</code> (Listing 2.5, pp. 36–38). The animation at the top of this page shows the same kind of prescribed motion, set in the controls on the right.',
+          html: 'You write this class in your own animation code (Listing 2.5, pp. 36–38). The animation at the top of this page shows the same kind of prescribed motion, set in the controls on the right.',
         },
       ]);
     },
@@ -272,8 +272,8 @@ def _wb_f(state, tau):
       const sec = section(parent, 'Open-loop simulation', 'p. 51 · C.3(e), Listing 3.5');
       inputControls(sec, ctx);
       sec.append(el('p', { class: 'muted small', text: ctx.S.mode === 'explore'
-        ? 'hw03_satelliteSim.py drives the body with τ = 0.1 sin(0.2πt) N·m. The energy plot checks the EOM: E(t) − E(0) must equal the work done by τ minus what the damper dissipates.'
-        : 'hw03_satelliteSim.py drives the body with τ = 0.1 sin(0.2πt) N·m. The lower energy-balance plot is empty until you plot your own P or forces or solve (a) or (c): E(t) − E(0) after (a) and the net work of the nonconservative forces after (c), which must agree. Plot my P / Plot my forces draw your own versions any time.' }));
+        ? 'The body is driven with τ = 0.1 sin(0.2πt) N·m. The energy plot checks the EOM: E(t) − E(0) must equal the work done by τ minus what the damper dissipates.'
+        : 'The body is driven with τ = 0.1 sin(0.2πt) N·m. The lower energy-balance plot is empty until you plot your own P or forces or solve (a) or (c): E(t) − E(0) after (a) and the net work of the nonconservative forces after (c), which must agree. Plot my P / Plot my forces draw your own versions any time.' }));
     },
 
     extraPlot(ctx, res) {
@@ -321,7 +321,7 @@ def _wb_f(state, tau):
         { title: 'Euler-Lagrange equations', page: 'p. 43 · §3.1.4',
           theory: 'L(q, \\dot q) = K(q, \\dot q) - P(q),\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q' },
         { title: 'Potential energy', page: 'p. 41–42 · §3.1.1',
-          theory: '\\text{gravity: } P = mgy + P_0 \\;(y = \\text{height of the mass}),\\quad \\text{spring: } P = \\tfrac12 k z^2 \\;(z = \\text{deflection})',
+          theory: '\\text{gravity: } P = mgy + P_0,\\quad \\text{spring: } P = \\tfrac12 k z^2 \\;(z = \\text{deflection})',
           note: 'A torsional spring stores energy the same way, with z its angular deflection.' },
         { title: 'Generalized coordinates, forces, damping', page: 'p. 42–43 · §3.1.2–3.1.3',
           theory: 'q = \\text{minimum set of configuration variables},\\quad \\tau = \\text{applied (nonconservative) forces along } q,\\quad -B\\dot q = \\text{damping forces}' },
@@ -416,7 +416,7 @@ def _wb_f(state, tau):
         },
         {
           id: 'e', title: '(e) Implement and simulate',
-          html: 'Write f(x, u) as in <code>satelliteDynamics.py</code>: the state x = (θ, φ, θ̇, φ̇)ᵀ is a 4×1 column. <em>Check</em> tests it at random states. <em>Simulate my f</em> runs it with RK4 on the same torque input as the satellite above (true-plant parameters) and draws θ and φ dashed on the plots.',
+          html: 'Write f(x, u): the state x = (θ, φ, θ̇, φ̇)ᵀ is a 4×1 column. <em>Check</em> tests it at random states. <em>Simulate my f</em> runs it with RK4 on the same torque input as the satellite above (true-plant parameters) and draws θ and φ dashed on the plots.',
           code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'f', args: ['state', 'tau'], truth: (p, a) => { const [td, pd] = accel(ctx, p, a); return [[a.thetadot], [a.phidot], [td], [pd]]; } }],
           }, 'def f(state, tau):\n    theta = state[0][0]\n    phi = state[1][0]\n    thetadot = state[2][0]\n    phidot = state[3][0]\n    thetaddot = ...\n    phiddot = ...\n    return np.array([[thetadot], [phidot],\n                     [thetaddot], [phiddot]])\n'), {

@@ -385,7 +385,7 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'b', title: '(b) Use only the measured θ and θ<sub>r</sub>',
-          html: 'The PID here gets only the (noisy) measurement and the reference; θ̇ comes from the dirty derivative in (c). In your <code>ctrlPID.py</code>, <code>update(r, y)</code> receives y, not the state.',
+          html: 'The PID here gets only the (noisy) measurement and the reference; θ̇ comes from the dirty derivative in (c). In your PID controller, <code>update(r, y)</code> receives y, not the state.',
         },
         {
           id: 'c1', title: `(c) PD gains for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,

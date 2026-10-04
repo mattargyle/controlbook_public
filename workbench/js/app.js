@@ -256,7 +256,7 @@ window.WB = window.WB || {};
     plant.append(el('button', { type: 'button', class: 'btn btn-quiet', text: 'Book values', onclick: () => { for (const q of s.params) S.p[q.key] = q.value; update(); } }));
 
     const mis = section(root, 'True plant vs. model');
-    mis.append(el('p', { class: 'muted small', text: 'The simulated plant differs from the model the controller was designed with, like <sys>Dynamics(alpha).' }));
+    mis.append(el('p', { class: 'muted small', text: 'The simulated plant differs from the model the controller was designed with.' }));
     for (const k of s.uncertain) {
       const q = s.params.find((pp) => pp.key === k);
       slider(mis, { label: 'Δ' + q.label, unit: '%', min: -50, max: 50, step: 1, sig: 3, get: () => S.mismatch[k], set: (val) => { S.mismatch[k] = val; update(); } });
@@ -320,7 +320,64 @@ window.WB = window.WB || {};
 
     const prob = document.getElementById('problem');
     prob.replaceChildren();
-    chapter().buildProblem(prob, ctx);
+    const panes = {
+      problem: el('div', { class: 'problem', role: 'tabpanel' }),
+      python: el('div', { class: 'help-pane', role: 'tabpanel' }),
+      params: el('div', { class: 'help-pane', role: 'tabpanel' }),
+    };
+    const bar = el('div', { class: 'problem-tabs', role: 'tablist', 'aria-label': 'Problem panel' });
+    const tabBtns = [['problem', 'Problem'], ['python', 'Python help'], ['params', 'Parameters <code>P</code>']].map(([k, label]) => {
+      const b = el('button', { type: 'button', role: 'tab', class: 'tab' });
+      b.innerHTML = label;
+      b.addEventListener('click', () => { problemTab = k; showTab(); });
+      bar.append(b);
+      return [k, b];
+    });
+    const showTab = () => {
+      for (const [k, b] of tabBtns) {
+        b.classList.toggle('on', k === problemTab);
+        b.setAttribute('aria-selected', String(k === problemTab));
+        panes[k].hidden = k !== problemTab;
+      }
+    };
+    prob.append(bar, panes.problem, panes.python, panes.params);
+    chapter().buildProblem(panes.problem, ctx);
+    buildPythonHelp(panes.python);
+    buildParamsHelp(panes.params);
+    showTab();
+  }
+
+  // Which tab of the problem card is showing; kept across chapter switches.
+  let problemTab = 'problem';
+  // Constants a system carries outside its sliders (sys.constants).
+  const CONSTANT_INFO = { g: { label: 'g', unit: 'm/s²', desc: 'gravitational acceleration' } };
+
+  function buildPythonHelp(root) {
+    const p = (html) => { const n = el('p'); n.innerHTML = html; root.append(n); };
+    p('Python answers run in your browser (Python 3.14 + numpy, loaded on the first Check).');
+    p(`<code>np</code> (numpy) and <code>math</code> are imported, and <code>P</code> holds the study's parameters (see the Parameters tab), for example <code>P.${sys().params[0].key}</code>.`);
+    p('Write answers with these, not numbers: they are checked with other parameter values too.');
+  }
+
+  function buildParamsHelp(root) {
+    const s = sys();
+    const intro = el('p');
+    intro.innerHTML = '<code>P</code> in Python answers holds these. Values are the current nominal parameters (left panel).';
+    const rows = [
+      ...s.params.map((q) => ({ key: q.key, label: q.label, unit: q.unit, desc: q.desc || '' })),
+      ...Object.keys(s.constants || {}).map((k) => ({ key: k, ...(CONSTANT_INFO[k] || { label: k, unit: '', desc: '' }) })),
+    ];
+    const tbody = el('tbody');
+    const valueCells = rows.map((r) => {
+      const name = el('td'); name.append(el('code', { text: `P.${r.key}` }));
+      const sym = el('td'); sym.innerHTML = r.label; // authored text (may contain <sub>)
+      const val = el('td', { class: 'num' });
+      tbody.append(el('tr', {}, name, sym, el('td', { text: r.desc }), val, el('td', { text: r.unit })));
+      return [r.key, val];
+    });
+    const head = el('tr', {}, ...['Python', 'Symbol', 'Meaning', 'Value', 'Unit'].map((t) => el('th', { text: t })));
+    root.append(intro, el('div', { class: 'table-scroll' }, el('table', { class: 'param-table' }, el('thead', {}, head), tbody)));
+    WB.ui.addRefresher(() => { for (const [k, td] of valueCells) td.textContent = M.fmt(ctx.pModel[k], 4); });
   }
 
   function renderMetrics(table) {

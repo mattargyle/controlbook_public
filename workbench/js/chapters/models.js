@@ -147,8 +147,8 @@ WB.chapters = WB.chapters || {};
       slider(sec, { label: 'A', unit: '°', min: 0, max: 180, step: 1, sig: 3, ...bind(ctx, 'A') });
       slider(sec, { label: 'f', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'f') });
       sec.append(el('p', { class: 'muted small', text: ctx.S.mode === 'work'
-        ? 'No dynamics here: the motion is imposed, as in hw02_armSim.py. Once (a) is solved, or you click Plot my K, the plot below shows the kinetic energy along that motion.'
-        : 'No dynamics here: the motion is imposed, as in hw02_armSim.py. The plot below splits the kinetic energy into translation of the center of mass and rotation about it.' }));
+        ? 'No dynamics here: the motion is imposed. Once (a) is solved, or you click Plot my K, the plot below shows the kinetic energy along that motion.'
+        : 'No dynamics here: the motion is imposed. The plot below splits the kinetic energy into translation of the center of mass and rotation about it.' }));
     },
 
     // K(t) (and its split) answers A.2(a), so in Work mode the plot is empty until (a)
@@ -202,7 +202,7 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'b', title: '(b) Animate the arm',
-          html: 'You write this class in your own <code>armAnimation.py</code> (hw02, p. 30). The animation at the top of this page shows the same prescribed motion θ(t) = A sin(2πft), set in the controls on the right.',
+          html: 'You write this class in your own animation code (p. 30). The animation at the top of this page shows the same prescribed motion θ(t) = A sin(2πft), set in the controls on the right.',
         },
       ]);
     },
@@ -273,8 +273,8 @@ WB.chapters = WB.chapters || {};
       const sec = section(parent, 'Open-loop simulation', 'p. 43 · A.3(e), Listing 3.2');
       inputControls(sec, ctx, { comps: [{ value: 'none', label: 'none (hw03)' }, { value: 'fl', label: 'τ_fl(θ)' }] });
       sec.append(el('p', { class: 'muted small', text: ctx.S.mode === 'work'
-        ? 'hw03_armSim.py drives the arm with a ±0.2 N·m square wave. That is less than gravity needs to hold the arm level, so the arm falls and swings. The energy plot checks the EOM: the change in K + P must equal the net work of the nonconservative forces. It stays empty until you plot your own P or forces (Plot my P / Plot my forces) or solve (a) or (c); E(t) − E(0) appears once (a) is solved and the work curve once (c) is solved. τ_fl is added once A.4(c) is solved (Ch 4 tab).'
-        : 'hw03_armSim.py drives the arm with a ±0.2 N·m square wave. That is less than gravity needs to hold the arm level, so the arm falls and swings. The energy plot checks the EOM: E(t) − E(0) must equal the work done by the torque minus the friction loss.' }));
+        ? 'The arm is driven with a ±0.2 N·m square wave. That is less than gravity needs to hold the arm level, so the arm falls and swings. The energy plot checks the EOM: the change in K + P must equal the net work of the nonconservative forces. It stays empty until you plot your own P or forces (Plot my P / Plot my forces) or solve (a) or (c); E(t) − E(0) appears once (a) is solved and the work curve once (c) is solved. τ_fl is added once A.4(c) is solved (Ch 4 tab).'
+        : 'The arm is driven with a ±0.2 N·m square wave. That is less than gravity needs to hold the arm level, so the arm falls and swings. The energy plot checks the EOM: E(t) − E(0) must equal the work done by the torque minus the friction loss.' }));
     },
 
     extraPlot(ctx, res) {
@@ -330,7 +330,7 @@ WB.chapters = WB.chapters || {};
         { title: 'Euler-Lagrange equations', page: 'p. 43 · §3.1.4',
           theory: 'L(q, \\dot q) = K(q, \\dot q) - P(q),\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q' },
         { title: 'Potential energy', page: 'p. 41–42 · §3.1.1',
-          theory: '\\text{gravity: } P = mgy + P_0 \\;(y = \\text{height of the mass}),\\quad \\text{spring: } P = \\tfrac12 k z^2',
+          theory: '\\text{gravity: } P = mgy + P_0,\\quad \\text{spring: } P = \\tfrac12 k z^2',
           note: 'For a rigid body, y is the height of its center of mass.' },
         { title: 'Generalized coordinates, forces, damping', page: 'p. 42–43 · §3.1.2–3.1.3',
           theory: 'q = \\text{minimum set of configuration variables},\\quad \\tau = \\text{applied (nonconservative) forces along } q,\\quad -B\\dot q = \\text{damping forces}' },
@@ -422,7 +422,7 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'e', title: '(e) Implement and simulate',
-          html: 'Write f(x, u) as in <code>armDynamics.py</code>: the state is a 2×1 column. <em>Check</em> tests it at random states like <code>testDynamics.py</code>. <em>Simulate my f</em> runs it with RK4 on the same torque input as the arm above (true-plant parameters) and draws θ dashed on the plot.',
+          html: 'Write f(x, u): the state is a 2×1 column. <em>Check</em> tests it at random states. <em>Simulate my f</em> runs it with RK4 on the same torque input as the arm above (true-plant parameters) and draws θ dashed on the plot.',
           code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'f', args: ['state', 'tau'], truth: (p, a) => [[a.thetadot], [thetaddotOf(ctx, p, a.theta, a.thetadot, a.tau)]] }],
           }, 'def f(state, tau):\n    theta = state[0][0]\n    thetadot = state[1][0]\n    thetaddot = ...\n    return np.array([[thetadot], [thetaddot]])\n'), {

@@ -831,7 +831,7 @@
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Parameters vary by up to 20% (α = 0.2)',
-          html: 'In your <code>VTOLDynamics.py</code>, scale m<sub>c</sub>, J<sub>c</sub>, d and μ by random factors in [1 − α, 1 + α] each run. Here the true plant is set by the plant-mismatch sliders in the left panel (the chapter starts with a fixed 20% draw). Passes when every mismatch is within ±20% and at least one is nonzero.',
+          html: 'In your dynamics, scale m<sub>c</sub>, J<sub>c</sub>, d and μ by random factors in [1 − α, 1 + α] each run. Here the true plant is set by the plant-mismatch sliders in the left panel (the chapter starts with a fixed 20% draw). Passes when every mismatch is within ±20% and at least one is nonzero.',
           check: () => {
             const mis = ctx.S.mismatch || {};
             const v = ['mc', 'Jc', 'd', 'mu'].map((k) => mis[k] || 0);

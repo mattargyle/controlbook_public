@@ -153,7 +153,7 @@ WB.chapters = WB.chapters || {};
           solution: () => [{ tex: `P(j\\omega) = \\frac{${tex(m().b0 / m().a1)}}{j\\omega(1 + j\\omega/${tex(m().a1)})}\\;\\Rightarrow\\; -20 \\text{ then } -40\\text{ dB/dec, phase } -90^\\circ \\to -180^\\circ` }],
         },
         {
-          id: 'b', title: '(b) Compare with bode (hw15.py prints these)', after: 'a',
+          id: 'b', title: '(b) Compare with bode', after: 'a',
           inputs: { m1: '|P(j0.3)| [dB]', m2: '|P(j10)| [dB]', m3: '|P(j1000)| [dB]' },
           check: (v) => PD().checkNumbers(v, { m1: magDb(0.3), m2: magDb(10), m3: magDb(1000) }, {}),
           solution: () => [{ tex: `${tex(magDb(0.3))},\\; ${tex(magDb(10))},\\; ${tex(magDb(1000))}\\;\\text{dB}` }],
@@ -439,7 +439,7 @@ WB.chapters = WB.chapters || {};
       // The book and repo designs answer A.18(a): Work mode offers them once it is solved.
       const designs = [
         el('button', { type: 'button', class: 'btn', text: 'Book text design', title: 'lag 1.5/40, lead 40/10, LPF 50 and 150, prefilter 3', onclick: () => { Object.assign(ctx.st, presetBook()); ctx.update(); } }),
-        el('button', { type: 'button', class: 'btn', text: 'Repo loopShaping.py', title: 'LPF 90, lag 5/90, lead 10/10, gain to cross at 6.35, LPF 100, prefilter 2', onclick: () => { Object.assign(ctx.st, presetRepo(ctx)); ctx.update(); } }),
+        el('button', { type: 'button', class: 'btn', text: 'Repo design', title: 'LPF 90, lag 5/90, lead 10/10, gain to cross at 6.35, LPF 100, prefilter 2', onclick: () => { Object.assign(ctx.st, presetRepo(ctx)); ctx.update(); } }),
       ];
       pre.append(el('div', { class: 'btn-row' },
         el('button', { type: 'button', class: 'btn', text: 'C_pid only', onclick: () => { Object.assign(ctx.st, presetNone()); ctx.update(); } }), ...designs));

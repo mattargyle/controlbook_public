@@ -202,7 +202,7 @@
       { title: 'Outer gains of the pendulum', page: 'p. 127 · Eq. 8.12–8.13', answers: 'B.8/d2',
         theory: 'a = \\frac{k_{Pz}}{1 + k_{Dz}} = -\\sqrt{\\tfrac{2\\ell}{3g}}\\,\\omega_{nz}^2,\\quad b = \\frac{k_{Dz}}{1 + k_{Dz}} = \\sqrt{\\tfrac{2\\ell}{3g}}\\big(a - 2\\zeta_z\\omega_{nz}\\big),\\quad k_{Dz} = \\frac{b}{1 - b},\\; k_{Pz} = \\frac{a}{1 - b}',
         numbers: `k_{Pz} = ${tex(g.kPz)},\\quad k_{Dz} = ${tex(g.kDz)}${withI ? `,\\quad k_{Iz} = ${tex(g.kIz)}` : ''},\\quad p_{out} = ${op.map((x) => texPole(x)).join(',\\;')}`,
-        note: ctx.st.formula === 'listing' && ctx.S.mode === 'explore' ? 'Using Listing 8.3 (ctrlPD.py). Its k_Dz expression is not Eq. 8.13, so the outer ζ comes out larger than ζ_z (ISSUES.md).' : undefined },
+        note: ctx.st.formula === 'listing' && ctx.S.mode === 'explore' ? 'Using Listing 8.3. Its k_Dz expression is not Eq. 8.13, so the outer ζ comes out larger than ζ_z (ISSUES.md).' : undefined },
     ];
   }
   function fullCard(ctx, g, withI) {
@@ -251,7 +251,7 @@
         knobSliders(sec, ctx);
         segmented(sec, {
           label: 'Outer gains from',
-          options: [{ value: 'book', label: 'Eq. 8.12–8.13' }, { value: 'listing', label: 'Listing 8.3 (ctrlPD.py)' }],
+          options: [{ value: 'book', label: 'Eq. 8.12–8.13' }, { value: 'listing', label: 'Listing 8.3' }],
           ...bind(ctx, 'formula'),
         });
         sec.append(el('div', { class: 'btn-row' },
@@ -633,7 +633,7 @@
         },
         {
           id: 'b', title: '(b) The controller knows only z, θ and r<sub>z</sub>',
-          html: 'The PID here gets only the (noisy) measurements z, θ and the reference; ż and θ̇ come from dirty derivatives (c). In your <code>ctrlPID.py</code>, <code>update(r, y)</code> receives y, not the state.',
+          html: 'The PID here gets only the (noisy) measurements z, θ and the reference; ż and θ̇ come from dirty derivatives (c). In your PID controller, <code>update(r, y)</code> receives y, not the state.',
         },
         {
           id: 'c1', title: `(c) Gains for the listing's t<sub>r,θ</sub> = ${pr.trTh} s, ζ<sub>θ</sub> = ${pr.zetaTh}, M = ${pr.M}, ζ<sub>z</sub> = ${pr.zetaZ}`,

@@ -179,7 +179,7 @@
         },
         {
           id: 'b', title: '(b) Animation',
-          html: 'You write this class in your own <code>VTOLAnimation.py</code>; its inputs are z<sub>v</sub>, z<sub>t</sub>, h and θ. The animation at the top of this page draws the same picture (the target z<sub>t</sub> is the box on the ground) for the motion set on the right.',
+          html: 'You write this class in your own animation code; its inputs are z<sub>v</sub>, z<sub>t</sub>, h and θ. The animation at the top of this page draws the same picture (the target z<sub>t</sub> is the box on the ground) for the motion set on the right.',
         },
       ]);
     },
@@ -332,7 +332,7 @@
         { title: 'Euler-Lagrange equations', page: 'p. 43 · §3.1.4',
           theory: 'L(q, \\dot q) = K(q, \\dot q) - P(q),\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q' },
         { title: 'Potential energy', page: 'p. 41–42 · §3.1.1',
-          theory: '\\text{gravity: } P = mgy + P_0 \\;(y = \\text{height of the mass})',
+          theory: '\\text{gravity: } P = mgy + P_0',
           note: 'For a rigid body, y is the height of its center of mass. The energy of a system is the sum over its bodies.' },
         { title: 'Generalized coordinates, forces, damping', page: 'p. 42–43 · §3.1.2–3.1.3',
           theory: 'q = \\text{minimum set of configuration variables},\\quad \\tau = \\text{applied (nonconservative) forces along } q,\\quad -B\\dot q = \\text{damping forces}' },
@@ -430,12 +430,12 @@
             { tex: 'M(q) = \\operatorname{diag}(m_c + 2m_r,\\; m_c + 2m_r,\\; J_c + 2m_r d^2),\\quad \\frac{\\partial P}{\\partial q} = \\begin{bmatrix}0\\\\ (m_c + 2m_r)g\\\\ 0\\end{bmatrix}' },
             { tex: '(m_c + 2m_r)\\ddot z = -F\\sin\\theta - \\mu\\dot z,\\quad (m_c + 2m_r)\\ddot h = F\\cos\\theta - (m_c + 2m_r)g,\\quad (J_c + 2m_r d^2)\\ddot\\theta = \\tau' },
             { code: ACC_CODE },
-            { html: 'M(q) is constant, so there are no Coriolis terms. These reproduce every expected value in <code>_F_planar_vtol/python/testDynamics.py</code> (<code>workbench/tools/regress_F.py</code>).' },
+            { html: 'M(q) is constant, so there are no Coriolis terms. These reproduce every expected value in the course\'s dynamics test.' },
           ],
         },
         {
           id: 'e', title: '(e) Implement and simulate',
-          html: 'Write f(x, u) as in your <code>VTOLDynamics.py</code>: x = (z, h, θ, ż, ḣ, θ̇) is a 6×1 column and u = (f<sub>r</sub>, f<sub>ℓ</sub>) a 2×1 column. <em>Check</em> tests it at random states like <code>testDynamics.py</code>. <em>Simulate my f</em> runs it with RK4 on the same inputs as the VTOL above (true-plant parameters) and draws z, h and θ dashed on the plots.',
+          html: 'Write f(x, u): x = (z, h, θ, ż, ḣ, θ̇) is a 6×1 column and u = (f<sub>r</sub>, f<sub>ℓ</sub>) a 2×1 column. <em>Check</em> tests it at random states. <em>Simulate my f</em> runs it with RK4 on the same inputs as the VTOL above (true-plant parameters) and draws z, h and θ dashed on the plots.',
           code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'f', args: ['state', 'u'], truth: (p, a) => sysF().f([a.z, a.h, a.theta, a.zdot, a.hdot, a.thetadot], [a.fr, a.fl], p).map((v) => [v]) }],
           }, 'def f(state, u):\n    z = state[0][0]\n    h = state[1][0]\n    theta = state[2][0]\n    zdot = state[3][0]\n    hdot = state[4][0]\n    thetadot = state[5][0]\n    fr = u[0][0]\n    fl = u[1][0]\n    zddot = ...\n    hddot = ...\n    thetaddot = ...\n    return np.array([[zdot], [hdot],\n                     [thetadot], [zddot],\n                     [hddot], [thetaddot]])\n'), {

@@ -163,11 +163,11 @@ WB.studies.B = WB.studies.B || { chapters: {} };
     name: 'Pendulum on a Cart',
     introPage: 14,
     params: [
-      { key: 'm1', label: 'm<sub>1</sub> (rod)', unit: 'kg', value: 0.25, min: 0.05, max: 1, step: 0.005 },
-      { key: 'm2', label: 'm<sub>2</sub> (cart)', unit: 'kg', value: 1.0, min: 0.2, max: 3, step: 0.01 },
-      { key: 'ell', label: 'ℓ', unit: 'm', value: 1.0, min: 0.2, max: 2, step: 0.01 },
-      { key: 'b', label: 'b', unit: 'N·s/m', value: 0.05, min: 0, max: 1, step: 0.005 },
-      { key: 'F_max', label: 'F<sub>max</sub>', unit: 'N', value: 5.0, min: 0.5, max: 30, step: 0.1 },
+      { key: 'm1', desc: 'mass of the rod', label: 'm<sub>1</sub> (rod)', unit: 'kg', value: 0.25, min: 0.05, max: 1, step: 0.005 },
+      { key: 'm2', desc: 'mass of the cart', label: 'm<sub>2</sub> (cart)', unit: 'kg', value: 1.0, min: 0.2, max: 3, step: 0.01 },
+      { key: 'ell', desc: 'length of the rod', label: 'ℓ', unit: 'm', value: 1.0, min: 0.2, max: 2, step: 0.01 },
+      { key: 'b', desc: 'damping coefficient', label: 'b', unit: 'N·s/m', value: 0.05, min: 0, max: 1, step: 0.005 },
+      { key: 'F_max', desc: 'maximum force', label: 'F<sub>max</sub>', unit: 'N', value: 5.0, min: 0.5, max: 30, step: 0.1 },
     ],
     constants: { g: 9.8 },
     // pendulumDynamics(alpha) perturbs m1, m2, ell, b; g is "well known".

@@ -16,10 +16,10 @@ WB.systems.A = {
 
   // Nominal physical parameters (what the controller designer knows).
   params: [
-    { key: 'm', label: 'm', unit: 'kg', value: 0.5, min: 0.1, max: 2.0, step: 0.01 },
-    { key: 'ell', label: 'ℓ', unit: 'm', value: 0.3, min: 0.1, max: 1.0, step: 0.01 },
-    { key: 'b', label: 'b', unit: 'N·m·s', value: 0.01, min: 0, max: 0.2, step: 0.001 },
-    { key: 'tau_max', label: 'τ<sub>max</sub>', unit: 'N·m', value: 1.0, min: 0.2, max: 5, step: 0.05 },
+    { key: 'm', desc: 'mass of the arm', label: 'm', unit: 'kg', value: 0.5, min: 0.1, max: 2.0, step: 0.01 },
+    { key: 'ell', desc: 'length of the arm', label: 'ℓ', unit: 'm', value: 0.3, min: 0.1, max: 1.0, step: 0.01 },
+    { key: 'b', desc: 'damping coefficient', label: 'b', unit: 'N·m·s', value: 0.01, min: 0, max: 0.2, step: 0.001 },
+    { key: 'tau_max', desc: 'maximum torque', label: 'τ<sub>max</sub>', unit: 'N·m', value: 1.0, min: 0.2, max: 5, step: 0.05 },
   ],
   constants: { g: 9.8 },
   // Parameters that armDynamics(alpha) perturbs; g is "well known" and is not.

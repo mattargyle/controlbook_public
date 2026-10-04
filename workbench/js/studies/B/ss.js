@@ -307,7 +307,7 @@
         },
         {
           id: 'b', title: '(b) Add A, B, C, D from B.6 to the parameter file',
-          html: 'Use your A, B, C, D from B.6 (the Ch 6 tab) in your <code>pendulumParam.py</code>. The model card in the Math section unlocks once B.6 is solved.',
+          html: 'Use your A, B, C, D from B.6 (the Ch 6 tab). The model card in the Math section unlocks once B.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability',
@@ -461,7 +461,7 @@
         { title: 'Observer poles and gain', page: 'p. 232 · Listing 13.2',
           theory: 't_{r,obs} = t_r / 10 \\text{ for each pair (repo)},\\quad L = \\text{place}(A^\\top, C^\\top, q)^\\top',
           numbers: `\\omega_{n\\theta,obs} = ${tex(g.wnThObs)},\\; \\omega_{nz,obs} = ${tex(g.wnZObs)},\\quad L^\\top = ${texMat(L.T(g.L))}`, spoiler: true, answers: 'B.13/c',
-          note: 'With two outputs many L place the same poles; this is the one scipy\'s YT iteration returns, so the page matches ctrlObserver.py.' },
+          note: 'With two outputs many L place the same poles; this is the one scipy\'s YT iteration returns.' },
         polesCard(ctx, d, 'sfi'),
         { title: 'Separation principle', page: 'p. 222–223',
           theory: '\\begin{pmatrix}\\dot x\\\\ \\dot e\\end{pmatrix} = \\begin{pmatrix}A - BK & BK\\\\ 0 & A - LC\\end{pmatrix}\\begin{pmatrix}x\\\\ e\\end{pmatrix} \\Rightarrow \\text{eig} = \\text{eig}(A - BK)\\cup\\text{eig}(A - LC)',
@@ -492,7 +492,7 @@
           id: 'c', title: '(c) Observer natural frequencies for the repo tuning (t<sub>r,obs</sub> = t<sub>r</sub>/10, π/(2t<sub>r</sub>√(1−ζ²)), ζ = 0.9)',
           inputs: { wt: 'ω<sub>nθ,obs</sub>', wz: 'ω<sub>nz,obs</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { wt: r.wnThObs, wz: r.wnZObs }, { wt: 'ωnθ,obs', wz: 'ωnz,obs' }); },
-          solution: () => { const r = ref(); return [{ tex: `\\omega_{n\\theta,obs} = ${tex(r.wnThObs)},\\; \\omega_{nz,obs} = ${tex(r.wnZObs)},\\quad L^\\top = ${texMat(L.T(r.L))}` }, { html: 'L is the scipy/control.place result printed by ctrlObserver.py. Any L with these eigenvalues of A − LC is a valid answer.' }]; },
+          solution: () => { const r = ref(); return [{ tex: `\\omega_{n\\theta,obs} = ${tex(r.wnThObs)},\\; \\omega_{nz,obs} = ${tex(r.wnZObs)},\\quad L^\\top = ${texMat(L.T(r.L))}` }, { html: 'L is the scipy/control.place result. Any L with these eigenvalues of A − LC is a valid answer.' }]; },
         },
         {
           id: 'd', title: '(d) Plot the states and their estimates',

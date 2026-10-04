@@ -158,7 +158,7 @@
         },
         {
           id: 'b', title: '(b) Animate the system',
-          html: 'You write this in your own <code>massAnimation.py</code> (hw02). The animation at the top of this page shows the same kind of variable input z(t) = A sin(2πft), set in the controls on the right.',
+          html: 'You write this in your own animation code. The animation at the top of this page shows the same kind of variable input z(t) = A sin(2πft), set in the controls on the right.',
         },
       ]);
     },
@@ -357,12 +357,11 @@
             { tex: 'L = \\tfrac12 m\\dot z^2 - \\tfrac12 kz^2,\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot z} = m\\ddot z,\\quad \\frac{\\partial L}{\\partial z} = -kz' },
             { tex: 'm\\ddot z + kz = F - b\\dot z' },
             { code: 'def zddot(z, zdot, F):\n    return (F - P.b * zdot - P.k * z) / P.m' },
-            { html: 'This is the f(x, u) that <code>_D_mass/python/testDynamics.py</code> checks.' },
           ],
         },
         {
           id: 'e', title: '(e) Implement and simulate',
-          html: 'Write f(x, u) as in <code>massDynamics.py</code>: the state is a 2×1 column. <em>Check</em> tests it at random states like <code>testDynamics.py</code>. <em>Simulate my f</em> runs it with RK4 on the same force input as the mass above (true-plant parameters) and draws z dashed on the plot. The output connects to the D.2 animation at the top of the page.',
+          html: 'Write f(x, u): the state is a 2×1 column. <em>Check</em> tests it at random states. <em>Simulate my f</em> runs it with RK4 on the same force input as the mass above (true-plant parameters) and draws z dashed on the plot. The output connects to the D.2 animation at the top of the page.',
           code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'f', args: ['state', 'F'], truth: (p, a) => [[a.zdot], [zddotOf(ctx, p, a.z, a.zdot, a.F)]] }],
           }, 'def f(state, F):\n    z = state[0][0]\n    zdot = state[1][0]\n    zddot = ...\n    return np.array([[zdot], [zddot]])\n'), {
@@ -691,7 +690,7 @@
           solution: () => [
             { tex: `P(s) = \\frac{1/m}{s^2 + \\frac bm s + \\frac km} = \\frac{${tex(t().b0)}}{s^2 + ${tex(t().a1)}s + ${tex(t().a0)}}` },
             { code: 'def transfer_function(s):\n    return (1 / P.m) / (s**2 + P.b / P.m * s + P.k / P.m)' },
-            { html: 'Cross-checked in tools/regress_D.py against C(sI − A)<sup>−1</sup>B from D.6.' },
+            { html: 'Cross-checked against C(sI − A)<sup>−1</sup>B from D.6.' },
           ],
         },
         {
@@ -756,7 +755,7 @@
         solution: () => { const { A, B } = ss(ctx.pModel); return [
           { tex: `A = \\begin{bmatrix}0 & 1\\\\ -\\frac km & -\\frac bm\\end{bmatrix} = ${texMat(A)},\\quad B = \\begin{bmatrix}0\\\\ \\frac1m\\end{bmatrix} = ${texMat(B)},\\quad C = \\begin{bmatrix}1 & 0\\end{bmatrix},\\quad D = 0` },
           { code: 'A = np.array([[0, 1],\n              [-P.k / P.m, -P.b / P.m]])\nB = np.array([[0], [1 / P.m]])\nC = np.array([[1, 0]])\nD = np.array([[0]])' },
-          { html: 'Check: C(sI − A)<sup>−1</sup>B reproduces the D.5 transfer function (tools/regress_D.py).' },
+          { html: 'Check: C(sI − A)<sup>−1</sup>B reproduces the D.5 transfer function.' },
         ]; },
       }]);
     },

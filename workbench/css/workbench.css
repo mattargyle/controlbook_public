@@ -281,6 +281,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-width: 0; }
 .status-icon { font-weight: 700; }
 
 /* ---------------------------------------------------------------- problem */
+.problem-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.help-pane { font-size: 13px; color: var(--text-secondary); }
+.help-pane p { margin: 0 0 8px; }
+.table-scroll { overflow-x: auto; }
+.param-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.param-table th { text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border); padding: 4px 8px 4px 0; }
+.param-table td { border-bottom: 1px solid var(--border); padding: 4px 8px 4px 0; vertical-align: top; }
+.param-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .problem-head { display: flex; justify-content: space-between; align-items: baseline; }
 .problem-stmt { font-size: 13px; color: var(--text-secondary); border-left: 3px solid var(--border); padding-left: 10px; margin: 6px 0; }
 .problem-stmt p { margin: 4px 0; }

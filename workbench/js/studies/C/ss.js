@@ -308,7 +308,7 @@
         },
         {
           id: 'b', title: '(b) Add A, B, C, D from C.6',
-          html: 'Use your matrices from C.6 (the Ch 6 tab). From here on the outputs are y = (θ, φ), as in <code>satelliteParam.py</code> and the C.13 solution, so the second row of C is (0, 1, 0, 0). The model card in the Math section unlocks once C.6 is solved.',
+          html: 'Use your matrices from C.6 (the Ch 6 tab). From here on the outputs are y = (θ, φ), as in the C.13 solution, so the second row of C is (0, 1, 0, 0). The model card in the Math section unlocks once C.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability',
@@ -325,7 +325,7 @@
         },
         {
           id: 'e', title: '(e) Implement and tune',
-          html: 'Implement the state feedback in your <code>ctrlStateFeedback.py</code>. Here, set K and k<sub>r</sub> with the sliders (or <em>Use my gains</em> in (d)) and tune. Passes when the closed loop is stable and |φ<sub>r</sub> − φ| just before the first reference switch is under 0.1°. Compare the response with the successive-loop-closure designs of Ch 8 and Ch 10.',
+          html: 'Implement the state feedback in your own controller. Here, set K and k<sub>r</sub> with the sliders (or <em>Use my gains</em> in (d)) and tune. Passes when the closed loop is stable and |φ<sub>r</sub> − φ| just before the first reference switch is under 0.1°. Compare the response with the successive-loop-closure designs of Ch 8 and Ch 10.',
           check: () => {
             if (ctx.S.mode !== 'work') return { ok: false, msg: 'Switch to Work mode so the simulation uses your gains.' };
             const stable = clPoles(ctx, 'sf').every((q) => q.re < 0), e = errBeforeSwitch(ctx);
@@ -479,7 +479,7 @@
           solution: () => [{ tex: '\\mathcal{O}_{A,C} = \\begin{bmatrix}C\\\\ CA\\end{bmatrix} = \\begin{bmatrix}I & 0\\\\ 0 & I\\end{bmatrix} \\text{ already has rank 4}' }],
         },
         {
-          id: 'c', title: `(c) Observer poles 10× faster (t<sub>r,obs</sub> = t<sub>r</sub>/${pr.obsFactor}, as in ctrlObserver.py)`,
+          id: 'c', title: `(c) Observer poles 10× faster (t<sub>r,obs</sub> = t<sub>r</sub>/${pr.obsFactor})`,
           html: 'Desired observer polynomial s⁴ + β<sub>3</sub>s³ + β<sub>2</sub>s² + β<sub>1</sub>s + β<sub>0</sub>.',
           inputs: { wTh: 'ω<sub>n,obs,θ</sub>', wPh: 'ω<sub>n,obs,φ</sub>', b3: 'β<sub>3</sub>', b0: 'β<sub>0</sub>' },
           check: (v) => { const o = od(), c = L.polyFromRoots(obsPoles(o)); return PD().checkNumbers(v, { wTh: o.wTh, wPh: o.wPh, b3: c[1], b0: c[4] }, { wTh: 'ωobs,θ', wPh: 'ωobs,φ' }); },

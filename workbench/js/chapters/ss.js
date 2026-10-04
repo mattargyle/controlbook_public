@@ -346,7 +346,7 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'e', title: '(e) Implement with a digital differentiator',
-          html: 'In your <code>ctrlStateFeedback.py</code>, estimate θ̇ from θ with the dirty derivative (Eq. 10.4). The simulation here applies your K and k<sub>r</sub> from the gain sliders.',
+          html: 'In your controller, estimate θ̇ from θ with the dirty derivative (Eq. 10.4). The simulation here applies your K and k<sub>r</sub> from the gain sliders.',
         },
       ]);
     },
@@ -494,7 +494,7 @@ WB.chapters = WB.chapters || {};
         },
         {
           id: 'c', title: `(c) Observer gain for ω<sub>n,obs</sub> = 2.2/(t<sub>r</sub>/${prob.trObsFactor}), ζ<sub>obs</sub> = ${prob.zetaObs} (t<sub>r</sub> = ${prob.tr})`,
-          html: 'The repo\'s tuning (ctrlObserver.py): observer 10× faster than the controller.',
+          html: 'The repo\'s tuning: observer 10× faster than the controller.',
           inputs: { L1: 'L<sub>1</sub>', L2: 'L<sub>2</sub>' },
           check: (v) => { const r = ref(); return PD().checkNumbers(v, { L1: r.L[0], L2: r.L[1] }, {}); },
           solution: () => { const r = ref(); return [{ tex: `L = ${texMat(r.L)},\\quad K = ${texMat([r.K])},\\; k_I = ${tex(r.ki)}` }]; },

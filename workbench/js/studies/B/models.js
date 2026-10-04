@@ -177,7 +177,7 @@
       slider(sec, { label: 'θ amplitude', unit: '°', min: 0, max: 90, step: 1, sig: 3, ...bind(ctx, 'Ath') });
       slider(sec, { label: 'θ frequency', unit: 'Hz', min: 0.02, max: 2, step: 0.01, sig: 3, ...bind(ctx, 'fth') });
       const plot = ctx.S.mode === 'explore' ? 'The plot below splits K into the cart, the rod\'s translation, and the rod\'s rotation.' : 'Once (a) is solved, or you click Plot my K, the plot below shows the kinetic energy along that motion.';
-      sec.append(el('p', { class: 'muted small', text: `z(t) = A_z sin(2πf_z t) and θ(t) = A_θ sin(2πf_θ t). No dynamics here: the motion is imposed, as in hw02_pendulumSim.py (which uses a square wave for θ). ${plot}` }));
+      sec.append(el('p', { class: 'muted small', text: `z(t) = A_z sin(2πf_z t) and θ(t) = A_θ sin(2πf_θ t). No dynamics here: the motion is imposed. ${plot}` }));
     },
 
     // K(t) and its split answer B.2(a), so in Work mode the plot is empty until (a) is
@@ -233,7 +233,7 @@
         },
         {
           id: 'b', title: '(b) Animate the inverted pendulum',
-          html: 'You write this class in your own <code>pendulumAnimation.py</code> (hw02, Listing 2.3, p. 33–34). The animation at the top of this page draws the cart, the rod and the bob from q = (z, θ)ᵀ with the sinusoidal motion set in the controls on the right.',
+          html: 'You write this class in your own animation code (Listing 2.3, p. 33–34). The animation at the top of this page draws the cart, the rod and the bob from q = (z, θ)ᵀ with the sinusoidal motion set in the controls on the right.',
         },
       ]);
     },
@@ -312,7 +312,7 @@
         options: [{ value: 'energy', label: 'energy balance' }, { value: 'zd', label: 'ż' }, { value: 'thd', label: 'θ̇' }],
         ...bind(ctx, 'extra'),
       });
-      sec.append(el('p', { class: 'muted small', text: `hw03_pendulumSim.py pushes the cart with F = sin(2πt) N. Nothing holds the pendulum up, so it falls and swings under the track. The energy plot checks the EOM: E(t) − E(0) must equal the net work done by the nonconservative forces.${ctx.S.mode === 'explore' ? '' : ' In Work mode it shows E(t) − E(0) once (a) is solved and the work once (c) is solved, and is empty until then; Plot my P and Plot my forces draw yours.'}` }));
+      sec.append(el('p', { class: 'muted small', text: `The cart is pushed with F = sin(2πt) N. Nothing holds the pendulum up, so it falls and swings under the track. The energy plot checks the EOM: E(t) − E(0) must equal the net work done by the nonconservative forces.${ctx.S.mode === 'explore' ? '' : ' In Work mode it shows E(t) − E(0) once (a) is solved and the work once (c) is solved, and is empty until then; Plot my P and Plot my forces draw yours.'}` }));
     },
 
     extraPlot(ctx, res) {
@@ -361,7 +361,7 @@
         { title: 'Euler-Lagrange equations', page: 'p. 43 · §3.1.4',
           theory: 'L(q, \\dot q) = K(q, \\dot q) - P(q),\\quad \\frac{d}{dt}\\frac{\\partial L}{\\partial\\dot q} - \\frac{\\partial L}{\\partial q} = \\tau - B\\dot q' },
         { title: 'Potential energy', page: 'p. 41–42 · §3.1.1',
-          theory: '\\text{gravity: } P = mgy + P_0 \\;(y = \\text{height of the mass}),\\quad \\text{spring: } P = \\tfrac12 k z^2',
+          theory: '\\text{gravity: } P = mgy + P_0,\\quad \\text{spring: } P = \\tfrac12 k z^2',
           note: 'For a rigid body, y is the height of its center of mass.' },
         { title: 'Generalized coordinates, forces, damping', page: 'p. 42–43 · §3.1.2–3.1.3',
           theory: 'q = \\text{minimum set of configuration variables},\\quad \\tau = \\text{applied (nonconservative) forces along } q,\\quad -B\\dot q = \\text{damping forces}' },
@@ -460,7 +460,7 @@
         },
         {
           id: 'e', title: '(e) Implement and simulate',
-          html: 'Write f(x, u) as in <code>pendulumDynamics.py</code>: the state is a 4×1 column (z, θ, ż, θ̇). <em>Check</em> tests it at random states like <code>testDynamics.py</code>. <em>Simulate my f</em> runs it with RK4 on the same force input as the pendulum above (true-plant parameters) and draws z and θ dashed on the plots. In your own code, connect it to the B.2 animation.',
+          html: 'Write f(x, u): the state is a 4×1 column (z, θ, ż, θ̇). <em>Check</em> tests it at random states. <em>Simulate my f</em> runs it with RK4 on the same force input as the pendulum above (true-plant parameters) and draws z and θ dashed on the plots. In your own code, connect it to the B.2 animation.',
           code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'f', args: ['state', 'F'], truth: (p, a) => ctx.sys.f([a.z, a.theta, a.zdot, a.thetadot], a.F, p).map((v) => [v]) }],
           }, 'def f(state, F):\n    z = state[0][0]\n    theta = state[1][0]\n    zdot = state[2][0]\n    thetadot = state[3][0]\n    zddot = ...\n    thetaddot = ...\n    return np.array([[zdot], [thetadot],\n                     [zddot], [thetaddot]])\n'), {

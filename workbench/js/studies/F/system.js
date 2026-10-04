@@ -23,12 +23,12 @@ WB.systems = WB.systems || {};
 
     // Nominal parameters (p. 393). m_ℓ = m_r = 0.25 kg, so one slider covers both rotors.
     params: [
-      { key: 'mc', label: 'm<sub>c</sub>', unit: 'kg', value: 1.0, min: 0.2, max: 3, step: 0.01 },
-      { key: 'mr', label: 'm<sub>r</sub> = m<sub>ℓ</sub>', unit: 'kg', value: 0.25, min: 0.05, max: 1, step: 0.005 },
-      { key: 'Jc', label: 'J<sub>c</sub>', unit: 'kg·m²', value: 0.0042, min: 0.001, max: 0.02, step: 0.0001 },
-      { key: 'd', label: 'd', unit: 'm', value: 0.3, min: 0.1, max: 0.6, step: 0.005 },
-      { key: 'mu', label: 'μ', unit: 'kg/s', value: 0.1, min: 0, max: 0.5, step: 0.005 },
-      { key: 'f_max', label: 'f<sub>max</sub>', unit: 'N', value: 10, min: 2, max: 30, step: 0.1 },
+      { key: 'mc', desc: 'mass of the center pod', label: 'm<sub>c</sub>', unit: 'kg', value: 1.0, min: 0.2, max: 3, step: 0.01 },
+      { key: 'mr', desc: 'mass of each rotor (right and left)', label: 'm<sub>r</sub> = m<sub>ℓ</sub>', unit: 'kg', value: 0.25, min: 0.05, max: 1, step: 0.005 },
+      { key: 'Jc', desc: 'moment of inertia of the center pod', label: 'J<sub>c</sub>', unit: 'kg·m²', value: 0.0042, min: 0.001, max: 0.02, step: 0.0001 },
+      { key: 'd', desc: 'distance from the center to each rotor', label: 'd', unit: 'm', value: 0.3, min: 0.1, max: 0.6, step: 0.005 },
+      { key: 'mu', desc: 'drag coefficient', label: 'μ', unit: 'kg/s', value: 0.1, min: 0, max: 0.5, step: 0.005 },
+      { key: 'f_max', desc: 'maximum thrust of each rotor', label: 'f<sub>max</sub>', unit: 'N', value: 10, min: 2, max: 30, step: 0.1 },
     ],
     constants: { g: 9.81 },
     // F.10(a), p. 399: m_c, J_c, d and μ vary by up to 20%.

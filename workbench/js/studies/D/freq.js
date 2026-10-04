@@ -178,7 +178,7 @@
           solution: () => [
             { tex: `${tex(magDb(0.1))},\\; ${tex(magDb(1))},\\; ${tex(magDb(10))}\\;\\text{dB}` },
             { tex: `\\zeta = \\frac{b}{2\\sqrt{km}} = ${tex(b().zeta)},\\quad |P(j\\omega_n)| = \\frac{1}{k\\,2\\zeta} = \\frac{1}{b\\,\\omega_n} = ${tex(b().peak)} = ${tex(b().peakDb)}\\,\\text{dB}` },
-            { html: 'The true maximum (at ω<sub>n</sub>√(1 − 2ζ²)) is 0.02 dB higher; either is accepted. Checked against python-control in tools/regress_D.py.' },
+            { html: 'The true maximum (at ω<sub>n</sub>√(1 − 2ζ²)) is 0.02 dB higher; either is accepted. Checked against python-control.' },
           ],
         },
       ]);
@@ -572,7 +572,7 @@
               { html: 'One design that works (not unique). The plant is easy at high frequency (|P(j500)| ≈ −122 dB), so the binding specs are tracking (|PC| ≥ 30.5 dB up to 0.1 rad/s) and the phase margin:' },
               { tex: `C(s) = ${tex(r.k)}\\cdot\\frac{s + 0.5}{s}\\cdot 30\\,\\frac{s + 5/\\sqrt{30}}{s + 5\\sqrt{30}}\\cdot\\frac{50}{s + 50},\\quad F(s) = \\frac{1}{s + 1}` },
               { tex: `PM = ${tex(d.mg.pm)}^\\circ \\text{ at } ${tex(d.mg.wc)}\\,\\text{rad/s},\\quad \\min_{\\omega\\le0.1}|PC| = ${tex(db(d.lowMin))}\\,\\text{dB},\\quad \\max_{\\omega\\ge500}|PC| = ${tex(db(d.highMax))}\\,\\text{dB}` },
-              { html: 'The PI puts the integrator in C (constant d<sub>in</sub> rejected); crossing over at 5 rad/s with a lead of M = 30 centred there buys the phase and lifts the low-frequency gain above 1/γ<sub>r</sub>; the LPF at 50 rad/s rolls off the lead. Python-control gives the same margins (tools/regress_D.py).' },
+              { html: 'The PI puts the integrator in C (constant d<sub>in</sub> rejected); crossing over at 5 rad/s with a lead of M = 30 centred there buys the phase and lifts the low-frequency gain above 1/γ<sub>r</sub>; the LPF at 50 rad/s rolls off the lead. Python-control gives the same margins.' },
             ];
           } },
         { id: 'b', title: 'Prefilter reduces the peaking',
@@ -585,7 +585,7 @@
           },
           solution: () => [{ html: 'A first-order F = p/(s + p) with p well below crossover (p = 1 in the reference design) shapes the reference so the steps never excite the lead\'s peaking: no overshoot, rise time about 2 s on the ±0.5 m square wave. It does not keep F inside F<sub>max</sub> = 6 N: the 1 m jumps demand about 20 N for a moment (the plant saturates; the PI has no anti-windup but recovers here). p ≈ 0.3 keeps the demand near 6 N at the cost of an 8 s rise time. D.18 itself says nothing about F<sub>max</sub>.' }] },
         { id: 'c', title: 'Implement C(s) and F(s) with state-space or digital-filter equivalents',
-          html: 'In your <code>ctrlLoopshape.py</code> (Listing 18.3 pattern, Eq. 18.3–18.7). The simulation here runs C and F as state-space filters; the dashed trace is the same loop without saturation, disturbance and noise.' },
+          html: 'In your own controller (Listing 18.3 pattern, Eq. 18.3–18.7). The simulation here runs C and F as state-space filters; the dashed trace is the same loop without saturation, disturbance and noise.' },
       ]);
     },
   };

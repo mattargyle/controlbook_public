@@ -103,10 +103,10 @@ WB.studies.D = WB.studies.D || { chapters: {} };
 
     // Nominal physical parameters (p. 377); F_max from D.8(b), p. 379.
     params: [
-      { key: 'm', label: 'm', unit: 'kg', value: 5, min: 0.5, max: 20, step: 0.05 },
-      { key: 'k', label: 'k', unit: 'N/m', value: 3, min: 0, max: 20, step: 0.05 },
-      { key: 'b', label: 'b', unit: 'N·s/m', value: 0.5, min: 0, max: 5, step: 0.01 },
-      { key: 'Fmax', label: 'F<sub>max</sub>', unit: 'N', value: 6, min: 1, max: 50, step: 0.5 },
+      { key: 'm', desc: 'mass', label: 'm', unit: 'kg', value: 5, min: 0.5, max: 20, step: 0.05 },
+      { key: 'k', desc: 'spring constant', label: 'k', unit: 'N/m', value: 3, min: 0, max: 20, step: 0.05 },
+      { key: 'b', desc: 'damping coefficient', label: 'b', unit: 'N·s/m', value: 0.5, min: 0, max: 5, step: 0.01 },
+      { key: 'Fmax', desc: 'maximum force', label: 'F<sub>max</sub>', unit: 'N', value: 6, min: 1, max: 50, step: 0.5 },
     ],
     constants: {},
     // massDynamics(alpha) perturbs m, k and b (D.10a, p. 380)

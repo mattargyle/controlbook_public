@@ -278,7 +278,7 @@
         },
         {
           id: 'b', title: '(b) Add A, B, C, D from D.6 to your param file',
-          html: 'Use your A, B, C, D from D.6 (the D.6 tab) in your <code>massParam.py</code>. The model card in the Math section unlocks once D.6 is solved.',
+          html: 'Use your A, B, C, D from D.6 (the D.6 tab). The model card in the Math section unlocks once D.6 is solved.',
         },
         {
           id: 'c', title: '(c) Controllability: rank(𝒞<sub>A,B</sub>) = n',

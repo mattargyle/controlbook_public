@@ -226,16 +226,9 @@ WB.chapters = WB.chapters || {};
     outer.append(head, parent);
     WB.ui.collapsible(title, `Problem ${prob.id}`, outer, parent, `wb.collapsed.problem.${ctx.sys.id}.${prob.id}`);
     parent.append(stmt);
-    const note = el('p', { class: 'muted small', text: 'Answers are checked against the current nominal parameters (left panel).' });
+    const note = el('p', { class: 'muted small', text: 'Answers are checked against the current nominal parameters (left panel). Python parts: see the Python help and Parameters tabs.' });
     parent.append(note);
     const partToggles = [];
-    if (parts.some((p) => p.code)) {
-      const pn = el('p', { class: 'muted small' });
-      const paramFile = { A: 'armParam.py', B: 'pendulumParam.py', C: 'satelliteParam.py', D: 'massParam.py', E: 'blockbeamParam.py', F: 'VTOLParam.py' }[ctx.sys.id] || 'the parameter file';
-      pn.innerHTML = `Python answers run in your browser (Python 3.14 + numpy, loaded on the first Check). <code>np</code> is imported, and <code>P</code> holds the parameters like <code>${paramFile}</code>: `
-        + Object.keys(ctx.pModel).map((k) => `<code>P.${k}</code>`).join(', ') + '. Write answers with these, not numbers: they are checked with other parameter values too.';
-      parent.append(pn);
-    }
 
     if (parts.length > 1) parent.append(tools);
     // Parts that can be marked solved (a Check or a done button) decide when the chapter's tab turns green.
@@ -618,7 +611,7 @@ WB.chapters = WB.chapters || {};
         label: 'ω<sub>n</sub> from t<sub>r</sub>',
         options: [
           { value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5, exact for ζ = 0.707' },
-          { value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))', title: 't_r ≈ t_p / 2 (p. 113); used in ctrlPID.py' },
+          { value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))', title: 't_r ≈ t_p / 2 (p. 113)' },
         ],
         ...bind(ctx, 'rule'),
       });
@@ -751,7 +744,7 @@ WB.chapters = WB.chapters || {};
             return [
               { html: 'The largest demand is right after the step, when θ̇ = 0 and θ = 0, so τ = τ<sub>fl</sub>(0) + k<sub>P</sub>e<sub>max</sub> ≤ τ<sub>max</sub> (Eq. 8.8 and Fig. 8-13):' },
               { tex: `k_P \\le \\frac{${tex(sb.umax)} - ${tex(sb.ue)}}{${tex(sb.eMax)}} \\Rightarrow \\omega_n \\le ${tex(sb.wnMax)} \\Rightarrow t_r \\ge ${tex(sb.trMin)}\\,\\text{s}` },
-              { html: `The book's solution (and <code>_A_arm/python/ctrlPD.py</code>) uses t<sub>r</sub> = ${prob.bookTr} s, tuned on the ±50° square wave. With that value the first 0→50° step demands ${(100 * peakFor(prob.bookTr)).toFixed(0)}% of τ<sub>max</sub>, so it saturates briefly.` },
+              { html: `The book's solution uses t<sub>r</sub> = ${prob.bookTr} s, tuned on the ±50° square wave. With that value the first 0→50° step demands ${(100 * peakFor(prob.bookTr)).toFixed(0)}% of τ<sub>max</sub>, so it saturates briefly.` },
             ];
           },
         },

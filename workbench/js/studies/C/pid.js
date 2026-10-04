@@ -132,7 +132,7 @@
     if (withRule) {
       segmented(parent, {
         label: 'ω<sub>n</sub> from t<sub>r</sub>',
-        options: [{ value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))', title: 'C.8 solution and ctrlPD.py' }, { value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5; ctrlPID.py' }],
+        options: [{ value: 'tp', label: 'π / (2 t<sub>r</sub>√(1−ζ²))', title: 'C.8 solution' }, { value: '2.2', label: '2.2 / t<sub>r</sub>', title: 'Eq. 8.5' }],
         ...bind(ctx, 'rule', () => st),
       });
     }
@@ -147,7 +147,7 @@
     if (ff) {
       segmented(parent, {
         label: 'Feedforward φ<sub>r</sub> into θ<sub>r</sub>',
-        options: [{ value: true, label: 'on (Fig. 8-20 p. 133, ctrlPD.py)' }, { value: false, label: 'off (Fig. 8-19)' }],
+        options: [{ value: true, label: 'on (Fig. 8-20 p. 133)' }, { value: false, label: 'off (Fig. 8-19)' }],
         ...bind(ctx, 'ff', () => st),
       });
     }
@@ -163,7 +163,7 @@
     if (aw) {
       segmented(parent, {
         label: 'Anti-windup',
-        options: [{ value: 'repo', label: 'u<sub>I</sub> += (T<sub>s</sub>/k<sub>I</sub>)(θ<sub>r</sub> − θ<sub>r,unsat</sub>)', title: 'ctrlPID.py / Listing 10.4' }, { value: 'none', label: 'none' }],
+        options: [{ value: 'repo', label: 'u<sub>I</sub> += (T<sub>s</sub>/k<sub>I</sub>)(θ<sub>r</sub> − θ<sub>r,unsat</sub>)', title: 'Listing 10.4' }, { value: 'none', label: 'none' }],
         ...bind(ctx, 'antiwindup', () => st),
       });
     }
@@ -469,7 +469,7 @@
         {
           id: 'f', title: `(f) Fastest t<sub>r<sub>θ</sub></sub> (with t<sub>r<sub>φ</sub></sub> = ${prob.M} t<sub>r<sub>θ</sub></sub>) that does not saturate τ on a ${prob.satStepDeg}° step`,
           inputs: { tr: 't<sub>r<sub>θ</sub></sub> [s]' },
-          html: `Checked by simulation: a ${prob.satStepDeg}° step on φ<sub>r</sub> from rest, ζ = 0.9 in both loops, feedforward on and |θ<sub>r</sub>| ≤ 30° as in ctrlPD.py. The peak demanded |τ| should be 95–100% of τ<sub>max</sub>.`,
+          html: `Checked by simulation: a ${prob.satStepDeg}° step on φ<sub>r</sub> from rest, ζ = 0.9 in both loops, feedforward on and |θ<sub>r</sub>| ≤ 30°. The peak demanded |τ| should be 95–100% of τ<sub>max</sub>.`,
           check: (v) => {
             const tr = PD().num(v.tr);
             if (tr === null || tr <= 0) return { ok: false, msg: 'Enter a positive rise time.' };
@@ -500,7 +500,7 @@
             return [
               { html: 'The largest demand is the first sample after the step: θ = φ = θ̇ = φ̇ = 0, so θ<sub>r</sub>(0) = sat((1 + k<sub>P<sub>φ</sub></sub>)·30°, 30°) and τ(0) = k<sub>P<sub>θ</sub></sub>θ<sub>r</sub>(0) ≤ τ<sub>max</sub> (Eq. 8.8). Both gains depend on t<sub>rθ</sub> (k<sub>P<sub>φ</sub></sub> turns negative for a slow outer loop), so solve numerically:' },
               { tex: `t_{r_\\theta} = ${tex(hi)}\\,\\text{s}:\\quad k_{P_\\theta} = ${tex(g.kPth)},\\; k_{P_\\phi} = ${tex(g.kPphi)},\\; \\theta_r(0) = ${tex(thr0 / DEG)}^\\circ,\\; \\tau(0) = ${tex(g.kPth * thr0)}\\,\\text{N·m}` },
-              { html: `ctrlPD.py uses t<sub>r<sub>θ</sub></sub> = ${prob.repoTr} s ("tuned to not saturate the input"); with it the step demands ${(100 * peakFor(prob.repoTr)).toFixed(0)}% of τ<sub>max</sub>.` },
+              { html: `The repo\'s PD controller uses t<sub>r<sub>θ</sub></sub> = ${prob.repoTr} s ("tuned to not saturate the input"); with it the step demands ${(100 * peakFor(prob.repoTr)).toFixed(0)}% of τ<sub>max</sub>.` },
             ];
           },
         },
@@ -603,7 +603,7 @@
           theory: 'D(s) = \\frac{1}{s^{q+1}}:\\quad \\lim_{t\\to\\infty} e = \\lim_{s\\to0} s\\frac{P}{1+PC}\\frac{1}{s^{q+1}}' },
         { title: 'Inner loop of the satellite (Fig. 9-11)', page: 'p. 151', answers: 'C.9/a',
           theory: 'P(s)C(s) = \\frac{k_D s + k_P}{(J_s+J_p)s^2}\\;(\\text{PD on the error}),\\quad \\text{type 2},\\; e_{step} = e_{ramp} = 0,\\; e_{parab} = \\frac{J_s+J_p}{k_P},\\quad \\text{input disturbance: type 0},\\; e = \\frac{1}{k_P}',
-          numbers: `e_{parab} = ${tex(a.inner.parab)},\\quad e_{d} = \\frac{1}{k_{P_\\theta}} = ${tex(a.inner.dStep)},\\quad \\text{derivative on }\\theta\\text{ (ctrlPD.py): type 1},\\; e_{ramp} = \\frac{k_{D_\\theta}}{k_{P_\\theta}} = ${tex(g.kDth / g.kPth)}`,
+          numbers: `e_{parab} = ${tex(a.inner.parab)},\\quad e_{d} = \\frac{1}{k_{P_\\theta}} = ${tex(a.inner.dStep)},\\quad \\text{derivative on }\\theta\\text{: type 1},\\; e_{ramp} = \\frac{k_{D_\\theta}}{k_{P_\\theta}} = ${tex(g.kDth / g.kPth)}`,
           note: 'The repo controllers differentiate θ, not the error (Fig. 7-2). That changes the reference type of this loop; see the solution.' },
         { title: 'Outer loop of the satellite (Fig. 9-12)', page: 'p. 151–153', answers: ['C.9/b1', 'C.9/b2'],
           theory: 'P(s)C(s) = \\frac{\\frac{b}{J_p}s + \\frac{k}{J_p}}{s^2 + \\frac{b}{J_p}s + \\frac{k}{J_p}}\\cdot\\frac{k_Ds^2 + k_Ps + k_I}{s},\\quad k_I = 0 \\Rightarrow \\text{type 0},\\; e_{step} = \\frac{1}{1 + k_P};\\quad k_I > 0 \\Rightarrow \\text{type 1},\\; e_{ramp} = \\frac{1}{k_I},\\quad \\text{disturbance: } \\frac{1}{1+k_P}\\;(k_I = 0),\\; \\frac{1}{k_I}\\text{ for a ramp}\\;(k_I \\ne 0)',
@@ -635,7 +635,7 @@
         const r = await WB.py.check(ctx, { args: { kP: PYARGS.kPin, kD: PYARGS.kDin }, items: innerItems(t === 1 ? 1 : 2) }, code);
         if (!r.ok) return r;
         return { ...r, msg: t === 2 ? `${r.msg} The book's answer, for PD on the error (Fig. 9-11). The repo differentiates θ instead, which makes it type 1 (see the solution).`
-          : `${r.msg} Right for the implemented controller (derivative on θ, ctrlPD.py). The book answers type 2 for PD on the error (Fig. 9-11).` };
+          : `${r.msg} Right for the implemented controller (derivative on θ). The book answers type 2 for PD on the error (Fig. 9-11).` };
       };
       PD().problemPanel(parent, ctx, ctx.sys.problems.ch9, [
         {
@@ -647,10 +647,10 @@
           },
           solution: () => [
             { tex: `\\text{Fig. 9-11 (PD on the error)}:\; PC = \\frac{k_Ds + k_P}{(J_s+J_p)s^2} \\Rightarrow \\text{type 2},\; e_{parab} = \\frac{J_s+J_p}{k_{P_\\theta}} = ${tex(a().inner.parab)}` },
-            { tex: `\\text{derivative on } \\theta \\text{ (ctrlPD.py, ctrlPID.py)}:\; \\frac{E}{R} = \\frac{(J_s+J_p)s^2 + k_Ds}{(J_s+J_p)s^2 + k_Ds + k_P} \\Rightarrow \\text{type 1},\; e_{ramp} = \\frac{k_{D_\\theta}}{k_{P_\\theta}} = ${tex(ctx.gains.kDth / ctx.gains.kPth)}` },
+            { tex: `\\text{derivative on } \\theta:\; \\frac{E}{R} = \\frac{(J_s+J_p)s^2 + k_Ds}{(J_s+J_p)s^2 + k_Ds + k_P} \\Rightarrow \\text{type 1},\; e_{ramp} = \\frac{k_{D_\\theta}}{k_{P_\\theta}} = ${tex(ctx.gains.kDth / ctx.gains.kPth)}` },
             { tex: `\\text{input disturbance (either form): type 0},\; e = \\frac{1}{k_{P_\\theta}} = ${tex(a().inner.dStep)}\;\\text{(current gains)}` },
             { html: 'Book: p. 151. Its Notes (p. 153) say the type does not change when the derivative moves to the output; for this loop it does, because the plant has no damping of its own.' },
-            { code: '# PD on the error (the book); ref_type = 1 with e_ref = kD / kP is right for ctrlPD.py\nref_type = 2\n\ndef e_ref(kP, kD):\n    return (P.Js + P.Jp) / kP     # e_parab = 1/M_a\n\ndist_type = 0\n\ndef e_dist(kP, kD):\n    return 1 / kP' },
+            { code: '# PD on the error (the book); ref_type = 1 with e_ref = kD / kP is right for derivative on theta\nref_type = 2\n\ndef e_ref(kP, kD):\n    return (P.Js + P.Jp) / kP     # e_parab = 1/M_a\n\ndist_type = 0\n\ndef e_dist(kP, kD):\n    return 1 / kP' },
           ],
         },
         {
@@ -915,7 +915,7 @@
       PD().problemPanel(parent, ctx, prob, [
         {
           id: 'a', title: '(a) Uncertain parameters (α = 0.2)',
-          html: 'In your <code>satelliteDynamics.py</code>, use the <code>alpha</code> argument. Here, the true plant differs from the model by the mismatch in the left panel (the chapter starts with a fixed 20% draw).',
+          html: 'In your dynamics, use the <code>alpha</code> argument. Here, the true plant differs from the model by the mismatch in the left panel (the chapter starts with a fixed 20% draw).',
           check: () => (misSet() ? { ok: true, msg: `Mismatch: ${Object.entries(ctx.S.mismatch).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${fmt(v, 3)}%`).join(', ')}.` } : { ok: false, msg: 'Set a plant mismatch in the left panel.' }),
         },
         {
@@ -939,7 +939,7 @@
           }],
           solution: () => [
             { tex: `k_{P_\\theta} = ${tex(s().kPth)},\\; k_{D_\\theta} = ${tex(s().kDth)},\\; k_{P_\\phi} = ${tex(s().kPphi)},\\; k_{D_\\phi} = ${tex(s().kDphi)}` },
-            { html: 'Same C.8 procedure, with ctrlPID.py\'s tuning (Listing 10.4, p. 167).' },
+            { html: 'Same C.8 procedure, with the Listing 10.4 tuning (p. 167).' },
           ],
         },
         {

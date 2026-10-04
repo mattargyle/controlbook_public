@@ -828,7 +828,7 @@
         },
         {
           id: 'b', title: '(b) The controller gets only z and z<sub>r</sub>',
-          html: 'The PID here gets only the (noisy) measurement and the reference; ż comes from the dirty derivative in (c). In your <code>ctrlPID.py</code>, <code>update(z_r, y)</code> receives y, not the state.',
+          html: 'The PID here gets only the (noisy) measurement and the reference; ż comes from the dirty derivative in (c). In your PID controller, <code>update(z_r, y)</code> receives y, not the state.',
         },
         {
           id: 'c1', title: `(c) PD part for t<sub>r</sub> = ${prob.tr} s, ζ = ${prob.zeta}`,

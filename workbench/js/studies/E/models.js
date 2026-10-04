@@ -108,7 +108,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
   const pyError = (out) => ({ ok: false, msg: out.timeout ? out.error : 'Python raised an error.', detail: [out.error, out.where, (out.stdout || '').trim()].filter(Boolean).join('\n') });
   // In Work mode, poles/eigenvalues that answer `key` stay off the s-plane until it is solved.
   const showsAnswer = (ctx, key) => ctx.S.mode === 'explore' || ctx.app.isSolved(key);
-  const LEN_NOTE = ' <code>P.length</code> is the same as <code>P.ell</code>, as in <code>blockbeamParam.py</code>.';
+  const LEN_NOTE = ' <code>P.length</code> is the same as <code>P.ell</code>.';
 
   // "Plot my answer" overlays (js/core/yours.js).
   const Y = WB.yours;
@@ -225,7 +225,7 @@ WB.studies.E = WB.studies.E || { chapters: {} };
         },
         {
           id: 'b', title: '(b) Animate the block on beam',
-          html: 'You write this class in your own <code>blockbeamAnimation.py</code> with z and θ as inputs, and turn in a screen capture. The animation at the top of this page shows the prescribed motion set in the controls on the right.',
+          html: 'You write this class in your own animation code with z and θ as inputs, and turn in a screen capture. The animation at the top of this page shows the prescribed motion set in the controls on the right.',
         },
       ]);
     },
@@ -446,12 +446,12 @@ WB.studies.E = WB.studies.E || { chapters: {} };
             { tex: 'z:\\; m_1\\ddot z - m_1 z\\dot\\theta^2 + m_1 g\\sin\\theta = 0' },
             { tex: '\\theta:\\; \\tfrac{d}{dt}\\big[(m_1 z^2 + \\tfrac{m_2\\ell^2}{3})\\dot\\theta\\big] + (m_1 g z + m_2 g\\tfrac{\\ell}{2})\\cos\\theta = F\\ell\\cos\\theta' },
             { code: `def accelerations(z, theta, zdot,\n                  thetadot, F):\n    ${EOM}\n    return zddot, thetaddot` },
-            { html: 'Same as the f(x, u) that passes <code>_E_blockbeam/python/testDynamics.py</code> (with g = 9.81 there; see ISSUES).' },
+            { html: 'Same as the f(x, u) the course\'s dynamics test expects (it uses g = 9.81; see ISSUES).' },
           ],
         },
         {
           id: 'e', title: '(e) Implement and simulate',
-          html: 'Write f(x, u) as in <code>blockbeamDynamics.py</code>: the state is a 4×1 column (z, θ, ż, θ̇). <em>Check</em> tests it at random states like <code>testDynamics.py</code>. <em>Simulate my f</em> runs it with RK4 on the same force input as the system above (true-plant parameters) and draws z and θ dashed. Connecting it to your E.2 animation is up to you.' + LEN_NOTE,
+          html: 'Write f(x, u): the state is a 4×1 column (z, θ, ż, θ̇). <em>Check</em> tests it at random states. <em>Simulate my f</em> runs it with RK4 on the same force input as the system above (true-plant parameters) and draws z and θ dashed. Connecting it to your E.2 animation is up to you.' + LEN_NOTE,
           code: Object.assign(pyPart(ctx, {
             items: [{ fn: 'f', args: ['state', 'F'], truth: (p, a) => { const d = ctx.sys.f(xOf(a), a.F, p); return d.map((v) => [v]); } }],
           }, 'def f(state, F):\n    z = state[0][0]\n    theta = state[1][0]\n    zdot = state[2][0]\n    thetadot = state[3][0]\n    zddot = ...\n    thetaddot = ...\n    return np.array([[zdot], [thetadot],\n                     [zddot], [thetaddot]])\n'), {

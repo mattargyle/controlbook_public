@@ -25,11 +25,11 @@ WB.studies.C = WB.studies.C || { chapters: {} };
     introPage: 15,
     // Nominal physical parameters (what the controller designer knows), p. 15.
     params: [
-      { key: 'Js', label: 'J<sub>s</sub>', unit: 'kg·m²', value: 5.0, min: 1, max: 20, step: 0.05 },
-      { key: 'Jp', label: 'J<sub>p</sub>', unit: 'kg·m²', value: 1.0, min: 0.1, max: 5, step: 0.01 },
-      { key: 'k', label: 'k', unit: 'N·m', value: 0.1, min: 0.005, max: 1, step: 0.005 },
-      { key: 'b', label: 'b', unit: 'N·m·s', value: 0.05, min: 0, max: 0.5, step: 0.005 },
-      { key: 'tau_max', label: 'τ<sub>max</sub>', unit: 'N·m', value: 5.0, min: 0.5, max: 100, step: 0.1 },   // up to 100 so C.8(e) can run unsaturated
+      { key: 'Js', desc: 'moment of inertia of the satellite body', label: 'J<sub>s</sub>', unit: 'kg·m²', value: 5.0, min: 1, max: 20, step: 0.05 },
+      { key: 'Jp', desc: 'moment of inertia of the panel', label: 'J<sub>p</sub>', unit: 'kg·m²', value: 1.0, min: 0.1, max: 5, step: 0.01 },
+      { key: 'k', desc: 'spring constant of the flexible joint', label: 'k', unit: 'N·m', value: 0.1, min: 0.005, max: 1, step: 0.005 },
+      { key: 'b', desc: 'damping coefficient of the flexible joint', label: 'b', unit: 'N·m·s', value: 0.05, min: 0, max: 0.5, step: 0.005 },
+      { key: 'tau_max', desc: 'maximum torque', label: 'τ<sub>max</sub>', unit: 'N·m', value: 5.0, min: 0.5, max: 100, step: 0.1 },   // up to 100 so C.8(e) can run unsaturated
     ],
     constants: {},
     // Parameters that satelliteDynamics(alpha) perturbs.

@@ -54,7 +54,7 @@
   // PID-cascade controls shared by C.16 and C.17.
   function gainControls(parent, ctx) {
     const st = ctx.st;
-    const sec = section(parent, 'C.10 loops: PD inner, PID outer', 'p. 167 · hw16.py');
+    const sec = section(parent, 'C.10 loops: PD inner, PID outer', 'p. 167');
     for (const [key, label, min, max] of [['kPth', 'k<sub>P<sub>θ</sub></sub>', 0, 400], ['kDth', 'k<sub>D<sub>θ</sub></sub>', 0, 150], ['kPphi', 'k<sub>P<sub>φ</sub></sub>', 0, 5], ['kIphi', 'k<sub>I<sub>φ</sub></sub>', 0, 2], ['kDphi', 'k<sub>D<sub>φ</sub></sub>', 0, 30]]) {
       slider(sec, { label, min, max, step: (max - min) / 4000, sig: 4, ...bind(ctx, key, () => st) });
     }
@@ -287,7 +287,7 @@
     math(ctx) {
       const s = this.specs(ctx), st = ctx.st;
       return [
-        { title: 'Loop controllers with the dirty derivative', page: 'hw16.py, p. 313',
+        { title: 'Loop controllers with the dirty derivative', page: 'p. 313',
           theory: 'C_{in} = \\frac{(k_{D_\\theta} + \\sigma k_{P_\\theta})s + k_{P_\\theta}}{\\sigma s + 1},\\quad C_{out} = \\frac{(k_{D_\\phi} + \\sigma k_{P_\\phi})s^2 + (k_{P_\\phi} + \\sigma k_{I_\\phi})s + k_{I_\\phi}}{\\sigma s^2 + s}',
           numbers: `C_{in} = ${T.texTf(cIn(st, st.sigma))},\\quad C_{out} = ${T.texTf(cOut(st, st.sigma))}` },
         { title: 'Parabola tracking (type 2)', page: 'p. 293–295 · Eq. 16.12, p. 299',
@@ -315,7 +315,7 @@
             return ok ? { ok: true, msg: 'The sliders hold the C.10 gains.' } : { ok: false, msg: 'Set the sliders to the C.10 gains (Load my C.10 gains copies yours from the Ch 10 tab) to plot the loops the problem asks for.' };
           } },
         { id: 'a', title: '(a) Steady-state error to θ<sub>r</sub> = 20t²',
-          html: 'Steady-state error (rad) as a function of the inner-loop gains, with the loop gain P<sub>in</sub>C<sub>in</sub> of hw16.py. The check calls it at random gains.',
+          html: 'Steady-state error (rad) as a function of the inner-loop gains, with the loop gain P<sub>in</sub>C<sub>in</sub> (PD on the error). The check calls it at random gains.',
           code: {
             template: 'def e_ss(kP, kD):\n    return ...\n',
             check: async (code) => {
@@ -324,13 +324,13 @@
                 items: [{ fn: 'e_ss', args: ['kP', 'kD'], truth: (p, a) => 2 * pr.parabA * (p.Js + p.Jp) / a.kP }],
                 explain: (it, f) => (M.close(flat1(f.e.got), flat1(f.e.want) / 2, 1e-4) ? 'Half the expected value matches the book (A/M_a), but L{20t²} = 40/s³, so the error is 2A/M_a.' : ''),
               }, code);
-              return r.ok ? { ...r, msg: `${r.msg} Right for the loop gain P_in C_in of hw16.py (PD on the error). The implemented controller differentiates θ, which makes the loop type 1, so it cannot track a parabola at all.` } : r;
+              return r.ok ? { ...r, msg: `${r.msg} Right for the loop gain P_in C_in (PD on the error). The implemented controller differentiates θ, which makes the loop type 1, so it cannot track a parabola at all.` } : r;
             },
           },
-          solution: () => [{ tex: `e_{ss} = \\frac{2A}{M_a} = \\frac{2A(J_s+J_p)}{k_{P_\\theta}};\\quad \\text{C.10 gains: } \\frac{${tex(2 * pr.parabA)}}{${tex(s().Ma)}} = ${tex(s().eParab)}\\,\\text{rad}` }, { html: 'Book: 1.53 with A/M<sub>a</sub> and the C.8 gains (M<sub>a</sub> at 22.3 dB, p. 299). Both treat the loop as P<sub>in</sub>C<sub>in</sub> with PD on the error. ctrlPID.py puts the derivative on θ, so its closed loop is type 1 (ramp error k<sub>D</sub>/k<sub>P</sub>) and the parabola error grows without bound.' },
+          solution: () => [{ tex: `e_{ss} = \\frac{2A}{M_a} = \\frac{2A(J_s+J_p)}{k_{P_\\theta}};\\quad \\text{C.10 gains: } \\frac{${tex(2 * pr.parabA)}}{${tex(s().Ma)}} = ${tex(s().eParab)}\\,\\text{rad}` }, { html: 'Book: 1.53 with A/M<sub>a</sub> and the C.8 gains (M<sub>a</sub> at 22.3 dB, p. 299). Both treat the loop as P<sub>in</sub>C<sub>in</sub> with PD on the error. The repo\'s PID controller puts the derivative on θ, so its closed loop is type 1 (ramp error k<sub>D</sub>/k<sub>P</sub>) and the parabola error grows without bound.' },
             { code: `def e_ss(kP, kD):\n    Ma = kP / (P.Js + P.Jp)      # lim s^2 P_in C_in\n    return 2 * ${pr.parabA} / Ma          # θ_r = ${pr.parabA}t^2  ->  R = ${2 * pr.parabA}/s^3` }] },
         { id: 'b', title: '(b) % of d<sub>in</sub> below 0.1 rad/s in θ',
-          html: 'Percent of an input disturbance at frequency w (rad/s) that shows up in θ, as a function of w and the inner-loop gains (dirty derivative σ, as in hw16.py).',
+          html: 'Percent of an input disturbance at frequency w (rad/s) that shows up in θ, as a function of w and the inner-loop gains (dirty derivative σ).',
           code: {
             template: 'def din_pct(w, kP, kD, sigma):\n    return ...\n',
             check: (code) => WB.py.check(ctx, {
@@ -566,7 +566,7 @@
       if (lib().shows(ctx, 'C.18/a', 'C.18/b')) {
         presets.append(
           el('button', { type: 'button', class: 'btn', text: 'Book text', title: 'C_in = 45·8/(s+8) with rate feedback; C_out with k = 0.0275; C.8 rate gains and the listing\'s outer model, as in Figs. 18-29 to 18-35', onclick: () => { Object.assign(st, presetBook(ctx.pModel, g0())); ctx.update(); } }),
-          el('button', { type: 'button', class: 'btn', text: 'Repo listings', title: 'loopShapingInner.py / loopShapingOuter.py', onclick: () => { Object.assign(st, presetRepo(ctx.pModel, g0())); ctx.update(); } }));
+          el('button', { type: 'button', class: 'btn', text: 'Repo listings', title: 'The repo\'s inner and outer loop-shaping designs', onclick: () => { Object.assign(st, presetRepo(ctx.pModel, g0())); ctx.update(); } }));
       }
       pre.append(presets);
       if (ctx.S.mode === 'work') {
@@ -607,7 +607,7 @@
         const s0 = section(parent, 'Outer plant', 'p. 366');
         segmented(s0, {
           label: 'Model of θ_r′ → φ',
-          options: [{ value: 'book', label: 'derived on p. 366' }, { value: 'repo', label: 'loopShapingOuter.py' }],
+          options: [{ value: 'book', label: 'derived on p. 366' }, { value: 'repo', label: 'repo design' }],
           ...bind(ctx, 'model', () => st),
         });
         s0.append(el('p', { class: 'muted small', text: 'The listing\'s model has DC gain 1/k = 10 instead of 1; the book\'s figures were made with it. The simulation always uses the real satellite.' }));
@@ -699,14 +699,14 @@
         { title: 'Outer plant with rate feedback', page: 'p. 366',
           theory: '\\theta_r = -k_D\\frac{s}{\\sigma s + 1}\\Phi + \\theta_r\'',
           symbolic: '\\frac{\\Phi}{\\Theta_r\'} = \\frac{\\sigma bs^2 + (\\sigma k + b)s + k}{\\sigma J_ps^3 + (\\sigma b + J_p + bk_D)s^2 + (\\sigma k + b + kk_D)s + k}', answers: 'C.18/b1',
-          note: `k_Dφ = ${fmt(g.kDphi, 4)}. The book and loopShapingOuter.py differ here; see ISSUES.md.` },
+          note: `k_Dφ = ${fmt(g.kDphi, 4)}. The book and the repo\'s design differ here; see ISSUES.md.` },
         { title: 'Your compensators', page: 'p. 362, p. 368',
           theory: `C_{in}(s) = ${T.texTf(d.Ci, 4)},\\quad C_{out}(s) = ${T.texTf(d.Co, 4)}` },
         // Each loop's margins follow from its plant (with C = 1 they are the plant's), so
         // Work mode shows them once C.18(a1) / (b1) is solved.
         { title: 'Margins', page: 'p. 304–306',
           theory: (this.plantShown(ctx, 'inner') ? `\\text{inner: } PM = ${tex(d.mgI.pm)}^\\circ \\text{ at } ${tex(d.mgI.wc)}` : '\\text{inner: after part (a), inner plant}') + ',\\quad ' + (this.plantShown(ctx, 'outer') ? `\\text{outer: } PM = ${tex(d.mgO.pm)}^\\circ \\text{ at } ${tex(d.mgO.wc)},\\; GM = ${d.mgO.crossings.length ? d.mgO.crossings.map((c) => tex(db(c.gm)) + '\\,\\text{dB}').join(',\\;') : '\\infty'}` : '\\text{outer: after part (b), outer plant}') },
-        { title: 'Implementation (ctrlLoopshape.py)', page: 'p. 335 · Eq. 18.3–18.4',
+        { title: 'Implementation', page: 'p. 335 · Eq. 18.3–18.4',
           theory: '\\theta_r = -k_{D_\\phi}\\dot{\\hat\\phi} + C_{out}\\big(F(\\phi_r) - \\phi\\big),\\quad \\tau = C_{in}(\\theta_r - \\theta)\\;[-\\,k_{D_\\theta}\\dot{\\hat\\theta}]' },
       ];
     },
@@ -764,7 +764,7 @@
           solution: () => [
             { tex: '\\frac{\\Phi}{\\Theta_r\'} = \\frac{\\sigma bs^2 + (\\sigma k + b)s + k}{\\sigma J_ps^3 + (\\sigma b + J_p + bk_D)s^2 + (\\sigma k + b + kk_D)s + k}' },
             { code: 'def P_out(s, kD, sigma):\n    Jp, b, k = P.Jp, P.b, P.k\n    num = (b * s + k) * (sigma * s + 1)\n    den = ((Jp * s**2 + b * s + k)\n           * (sigma * s + 1)\n           + kD * s * (b * s + k))\n    return num / den' },
-            { html: 'Book: p. 366. <code>loopShapingOuter.py</code> uses a different model (see ISSUES.md).' },
+            { html: 'Book: p. 366. The repo\'s outer design uses a different model (see ISSUES.md).' },
           ] },
         { id: 'b', title: '(b) Outer-loop specs', after: 'b1',
           check: () => { const d = this.design(ctx), o = d.outer; return { ok: o.type && o.din && o.noise && o.pm, msg: `type ${o.type ? '✓' : '✗'}, d_in ${o.din ? '✓' : '✗'}, noise ${o.noise ? '✓' : '✗'}, PM ${fmt(d.mgO.pm, 3)}° ${o.pm ? '✓' : '✗'}` }; },
