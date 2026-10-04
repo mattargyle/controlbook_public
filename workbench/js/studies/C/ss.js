@@ -303,24 +303,10 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
     slider(parent, { label: 'ζ<sub>obs</sub>', min: 0.3, max: 0.99, step: 0.005, sig: 3, get: () => o.zTh, set: (v) => { o.zTh = v; o.zPh = v; ctx.update(); } });
     if (withD) slider(parent, { label: 'p<sub>d</sub>', min: -40, max: -0.2, step: 0.1, sig: 3, ...bind(ctx, 'pD') });
   }
-  // The problem's target poles answer C.11(a) (the same tuning is used through C.14),
-  // so in Work mode the toggle appears once C.11(a) is solved.
-  const showTargets = (ctx) => lib().shows(ctx, 'C.11/a');
-  function targetToggle(parent, ctx) {
-    const seg = segmented(parent, {
-      label: 'Target poles from the problem (s-plane rings)',
-      options: [{ value: false, label: 'hidden' }, { value: true, label: 'shown' }],
-      get: () => !!ctx.st.showTargets, set: (v) => { ctx.st.showTargets = v; ctx.update(); },
-    });
-    const note = el('p', { class: 'muted small', text: 'The problem\'s target poles can be shown here once C.11(a) is solved.' });
-    parent.append(note);
-    WB.ui.addRefresher(() => { const ok = showTargets(ctx); seg.row.hidden = !ok; note.hidden = ok; });
-  }
   // Work-mode control panel: the plots show the student's controller (part `part`).
   function workBanner(parent, ctx, part) {
     const sec = section(parent, 'Your controller');
     WB.myCtrl.banner(sec, ctx, part);
-    targetToggle(sec, ctx);
   }
   function awControl(parent, ctx) {
     segmented(parent, {
@@ -355,8 +341,8 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
       g.ph.forEach((q) => mk.push({ ...q, kind: 'cl', label: 'controller pole (φ pair)', dragId: 'cph' }));
       if (level !== 'sf') mk.push({ re: st.pI, im: 0, kind: 'cl', label: 'integrator pole p_I', dragId: 'cI' });
     } else {
-      // Work mode has no gains: the plots run the student's own controller.
-      if (st.showTargets && showTargets(ctx)) specPoles.forEach((q) => mk.push({ ...q, kind: 'target', label: 'target pole (problem)' }));
+      // Work mode has no gains (the plots run the student's own controller) and no
+      // target poles (the problem gives no tuning beyond C.8's; the listing's is the solution's).
       return mk;
     }
     if (level === 'obs' || level === 'dobs') {
@@ -396,8 +382,10 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
   // The general method, then this tuning's numbers. In Work mode the tuning is the
   // problem's (C.11-C.14 share it), so its poles answer C.11(a) and stay locked.
   function polesCard(ctx, d, level, answers = 'C.11/a') {
-    const st = ctx.st;
+    const st = ctx.st, work = ctx.S.mode === 'work';
     const wTex = st.rule === 'tp' ? '\\omega_n = \\frac{\\pi}{2t_r\\sqrt{1-\\zeta^2}}' : '\\omega_n = \\frac{2.2}{t_r}';
+    // Work mode: only the general form (the tuning knobs default to the listing's values).
+    if (work) return [{ title: 'Desired closed-loop poles', page: 'p. 193', theory: '\\Delta^d = (s^2 + 2\\zeta_\\theta\\omega_{n_\\theta}s + \\omega_{n_\\theta}^2)(s^2 + 2\\zeta_\\phi\\omega_{n_\\phi}s + \\omega_{n_\\phi}^2)' + (level === 'sf' ? '' : '(s - p_I)') }];
     return [
       { title: 'Desired closed-loop poles', page: 'p. 193, p. 194 (Listing 11.3)',
         theory: `${wTex},\\quad t_{r_\\phi} = M t_{r_\\theta},\\quad \\Delta^d = (s^2 + 2\\zeta_\\theta\\omega_{n_\\theta}s + \\omega_{n_\\theta}^2)(s^2 + 2\\zeta_\\phi\\omega_{n_\\phi}s + \\omega_{n_\\phi}^2)` + (level === 'sf' ? '' : '(s - p_I)') },
@@ -414,14 +402,6 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
   const specOf = (ctx, pr, level) => design(ctx.pModel, { ...ctx.st, trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaPhi: pr.zetaPhi, rule: pr.rule, pI: pr.pI ?? -2, obs: pr.obsFactor ? obsDefaults(pr) : ctx.st.obs, pD: pr.pD ?? ctx.st.pD }, level);
 
   // ------------------------------------------------------ controller checks --
-  // The workbench's controller at `level` with the problem's tuning, on a check
-  // scenario (reference for WB.myCtrl.matchCheck).
-  function refRun(ctx, sc, level, pr) {
-    const rc = WB.myCtrl.refCtx(ctx, sc);
-    rc.st = { ...ctx.st, trTh: pr.trTh, zetaTh: pr.zetaTh, M: pr.M, zetaPhi: pr.zetaPhi, rule: pr.rule, pI: pr.pI ?? -2, antiwindup: 'clamp', xhat0: 0 };
-    rc.gains = design(sc.params, rc.st, level);
-    return WB.myCtrl.reference(ctx, sc, makeSS(rc, level));
-  }
   const SQUARE = (amplitude, frequency) => ({ type: 'square', amplitude, frequency, tStep: 0 });
   const errAt = (res, t) => lib().phiErrAt(res, t);
   // The student's estimate must come back from update as (tau, x_hat).
@@ -444,15 +424,43 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
 
   // Check settings. C.11: square wave (°, Hz) and the error before a switch (°).
   const C11 = { amp: 10, freq: 0.04, tol: 0.1 };
-  // C.12(a): a small square wave keeps τ unsaturated for the match (any anti-windup
-  // gives the same φ); then the C.12(b) disturbance on a plant with J_s above the
-  // model (an α = 0.2 draw for which hw12 diverges without anti-windup).
-  const C12 = { amp: 2, mismatch: { Js: 12, Jp: 9, k: 15, b: -7 }, phiMax: 20 };
+  // C.12(a): a small square wave with a constant disturbance (the integrator must
+  // remove the error; τ stays unsaturated); then the C.12(b) disturbance on a plant
+  // with J_s above the model (an α = 0.2 draw for which hw12 diverges without anti-windup).
+  const C12 = { amp: 5, dist: 0.5, mismatch: { Js: 12, Jp: 9, k: 15, b: -7 }, phiMax: 20 };
   // C.13(c): initial angles (°; larger ones saturate τ while x̂ converges), settled
   // window before each switch (s), estimate tolerances (°, °/s).
   const C13 = { init: 2, freq: 0.03, settle: 4.6, tolAngle: 0.02, tolRate: 0.1 };
   // C.14(b): mean estimator bias (°) under d, noise and mismatch.
   const C14 = { tolBias: 0.02 };
+
+  // C.11(a, d), C.12(a): Python functions of the desired poles (the problem gives
+  // C.8's specs, not the listing's tuning), checked at random values.
+  const cx = WB.py.cx;
+  const POLE_ARGS = {
+    s: { label: 's', complex: true, re: [-3, 1], im: [0.3, 4] },
+    wn_th: { label: 'ωn,θ', lo: 0.8, hi: 4 }, zeta_th: { label: 'ζθ', lo: 0.6, hi: 0.95 },
+    wn_phi: { label: 'ωn,φ', lo: 0.1, hi: 0.7 }, zeta_phi: { label: 'ζφ', lo: 0.6, hi: 0.95 },
+  };
+  const pairsOf = (a) => [...lib().pairPoles(a.wn_th, a.zeta_th), ...lib().pairPoles(a.wn_phi, a.zeta_phi)];
+  // C.8's poles (t_rθ = 1 s, t_rφ = 10 s, ζ = 0.9, the C.8 solution's ω_n rule), for solutions.
+  function c8Pairs() {
+    const c8 = WB.systems.C.problems.ch8, w = (tr, z) => lib().wnRule(tr, z, c8.rule);
+    const wnTh = w(c8.trTh, c8.zetaTh), wnPhi = w(c8.M * c8.trTh, c8.zetaPhi);
+    return { wnTh, wnPhi, poles: [...lib().pairPoles(wnTh, c8.zetaTh), ...lib().pairPoles(wnPhi, c8.zetaPhi)] };
+  }
+  function sfGains(p, poles) {
+    const { A, B } = lib().ss(p);
+    const K = WB.yt.place(A, B, poles)[0];
+    const Ai = L.inv(L.sub(A, L.mul(B, [K])));
+    return { K, kr: -1 / L.mul(L.mul([[0, 1, 0, 0]], Ai), B)[0][0] };
+  }
+  function sfiGains(p, poles) {
+    const { A, B } = lib().ss(p);
+    const { A1, B1 } = augI(A, B);
+    const K1 = WB.yt.place(A1, B1, poles)[0];
+    return { K: K1.slice(0, 4), ki: K1[4] };
+  }
 
   function base(level, num, title, pages, extra) {
     return Object.assign({
@@ -493,8 +501,8 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
         { title: 'Pole placement and reference gain', page: 'p. 194 · Step 4, Eq. 11.35',
           theory: 'K = (\\alpha - a_A)\\mathcal{A}_A^{-1}\\mathcal{C}_{A,B}^{-1},\\quad k_r = \\frac{-1}{C_r(A - BK)^{-1}B},\; C_r = \\begin{bmatrix}0 & 1 & 0 & 0\\end{bmatrix}',
           note: 'At steady state the spring forces θ = φ, so C_r = [1 0 0 0] (what the listing uses) gives the same k_r.' },
-        { title: 'K and k_r for this tuning', page: 'p. 194', answers: 'C.11/d',
-          theory: `K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}` },
+        ...(ctx.S.mode === 'work' ? [] : [{ title: 'K and k_r for this tuning', page: 'p. 194',
+          theory: `K = ${texMat([d.K])},\\quad k_r = ${tex(d.kr)}` }]),
         { title: 'Control law', page: 'p. 195 · Listing 11.3', answers: 'C.11/e',
           theory: '\\tau = \\text{sat}\\left(-Kx + k_r\\phi_r\\right)',
           numbers: ctx.S.mode === 'work' ? null : `\\tau = -(${g.K.map((v) => tex(v)).join(',\;')})\\,x + ${tex(g.kr)}\\,\\phi_r` },
@@ -502,15 +510,20 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
     },
     buildProblem(parent, ctx) {
       const pr = ctx.sys.problems.ch11;
-      const ref = () => specOf(ctx, pr, 'sf');
       const { A, B } = lib().ss(ctx.pModel);
       PD().problemPanel(parent, ctx, pr, [
         {
-          id: 'a', title: `(a) Desired poles for the listing's tuning: t<sub>r<sub>θ</sub></sub> = ${pr.trTh} s, M = ${pr.M}, ζ = ${pr.zetaTh} (ω<sub>n</sub> = π/(2t<sub>r</sub>√(1−ζ²)))`,
-          html: 'Δ<sup>d</sup>(s) = s⁴ + α<sub>3</sub>s³ + α<sub>2</sub>s² + α<sub>1</sub>s + α<sub>0</sub>',
-          inputs: { wnTh: 'ω<sub>n<sub>θ</sub></sub>', wnPhi: 'ω<sub>n<sub>φ</sub></sub>', a3: 'α<sub>3</sub>', a2: 'α<sub>2</sub>', a1: 'α<sub>1</sub>', a0: 'α<sub>0</sub>' },
-          check: (v) => { const r = ref(), c = L.polyFromRoots(r.poles); return PD().checkNumbers(v, { wnTh: r.wnTh, wnPhi: r.wnPhi, a3: c[1], a2: c[2], a1: c[3], a0: c[4] }, { wnTh: 'ωnθ', wnPhi: 'ωnφ' }); },
-          solution: () => { const r = ref(); return [{ tex: `\\omega_{n_\\theta} = ${tex(r.wnTh)},\; \\omega_{n_\\phi} = ${tex(r.wnPhi)},\\quad p = ${r.poles.map((q) => texPole(q)).join(',\;')}` }, { tex: `\\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(r.poles))}` }, { html: 'The printed solution (p. 193) uses ω<sub>θ</sub> = 1.9848, ω<sub>φ</sub> = 1.5, ζ = 0.707 instead; see ISSUES.md.' }]; },
+          id: 'a', title: '(a) Desired closed-loop poles from the C.8 ω<sub>n</sub> and ζ',
+          html: 'Write the desired characteristic polynomial Δ<sup>d</sup>(s) as a function of the two loops\' ω<sub>n</sub> and ζ (yours from C.8: t<sub>r<sub>θ</sub></sub> = 1 s, t<sub>r<sub>φ</sub></sub> = 10 t<sub>r<sub>θ</sub></sub>, ζ = 0.9). The check calls it at complex s and random values.',
+          code: {
+            template: 'def desired_char_poly(s, wn_th, zeta_th, wn_phi, zeta_phi):\n    # Delta^d(s)\n    return ...\n',
+            check: (code) => WB.py.check(ctx, { args: POLE_ARGS, items: [{ fn: 'desired_char_poly', args: ['s', 'wn_th', 'zeta_th', 'wn_phi', 'zeta_phi'], truth: (p, a) => cx.poly(L.polyFromRoots(pairsOf(a)), a.s) }] }, code),
+          },
+          solution: () => { const c8 = c8Pairs(); return [
+            { code: 'def desired_char_poly(s, wn_th, zeta_th, wn_phi, zeta_phi):\n    return ((s**2 + 2 * zeta_th * wn_th * s + wn_th**2)\n            * (s**2 + 2 * zeta_phi * wn_phi * s + wn_phi**2))\n' },
+            { tex: `\\text{C.8 values } (\\omega_n = \\pi/(2t_r\\sqrt{1-\\zeta^2})):\\; \\omega_{n_\\theta} = ${tex(c8.wnTh)},\\; \\omega_{n_\\phi} = ${tex(c8.wnPhi)},\\quad \\Delta^d = ${WB.tf.polyTex(L.polyFromRoots(c8.poles))}` },
+            { html: 'The printed solution (p. 193) uses ω<sub>θ</sub> = 1.9848, ω<sub>φ</sub> = 1.5, ζ = 0.707, and the listing t<sub>r<sub>θ</sub></sub> = 2 s, M = 3; see ISSUES.md.' },
+          ]; },
         },
         {
           id: 'b', title: '(b) Add A, B, C, D from C.6',
@@ -524,9 +537,16 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
         },
         {
           id: 'd', title: '(d) K and k<sub>r</sub>',
-          inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', kr: 'k<sub>r</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], kr: r.kr }, {}); },
-          solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_r = ${tex(r.kr)}` }, { html: 'Book (p. 194): K = (40.28, 255.17, 24.34, 366.18), k<sub>r</sub> = 295.46, for its own poles and a different A.' }]; },
+          html: 'As a function of the desired poles\' ω<sub>n</sub>, ζ (as in (a)): return K (1×4) and k<sub>r</sub>, with the model from <code>P</code>. <code>import control as cnt</code> gives <code>cnt.place</code>. The check calls it at random values.',
+          code: {
+            template: 'def gains(wn_th, zeta_th, wn_phi, zeta_phi):\n    # K (1x4) and k_r\n    return K, kr\n',
+            check: (code) => WB.py.check(ctx, { args: POLE_ARGS, items: [{ fn: 'gains', args: ['wn_th', 'zeta_th', 'wn_phi', 'zeta_phi'], truth: (p, a) => { const g = sfGains(p, pairsOf(a)); return [g.K, g.kr]; } }] }, code),
+          },
+          solution: () => { const g = sfGains(ctx.pModel, c8Pairs().poles); return [
+            { code: `import control as cnt\n\ndef gains(wn_th, zeta_th, wn_phi, zeta_phi):\n${MODEL_PY.replace(/^ {4}/gm, '')}    Cr = np.array([[0.0, 1.0, 0.0, 0.0]])\n    poles = np.roots(np.convolve([1, 2 * zeta_th * wn_th, wn_th**2],\n                                 [1, 2 * zeta_phi * wn_phi, wn_phi**2]))\n    K = cnt.place(A, B, poles)\n    kr = -1.0 / (Cr @ np.linalg.inv(A - B @ K) @ B)[0, 0]\n    return K, kr\n` },
+            { tex: `\\text{C.8 poles: } K = ${texMat([g.K])},\\quad k_r = ${tex(g.kr)}` },
+            { html: 'Book (p. 194): K = (40.28, 255.17, 24.34, 366.18), k<sub>r</sub> = 295.46, for its own poles and a different A.' },
+          ]; },
         },
         WB.myCtrl.part(ctx, {
           id: 'e', title: '(e) Implement the state feedback and tune the closed-loop poles',
@@ -578,35 +598,45 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
         ...polesCard(ctx, d, 'sfi'),
         { title: 'Gains', page: 'p. 212 · Step 3', answers: 'C.12/a2',
           theory: 'K_1 = \\begin{bmatrix}K & k_I\\end{bmatrix} = \\text{place}(A_1, B_1, p),\\quad \\tau = -Kx - k_I\\int_0^t(\\phi_r - \\phi)\\,d\\tau' },
-        { title: 'K and k_I for this tuning', page: 'p. 212', answers: 'C.12/a',
-          theory: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}` },
+        ...(ctx.S.mode === 'work' ? [] : [{ title: 'K and k_I for this tuning', page: 'p. 212',
+          theory: `K = ${texMat([d.K])},\\quad k_I = ${tex(d.ki)}` }]),
       ];
     },
     buildProblem(parent, ctx) {
       const pr = ctx.sys.problems.ch12;
-      const ref = () => specOf(ctx, pr, 'sfi');
       PD().problemPanel(parent, ctx, pr, [
         {
-          id: 'a', title: `(a) Gains with the listing's tuning (t<sub>r<sub>θ</sub></sub> = ${pr.trTh}, M = ${pr.M}, ζ = ${pr.zetaTh}, p<sub>I</sub> = ${pr.pI})`,
-          inputs: { K1: 'K<sub>1</sub>', K2: 'K<sub>2</sub>', K3: 'K<sub>3</sub>', K4: 'K<sub>4</sub>', ki: 'k<sub>I</sub>' },
-          check: (v) => { const r = ref(); return PD().checkNumbers(v, { K1: r.K[0], K2: r.K[1], K3: r.K[2], K4: r.K[3], ki: r.ki }, {}); },
-          solution: () => { const r = ref(); return [{ tex: `K = ${texMat([r.K])},\\quad k_I = ${tex(r.ki)}` }, { html: 'Book (p. 212): K = (19.15, 43.41, 16.72, 111.63), k<sub>I</sub> = −14.52, for p<sub>I</sub> = −1 and different poles and A.' }]; },
+          id: 'a', title: '(a) Gains with the integrator on φ',
+          html: 'As a function of the desired poles (the two pairs as in C.11, plus the integrator pole p<sub>I</sub>): return K (1×4) and k<sub>I</sub> for τ = −Kx − k<sub>I</sub>∫(φ<sub>r</sub> − φ). The check calls it at random values.',
+          code: {
+            template: 'def gains(wn_th, zeta_th, wn_phi, zeta_phi, p_I):\n    # K (1x4) and k_I\n    return K, kI\n',
+            check: (code) => WB.py.check(ctx, { args: { ...POLE_ARGS, p_I: { label: 'p_I', lo: -5, hi: -0.3 } }, items: [{ fn: 'gains', args: ['wn_th', 'zeta_th', 'wn_phi', 'zeta_phi', 'p_I'], truth: (p, a) => { const g = sfiGains(p, [...pairsOf(a), { re: a.p_I, im: 0 }]); return [g.K, g.ki]; } }] }, code),
+          },
+          solution: () => [
+            { code: `import control as cnt\n\ndef gains(wn_th, zeta_th, wn_phi, zeta_phi, p_I):\n${MODEL_PY.replace(/^ {4}/gm, '')}    Cr = np.array([[0.0, 1.0, 0.0, 0.0]])\n    A1 = np.block([[A, np.zeros((4, 1))], [-Cr, np.zeros((1, 1))]])\n    B1 = np.vstack([B, [[0.0]]])\n    poles = np.roots(np.convolve(np.convolve([1, 2 * zeta_th * wn_th, wn_th**2],\n                                             [1, 2 * zeta_phi * wn_phi, wn_phi**2]),\n                                 [1, -p_I]))\n    K1 = cnt.place(A1, B1, poles)\n    return K1[:, 0:4], K1[0, 4]\n` },
+            { html: 'Book (p. 212): K = (19.15, 43.41, 16.72, 111.63), k<sub>I</sub> = −14.52, for p<sub>I</sub> = −1 and different poles and A. The repo uses t<sub>r<sub>θ</sub></sub> = 2 s, M = 3, ζ = 0.9, p<sub>I</sub> = −2.' },
+          ],
         },
         WB.myCtrl.part(ctx, {
           id: 'a2', title: '(a) Add an integrator with anti-windup on φ to your C.11 controller', seed: 'C.11/e',
-          html: `Use the gains from above. The check (1) runs a ±${C12.amp}° square wave with the nominal and with other parameters and compares φ(t) with the design (within 3%), then (2) runs the ±15° square wave (0.01 Hz) with d = 1 N·m on a plant that differs from the model by ${lib().misText(C12.mismatch)}: τ saturates at the switches, and |φ| must stay under ${C12.phiMax}°.`,
+          html: `Use gains from (a) with poles you choose. The check (1) runs a ±${C12.amp}° square wave (0.02 Hz) with a ${C12.dist} N·m input disturbance, with the nominal and with other parameters: |φ<sub>r</sub> − φ| just before each of the first two switches must be under 0.1°; then (2) runs the ±15° square wave (0.01 Hz) with d = 1 N·m on a plant that differs from the model by ${lib().misText(C12.mismatch)}: τ saturates at the switches, and |φ| must stay under ${C12.phiMax}°.`,
           check: async (code) => {
-            const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
-              const sc = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(C12.amp, 0.02), tEnd: 50 });
-              return { sc, label: pc.label, ref: () => refRun(ctx, sc, 'sfi', pr) };
-            });
-            const m = await WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * C12.amp * M.DEG });
-            if (!m.ok) return m;
+            // (1) tracking with a constant disturbance: the integrator must remove the error
+            const errs = [];
+            for (const pc of WB.myCtrl.paramCases(ctx)) {
+              const sc1 = WB.myCtrl.scenario(ctx, { params: pc.params, ref: SQUARE(C12.amp, 0.02), tEnd: 50, dist: C12.dist });
+              const r1 = await WB.myCtrl.run(ctx, code, sc1);
+              if (r1.ok === false) return r1;
+              const e = Math.max(errAt(r1, 24.95), errAt(r1, 49.95));
+              if (!(e < 0.1)) return { ok: false, msg: `With d = ${C12.dist} N·m (${pc.label}) |φ_r − φ| before a switch is ${fmt(e, 3)}°.` };
+              errs.push(`${fmt(e, 3)}° (${pc.label})`);
+            }
+            const m = { msg: `Error before a switch with d = ${C12.dist} N·m: ${errs.join('; ')}.` };
             const sc = WB.myCtrl.scenario(ctx, { ref: SQUARE(15, 0.01), tEnd: 100, dist: 1, mismatch: C12.mismatch });
             const res = await WB.myCtrl.run(ctx, code, sc);
             if (res.ok === false) return res;
             const peak = Math.max(...Array.from(res.yAll[1], Math.abs)) * R2D;
-            if (!(peak <= C12.phiMax)) return { ok: false, msg: `Tracking matches, but with d = 1 N·m on the ${lib().misText(C12.mismatch)} plant |φ| reaches ${fmt(peak, 3)}°: the integrator winds up while τ is saturated.` };
+            if (!(peak <= C12.phiMax)) return { ok: false, msg: `Tracking works, but with d = 1 N·m on the ${lib().misText(C12.mismatch)} plant |φ| reaches ${fmt(peak, 3)}°: the integrator winds up while τ is saturated.` };
             return { ok: true, msg: `${m.msg} With d = 1 N·m and saturation: largest |φ| ${fmt(peak, 3)}°.` };
           },
           solution: () => [{ code: SOL.ch12 }, { html: 'Anti-windup here holds the integrator while τ is saturated; unwinding it by (τ<sub>sat</sub> − τ<sub>unsat</sub>)/k<sub>I</sub> passes too. Without it the second check diverges. The repo\'s ctrlStateFeedbackIntegrator.py has none (and integrates θ instead of φ; see ISSUES.md).' }],
@@ -655,7 +685,7 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
         theory: `\\operatorname{rank}\\mathcal{O}_{A,C} = ${L.rank(O)}\;(\\text{already } ${L.rank(O.slice(0, 4))} \\text{ from } C, CA)` },
       { title: 'Observer gain (two outputs)', page: 'p. 236 · Listing 13.3', answers: 'C.13/c',
         theory: 'L = \\text{place}(A^\\top, C^\\top, q)^\\top,\\quad q = \\text{roots}\\big((s^2 + 2\\zeta\\omega_{obs,\\theta}s + \\omega_{obs,\\theta}^2)(s^2 + 2\\zeta\\omega_{obs,\\phi}s + \\omega_{obs,\\phi}^2)\\big)',
-        numbers: d.L ? `q = ${d.obsPoles.map((q) => texPole(q)).join(',\;')},\\quad L^\\top = ${texMat(L.T(d.L))}` : '', spoiler: true,
+        numbers: d.L && ctx.S.mode !== 'work' ? `q = ${d.obsPoles.map((q) => texPole(q)).join(',\;')},\\quad L^\\top = ${texMat(L.T(d.L))}` : '', spoiler: true,
         note: 'With two outputs many L place the same poles. The one shown is what python-control\'s place (scipy\'s YT algorithm) returns, ported here so the simulation matches the repo.' },
     ];
     if (level === 'dobs') {
@@ -663,7 +693,7 @@ ${MODEL_PY}        C = np.array([[1.0, 0.0, 0.0, 0.0],
       const { A2, C2 } = augD(A, B, C);
       cards.push({ title: 'Disturbance observer', page: 'p. 240–241, pp. 258–259 · Listing 14.6', answers: 'C.14/b',
         theory: 'A_2 = \\begin{bmatrix}A & B\\\\ 0 & 0\\end{bmatrix},\; C_2 = \\begin{bmatrix}C & 0\\end{bmatrix},\\quad \\tau = -K\\hat x - k_I\\textstyle\\int e - \\hat d',
-        numbers: d.L2 ? `L_2^\\top = ${texMat(L.T(d.L2))}` : '', spoiler: true });
+        numbers: d.L2 && ctx.S.mode !== 'work' ? `L_2^\\top = ${texMat(L.T(d.L2))}` : '', spoiler: true });
       cards.push({ title: 'Observability of the augmented model', page: 'p. 254', answers: 'C.14/b',
         theory: `\\operatorname{rank}\\mathcal{O}_{A_2,C_2} = ${L.rank(L.obsv(A2, C2))}` });
     }

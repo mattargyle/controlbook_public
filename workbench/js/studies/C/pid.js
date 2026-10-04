@@ -292,7 +292,7 @@
     workSliders(sec, ctx, withI);
     sec.append(el('p', { class: 'muted small', text: 'These place the design-model × and the full-loop circles in the s-plane. They do not drive the simulation.' }));
     zoomControl(sec, ctx);
-    targetToggle(sec, ctx, targetKey);
+    if (targetKey) targetToggle(sec, ctx, targetKey);
     WB.myCtrl.banner(section(parent, 'Your controller'), ctx, part);
   }
 
@@ -507,6 +507,10 @@
         return peak / TAU_MAX;
       };
       // Each part's "Use my gains" sets the gains it asks for (a part's action sees only its own inputs).
+      // The statement gives t_r and ζ, not how ω_n follows from them: Eq. 8.5 (2.2/t_r)
+      // and the C.8 solution's π/(2t_r√(1−ζ²)) are both accepted.
+      const specFor = (rule, p = ctx.pModel) => lib().slcDesign(p, { trTh: prob.trTh, zetaTh: prob.zetaTh, M: prob.M, zetaPhi: prob.zetaPhi, rule });
+      const eitherRule = (fn) => { const a = fn(specFor('tp')); return a.ok ? a : (fn(specFor('2.2')).ok ? fn(specFor('2.2')) : a); };
       const useInner = WB.design.useGains(ctx, ['kPth', 'kDth'], { msg: 'Enter kPθ and kDθ first.' });
       const useOuter = WB.design.useGains(ctx, ['kPphi', 'kDphi'], { extra: { kIphi: 0 }, msg: 'Enter kPφ and kDφ first.' });
       PD().problemPanel(parent, ctx, prob, [
@@ -537,13 +541,13 @@
         },
         {
           id: 'b', title: `(b) Inner loop: t<sub>r<sub>θ</sub></sub> = ${prob.trTh} s, ζ<sub>θ</sub> = ${prob.zetaTh}`,
-          html: 'Use ω<sub>n</sub> = π/(2 t<sub>r</sub>√(1−ζ²)) as the C.8 solution does (p. 131).',
+          html: 'Get ω<sub>n</sub> from the rise time with Eq. 8.5 (ω<sub>n</sub> = 2.2/t<sub>r</sub>) or with the exact rise-time relation for ζ = 0.9; either is accepted.',
           inputs: { wn: 'ω<sub>n<sub>θ</sub></sub>', kPth: 'k<sub>P<sub>θ</sub></sub>', kDth: 'k<sub>D<sub>θ</sub></sub>' },
-          check: (v) => PD().checkNumbers(v, { wn: s().wnTh, kPth: s().kPth, kDth: s().kDth }, { wn: 'ωnθ', kPth: 'kPθ', kDth: 'kDθ' }),
+          check: (v) => eitherRule((g) => PD().checkNumbers(v, { wn: g.wnTh, kPth: g.kPth, kDth: g.kDth }, { wn: 'ωnθ', kPth: 'kPθ', kDth: 'kDθ' })),
           actions: [useInner],
           solution: () => [
             { tex: `\\omega_{n_\\theta} = \\frac{\\pi}{2(${prob.trTh})\\sqrt{1 - ${prob.zetaTh}^2}} = ${tex(s().wnTh)},\\quad k_{P_\\theta} = \\omega_{n_\\theta}^2(J_s+J_p) = ${tex(s().kPth)},\\quad k_{D_\\theta} = ${tex(s().kDth)}` },
-            { html: 'Book: 77.9 and 38.9 (p. 131).' },
+            { html: `Book: 77.9 and 38.9 (p. 131), with the exact relation ω<sub>n</sub> = π/(2t<sub>r</sub>√(1−ζ²)). Eq. 8.5 gives ω<sub>n</sub> = 2.2, k<sub>P<sub>θ</sub></sub> = ${tex(specFor('2.2').kPth)}, k<sub>D<sub>θ</sub></sub> = ${tex(specFor('2.2').kDth)}.` },
           ],
         },
         {
@@ -575,7 +579,8 @@
         {
           id: 'd', title: `(d) Outer loop: t<sub>r<sub>φ</sub></sub> = ${prob.M} t<sub>r<sub>θ</sub></sub>, ζ<sub>φ</sub> = ${prob.zetaPhi}`,
           inputs: { kPphi: 'k<sub>P<sub>φ</sub></sub>', kDphi: 'k<sub>D<sub>φ</sub></sub>', kdc: 'k<sub>DC<sub>φ</sub></sub>' },
-          check: (v) => PD().checkNumbers(v, { kPphi: s().kPphi, kDphi: s().kDphi, kdc: s().kDCphi }, { kPphi: 'kPφ', kDphi: 'kDφ', kdc: 'kDCφ' }),
+          html: 'ω<sub>n</sub> from t<sub>r</sub> as in (b) (either rule).',
+          check: (v) => eitherRule((g) => PD().checkNumbers(v, { kPphi: g.kPphi, kDphi: g.kDphi, kdc: g.kDCphi }, { kPphi: 'kPφ', kDphi: 'kDφ', kdc: 'kDCφ' })),
           actions: [useOuter],
           solution: () => [
             { tex: `\\omega_{n_\\phi} = ${tex(s().wnPhi)},\\quad \\begin{bmatrix}k_{P_\\phi}\\\\ k_{D_\\phi}\\end{bmatrix} = ${M.texMat(s().AA)}^{-1}${M.texMat(s().bb)} = \\begin{bmatrix}${tex(s().kPphi)}\\\\ ${tex(s().kDphi)}\\end{bmatrix}` },
@@ -590,9 +595,9 @@
             const cases = WB.myCtrl.paramCases(ctx).map((pc) => {
               const params = { ...pc.params, tau_max: 1000 };
               const sc = WB.myCtrl.scenario(ctx, { params, ref: { type: 'step', amplitude: E_STEP, tStep: 0 }, tEnd: 60 });
-              const g = lib().slcDesign(params, { trTh: prob.trTh, zetaTh: prob.zetaTh, M: prob.M, zetaPhi: prob.zetaPhi, rule: prob.rule });
-              // with or without the φ_r feedforward of Fig. 8-20
-              return { sc, label: pc.label, refs: [() => cascadeRef(ctx, sc, g, true), () => cascadeRef(ctx, sc, g, false)] };
+              // either ω_n rule, with or without the φ_r feedforward of Fig. 8-20
+              const refs = ['tp', '2.2'].flatMap((rule) => { const g = specFor(rule, params); return [() => cascadeRef(ctx, sc, g, true), () => cascadeRef(ctx, sc, g, false)]; });
+              return { sc, label: pc.label, refs };
             });
             return WB.myCtrl.matchCheck(ctx, code, cases, { tol: 0.03 * E_STEP * DEG, outputs: [0, 1] });
           },
@@ -1010,7 +1015,7 @@
 
     buildControls(parent, ctx) {
       if (ctx.S.mode === 'work') {
-        workControls(parent, ctx, { withI: true, targetKey: 'C.10/c', part: 'C.10(c)' });
+        workControls(parent, ctx, { withI: true, part: 'C.10(c)' });
       } else {
         const sec = section(parent, 'Digital PID, measured angles only', 'p. 166 · Listing 10.4');
         designSliders(sec, ctx, { withI: true }); readout(sec, ctx, ['kPth', 'kDth', 'kPphi', 'kDphi', 'kIphi']);
@@ -1039,9 +1044,8 @@
     },
 
     splane(ctx) {
-      const s = this.spec(ctx);
-      const tg = ctx.S.mode === 'work' && ctx.st.showTargets && lib().shows(ctx, 'C.10/c') ? [...lib().innerPoles(ctx.pModel, s), ...lib().outerPoles(ctx.pModel, { ...s, kIphi: 0 })] : null;
-      return cascadeMarkers(ctx, { targets: tg, sigma: this.sigmaOf(ctx) });
+      // No target poles: the problem gives no tuning for C.10 (the listing's is the solution's).
+      return cascadeMarkers(ctx, { sigma: this.sigmaOf(ctx) });
     },
     onPoleDrag: onCascadeDrag,
 
@@ -1051,7 +1055,8 @@
       const { beta, gamma } = WB.design.dirtyCoeffs(sigma, Ts);
       const g = ctx.gains, d = ctx.S.mode === 'work' ? this.spec(ctx) : designOf(ctx);
       return [
-        ...generalCards(ctx), ...innerCards(ctx, g), outerCard(ctx, { ...g, kIphi: 0 }), ...designCards(ctx, d, { inner: 'C.10/c', outer: 'C.10/c' }),
+        // The listing's design cards only in Explore: the problem gives no tuning.
+        ...generalCards(ctx), ...innerCards(ctx, g), outerCard(ctx, { ...g, kIphi: 0 }), ...(ctx.S.mode === 'work' ? [] : designCards(ctx, d, { inner: 'C.10/c', outer: 'C.10/c' })),
         { title: 'Dirty derivative of the measured angles', page: 'p. 157 · Eq. 10.4',
           theory: '\\dot{\\hat y}[n] = \\frac{2\\sigma - T_s}{2\\sigma + T_s}\\dot{\\hat y}[n-1] + \\frac{2}{2\\sigma + T_s}\\big(y[n] - y[n-1]\\big)' },
         { title: 'Dirty-derivative coefficients', page: 'p. 157 · Eq. 10.4', answers: 'C.10/c',
