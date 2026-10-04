@@ -65,3 +65,15 @@ Notes on the derived results (not errors):
 | F.13 / F.14 | Block-structured lateral observer. The disturbance observer estimates d_F (altitude input), d_z (lateral force), and d_τ (input torque, cancelled in τ). |
 | F.16 / F.17 | "My F.10 gains" (from the Ch 10 tab) or the reference design. Every check is computed from the selected gains. |
 | F.18 | The outer loop is shaped on P_out·T_in with the current inner design. The reference designs meet every spec (PM 59.6° / 59.1° / 60.1°). |
+
+## Work mode (Python answers)
+
+| Item | Workbench reading |
+| --- | --- |
+| F.4(a), p. 396 | θ_e = π with F = −(m_c + 2m_r)g also satisfies f(x_e, u_e) = 0. The rotors cannot pull (0 ≤ f ≤ f_max), so only θ_e = 0 is accepted. |
+| F.4(b), p. 396 | The book does not fix the input vector. The Python part uses the full 6-state model with ũ = (F̃, τ̃), the inputs F.4 recommends; F.5 and F.6 then split it. |
+| F.4(c), p. 396 | "If possible": only the altitude channel is feedback-linearizable. The check accepts any F_fl(θ, F̃) that makes ḧ linear; the lateral answer is explained in the solution. |
+| F.3(b), p. 395 | "Generalized coordinates and damping forces" is one part in the book; the panel splits it into a text answer (q) and a Python answer (−Bq̇). |
+| F.P.6(b), p. 398 | The outer-loop Evans form is checked with K = k_I,z (so L_z carries the −g) and k_DC,θ = 1. The s-plane draws the locus for K = −k_I,z > 0. |
+| F.17(a–c), p. 403 | The book asks for gain margins too. Most loops have GM = ∞ or several crossings, so only PM, ω_co and the bandwidth are entered; the solution lists every gain-margin crossing. |
+| F.9(c), p. 398 | The PD parabola error is infinite; the panel asks only for the finite errors. |

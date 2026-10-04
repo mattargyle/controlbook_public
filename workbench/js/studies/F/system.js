@@ -227,18 +227,19 @@ WB.systems = WB.systems || {};
         id: 'F.2', page: 395,
         sim: { tEnd: 10, tStep: 0 },
         statement: [
-          '(a) Using the configuration variables z<sub>v</sub>, h and θ, write the kinetic energy of the planar VTOL.',
-          '(b) Animate the VTOL. The animation takes z<sub>v</sub>, the target position z<sub>t</sub>, h and θ (p. 395).',
+          '(a) Using the configuration variables z<sub>v</sub>, h and θ, write an expression for the kinetic energy of the system.',
+          '(b) Create an animation of the planar VTOL system. The inputs to the animation should be z<sub>v</sub>, z<sub>t</sub>, h and θ.',
         ],
       },
       ch3: {
         id: 'F.3', page: 395,
         sim: { tEnd: 4, tStep: 0 },
         statement: [
-          '(a) Find the potential energy. (b) Define the generalized coordinates and the damping forces.',
-          '(c) Find the generalized forces. The rotor forces are easier to treat as a total force F on the center of mass and a torque τ about it.',
-          '(d) Derive the equations of motion with the Euler-Lagrange equations.',
-          '(e) Implement the equations of motion and simulate with variable inputs f<sub>r</sub>, f<sub>ℓ</sub> (Appendices P.1–P.3).',
+          '(a) Find the potential energy for the system.',
+          '(b) Define the generalized coordinates and damping forces.',
+          '(c) Find the generalized forces. The right and left forces are more easily modeled as a total force on the center of mass and a torque about the center of mass.',
+          '(d) Derive the equations of motion for the planar VTOL using the Euler-Lagrange equations.',
+          '(e) Referring to Appendices P.1–P.3, write a class that implements the equations of motion. Simulate the system using variable force inputs f<sub>r</sub> and f<sub>ℓ</sub>; the output connects to the F.2 animation.',
         ],
       },
       ch4: {
@@ -246,7 +247,9 @@ WB.systems = WB.systems || {};
         sim: { tEnd: 6, tStep: 0 },
         statement: [
           'Use F = f<sub>r</sub> + f<sub>ℓ</sub> and τ = d(f<sub>r</sub> − f<sub>ℓ</sub>) as the inputs; then f<sub>r</sub> = F/2 + τ/2d and f<sub>ℓ</sub> = F/2 − τ/2d (pp. 395–396).',
-          '(a) Find the equilibria. (b) Linearize about them with Jacobian linearization. (c) If possible, linearize with feedback linearization.',
+          '(a) Find the equilibria of the system.',
+          '(b) Linearize the equations about the equilibria using Jacobian linearization.',
+          '(c) If possible, linearize the system using feedback linearization.',
         ],
       },
       ch5: {
@@ -254,7 +257,10 @@ WB.systems = WB.systems || {};
         sim: { tEnd: 6, tStep: 0 },
         statement: [
           'The VTOL splits into longitudinal dynamics (F̃ in, h̃ out) and lateral dynamics (τ̃ in, z̃ out, with θ̃ in between).',
-          '(a) Laplace-transform the linearized equations. (b) Find H̃(s)/F̃(s). (c) Find Θ̃(s)/τ̃(s), Z̃(s)/Θ̃(s) and Z̃(s)/τ̃(s). (d) Draw open-loop block diagrams.',
+          '(a) Start with the linearized equations of motion and use the Laplace transform to convert them to the s-domain.',
+          '(b) For the longitudinal dynamics, find the transfer function from F̃(s) to H̃(s).',
+          '(c) For the lateral dynamics, find the transfer function from τ̃(s) to the intermediate state Θ̃(s) and to the output Z̃(s). Find the transfer function from Θ̃(s) to Z̃(s).',
+          '(d) Draw a block diagram of the open-loop longitudinal and lateral systems.',
         ],
       },
       ch6: {
@@ -367,9 +373,9 @@ WB.systems = WB.systems || {};
         id: 'F.15', page: 401,
         sim: { tEnd: 30, tStep: 0 },
         statement: [
-          '(a) Sketch the Bode plot of F̃ → h̃ by hand and compare with bode.',
-          '(b) The same for the inner loop τ → θ.',
-          '(c) The same for the outer loop θ → z.',
+          '(a) Draw by hand the Bode plot of the altitude transfer function from force F̃ to altitude h̃. Use the bode command and compare your results.',
+          '(b) Draw by hand the Bode plot of the inner-loop transfer function for the lateral dynamics from torque τ to angle θ. Use the bode command and compare your results.',
+          '(c) Draw by hand the Bode plot of the outer-loop transfer function for the lateral dynamics from angle θ to position z. Use the bode command and compare your results.',
         ],
       },
       ch16: {
