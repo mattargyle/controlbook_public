@@ -854,6 +854,76 @@ window.WB = window.WB || {};
   };
   WB.app = app;
 
+  // ------------------------------------------------------- save / load --
+  // Progress (answers, solved parts, student controllers, sliders) lives in
+  // localStorage under `wb.*`. Save writes those keys to a JSON file; Load
+  // replaces them from one and reloads, so a student can move to another
+  // computer. Layout and theme are per-device and stay out of the file.
+  const SAVE_FORMAT = 'controlbook-workbench-progress';
+  const isProgressKey = (k) => k.startsWith('wb.') && !k.startsWith('wb.collapsed.') &&
+    !['wb.theme', 'wb.leftCollapsed', 'wb.problemFrac'].includes(k);
+  const progressKeys = () => {
+    const keys = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (isProgressKey(k)) keys.push(k);
+      }
+    } catch (e) { /* storage unavailable */ }
+    return keys.sort();
+  };
+
+  function saveProgress() {
+    store.set(STATE_KEY, S);
+    const data = {};
+    for (const k of progressKeys()) data[k] = localStorage.getItem(k);
+    const file = { format: SAVE_FORMAT, version: 1, saved: new Date().toISOString(), data };
+    const blob = new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' });
+    const a = el('a', { href: URL.createObjectURL(blob), download: `workbench-progress-${file.saved.slice(0, 10)}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function loadProgress(text) {
+    let file;
+    try { file = JSON.parse(text); } catch (e) { file = null; }
+    if (!file || file.format !== SAVE_FORMAT || typeof file.data !== 'object' || !file.data) {
+      alert('That file is not a saved Workbench progress file.');
+      return;
+    }
+    const entries = Object.entries(file.data).filter(([k, v]) => isProgressKey(k) && typeof v === 'string');
+    const when = file.saved ? ` (saved ${new Date(file.saved).toLocaleString()})` : '';
+    if (!confirm(`Load progress from this file${when}?\n\nThis replaces all answers and settings in this browser.`)) return;
+    try {
+      for (const k of progressKeys()) localStorage.removeItem(k);
+      for (const [k, v] of entries) localStorage.setItem(k, v);
+    } catch (e) {
+      alert(`Could not store the progress in this browser: ${e.message}`);
+      return;
+    }
+    // The URL hash overrides the stored study/chapter at startup; point it at the loaded one.
+    const st = store.get(STATE_KEY, null);
+    const hash = st && st.sysId ? `#${st.sysId}/${st.chapter}/${st.mode}` : '';
+    try { history.replaceState(null, '', location.pathname + location.search + hash); } catch (e) { location.hash = hash; }
+    location.reload();
+  }
+
+  function buildSaveLoad() {
+    const input = el('input', { type: 'file', accept: '.json,application/json', hidden: '' });
+    input.addEventListener('change', () => {
+      const f = input.files[0];
+      input.value = '';
+      if (f) f.text().then(loadProgress);
+    });
+    const saveBtn = el('button', { type: 'button', class: 'btn btn-quiet', title: 'Save your answers and settings to a file', text: 'Save' });
+    const loadBtn = el('button', { type: 'button', class: 'btn btn-quiet', title: 'Load answers and settings from a saved file (replaces this browser\'s progress)', text: 'Load' });
+    saveBtn.addEventListener('click', saveProgress);
+    loadBtn.addEventListener('click', () => input.click());
+    document.getElementById('reset-all').before(saveBtn, loadBtn, input);
+  }
+
   // Optional deep link: #A/ch8/explore
   function applyHash() {
     const [sysId, ch, mode] = location.hash.replace('#', '').split('/');
@@ -924,5 +994,7 @@ window.WB = window.WB || {};
       S = freshState(S.sysId, S.chapter);
       rebuild();
     });
+
+    buildSaveLoad();
   });
 })();
