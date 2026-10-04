@@ -689,7 +689,7 @@ window.WB = window.WB || {};
       if (isSolved(k)) return;
       solved[`${S.sysId}:${k}`] = true;
       store.set(SOLVED_KEY, solved);
-      drawMath();
+      update();  // plots and s-plane markers may be gated on this part too
     },
     setMode(m) {
       if (S.mode === m) return;

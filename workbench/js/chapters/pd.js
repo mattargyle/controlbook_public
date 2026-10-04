@@ -208,7 +208,8 @@ WB.chapters = WB.chapters || {};
     const partToggles = [];
     if (parts.some((p) => p.code)) {
       const pn = el('p', { class: 'muted small' });
-      pn.innerHTML = 'Python answers run in your browser (Python 3.14 + numpy, loaded on the first Check). <code>np</code> is imported, and <code>P</code> holds the parameters like <code>armParam.py</code>: '
+      const paramFile = { A: 'armParam.py', B: 'pendulumParam.py', C: 'satelliteParam.py', D: 'massParam.py', E: 'blockbeamParam.py', F: 'VTOLParam.py' }[ctx.sys.id] || 'the parameter file';
+      pn.innerHTML = `Python answers run in your browser (Python 3.14 + numpy, loaded on the first Check). <code>np</code> is imported, and <code>P</code> holds the parameters like <code>${paramFile}</code>: `
         + Object.keys(ctx.pModel).map((k) => `<code>P.${k}</code>`).join(', ') + '. Write answers with these, not numbers: they are checked with other parameter values too.';
       parent.append(pn);
     }

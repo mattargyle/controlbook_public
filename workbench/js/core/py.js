@@ -127,6 +127,8 @@ def _simulate(a):
         return v.reshape(n, 1)
     xs = []
     for k, u in enumerate(a['u']):
+        if isinstance(u, list):  # vector input: a column, as check passes it
+            u = np.array(u, dtype=float).reshape(-1, 1)
         xs.append(x[:, 0].tolist())
         if k == len(a['u']) - 1:
             break

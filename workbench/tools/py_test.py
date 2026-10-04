@@ -50,20 +50,7 @@ window.__t = {
 return true;
 """
 
-# (chapter, part title prefix, code, expected substring in the result, should pass)
-TARGETED = {
-    "A": [
-        ("ch3", "(a)", "def potential(theta):\n    return 0.735 * np.sin(theta)\n", "rather than numbers", False),
-        ("ch3", "(c)", "def generalized_force(theta, thetadot, tau):\n    return tau\n\ndef damping_force(theta, thetadot, tau):\n    return P.b * thetadot\n", "Check the sign", False),
-        ("ch3", "(d)", "def thetaddot(theta, thetadot, tau):\n    return 3 / (P.m * P.ell**2) * (tau - P.b * thetadot)\n", "only gravity acts", False),
-        ("ch3", "(d)", "def thetaddot(theta, thetadot, tau):\n    while True:\n        pass\n", "Stopped after", False),
-        ("ch3", "(d)", "def thetaddot(theta, thetadot, tau):\n    return undefined_name\n", "NameError", False),
-        ("ch4", "(c)", "def tau_fl(theta, thetadot):\n    return P.m * P.g * P.ell / 2 * np.cos(theta) + P.b * thetadot\n\ndef thetaddot_fl(theta, thetadot, tau_tilde):\n    return 3 / (P.m * P.ell**2) * tau_tilde\n", "Consistent", True),
-        ("ch4", "(c)", "def tau_fl(theta, thetadot):\n    return 0\n\ndef thetaddot_fl(theta, thetadot, tau_tilde):\n    return 3 / (P.m * P.ell**2) * (tau_tilde - P.b * thetadot - P.m * P.g * P.ell / 2 * np.cos(theta))\n", "not linear", False),
-        ("ch5", "Transfer", "def transfer_function(s):\n    return 2 * (3 / (P.m * P.ell**2)) / (s**2 + 3 * P.b / (P.m * P.ell**2) * s)\n", "expected", False),
-        ("ch6", "A, B", "A = np.array([[0, 1], [0, -3 * P.b / (P.m * P.ell**2)]])\nB = np.array([0, 3 / (P.m * P.ell**2)])\nC = np.array([1, 0])\nD = 0\n", "Matches", True),
-    ],
-}
+from py_targets import TARGETED  # noqa: E402
 
 
 def main():

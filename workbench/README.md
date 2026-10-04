@@ -12,7 +12,7 @@ All six design studies (A–F) have a tab for every problem. Issues found in the
 
 ## Modes
 
-- **Work it**: you set the gains. Every lettered part of the book's problem has its own panel with **Check** and **Show solution**. Derivations (energies, equations of motion, linearizations, transfer functions, state-space models) are answered in Python, so you derive the whole expression rather than fill in constants. Live math shows general equations from the book; a card that gives away an answer stays locked until you solve that part (or click **Reveal anyway**). Answers and solved parts are saved in the browser's localStorage. *(Study A so far; B–F still use numeric answer boxes.)*
+- **Work it**: you set the gains. Every lettered part of the book's problem has its own panel with **Check** and **Show solution**. Derivations (energies, equations of motion, linearizations, transfer functions, state-space models) are answered in Python, so you derive the whole expression rather than fill in constants. Live math shows general equations from the book; a card that gives away an answer stays locked until you solve that part (or click **Reveal anyway**). Answers and solved parts are saved in the browser's localStorage.
 - **Explore**: gains are designed from the chapter's knobs (pole locations in Ch 7, t_r and ζ in Ch 8). Drag the closed-loop poles in the s-plane.
 
 ## Python answers
@@ -70,7 +70,8 @@ See [STUDY_GUIDE.md](STUDY_GUIDE.md): each study lives in `js/studies/<X>/` (sys
 
 ```
 python3 workbench/tools/smoke_test.py [--study X] [--shots DIR]   every tab × mode, buttons clicked, JS errors reported
-python3 workbench/tools/py_test.py [--study X] [--chapters ch3,..]  Python parts end to end (needs network): templates fail, solutions pass, cards unlock
+python3 workbench/tools/py_test.py [--study X] [--chapters ch3,..]  Python parts end to end (needs network): templates fail, solutions pass, cards unlock,
+                                                                   plus the targeted wrong answers in tools/py_targets.py
 .venv/bin/python workbench/tools/regress_A.py                     JS vs _A_arm/python controllers (machine precision)
 tools/js_eval.py                                                   run a JS snippet with all workbench scripts loaded
 ```
